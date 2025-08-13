@@ -1,0 +1,26 @@
+# VS Code
+.vscode/
+
+# Rider IDE
+.idea/
+*.sln.iml
+
+# Build
+bin/
+obj/
+
+# Configs with secrets
+appsettings.*.json
+!appsettings.json
+secrets.json
+
+# dotnet user secrets
+**/secrets.json
+
+# Logs
+*.log
+
+# Others
+*.db
+*.mdf
+*.ldf
