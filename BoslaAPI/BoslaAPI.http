@@ -1,6 +1,0 @@
-@BoslaAPI_HostAddress = http://localhost:5280
-
-GET {{BoslaAPI_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

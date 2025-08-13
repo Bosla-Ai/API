@@ -2,7 +2,7 @@ using Shared.Enums;
 
 namespace Domain.Entities;
 
-public class Customer 
+public sealed class Customer 
 {
     public string ApplicationUserId { get; set; }
     public ApplicationUser ApplicationUser { get; set; }
@@ -21,8 +21,9 @@ public class Customer
     public DateTime? LastCvAnalysisDate { get; set; }
     
     // Computed Learning Score (for recommendation algorithm)
-    public double LearningScore { get; set; } = 0.0; // Based on level, hours, reviews, etc.
     
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    
+    public ICollection<Roadmap> RoadMaps { get; set; } = new List<Roadmap>();
 }

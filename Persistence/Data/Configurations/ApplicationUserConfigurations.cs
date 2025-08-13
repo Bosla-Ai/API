@@ -12,8 +12,5 @@ public class ApplicationUserConfigurations : IEntityTypeConfiguration<Applicatio
             .WithOne(c => c.ApplicationUser)
             .HasForeignKey<Customer>(a => a.ApplicationUserId);
         
-        builder.HasMany(a => a.RoadMaps)
-            .WithOne(r => r.ApplicationUser)
-            .HasForeignKey(r => r.ApplicationUserId);
     }
 }
