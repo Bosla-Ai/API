@@ -9,6 +9,11 @@
     <ItemGroup>
       <Folder Include="Data\Configurations\" />
       <Folder Include="Data\Contexts\" />
+      <Folder Include="Repositories\" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\Domain\Domain.csproj" />
     </ItemGroup>
 
 </Project>
