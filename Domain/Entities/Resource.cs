@@ -25,5 +25,5 @@ public class Resource
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation Properties
-    public ICollection<ResourceTag> ResourceTags { get; set; } = new List<ResourceTag>();
+    // public ICollection<ResourceTag> ResourceTags { get; set; } = new List<ResourceTag>();
 }
