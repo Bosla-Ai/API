@@ -4,11 +4,10 @@
         <TargetFramework>net8.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <RootNamespace>Presintation</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Service\Service.csproj" />
+      <Folder Include="Dtos\" />
     </ItemGroup>
 
 </Project>
