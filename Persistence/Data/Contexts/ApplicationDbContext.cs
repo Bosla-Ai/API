@@ -2,6 +2,8 @@ using System.Reflection;
 using Domain.Entities;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Persistence.Data.Configurations;
 
 namespace Persistence.Data.Contexts;
 
@@ -12,16 +14,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         
     }
     
-    protected override void OnModelCreating(ModelBuilder builder)
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        builder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
-        base.OnModelCreating(builder);
+        modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
+        base.OnModelCreating(modelBuilder);
     }
     
     public DbSet<Resource> Resources { get; set; }
-    public DbSet<LLMInteraction> LlmInteractions { get; set; }
     public DbSet<ApplicationUser> ApplicationUsers { get; set; }
-    public DbSet<Customer> Customers { get; set; }
-    // public DbSet<ResourceTag> ResourceTags { get; set; }
-    public DbSet<RoadMap> RoadMaps { get; set; }
+    public DbSet<Customer> Customers { get; set; } // public DbSet<ResourceTag> ResourceTags { get; set; }
 }
