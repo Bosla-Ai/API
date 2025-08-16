@@ -15,4 +15,5 @@ public class Resource
     public bool HasLab { get; set; } = false; // useful for Cyber/ML
 
     public Guid TopicId { set; get; }
+    public ICollection<Roadmap> Roadmaps { get; set; } = new List<Roadmap>();
 }

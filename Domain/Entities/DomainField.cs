@@ -1,6 +1,6 @@
 namespace Domain.Entities;
 
-public sealed class Domain
+public sealed class DomainField
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; }

@@ -11,6 +11,5 @@ public class ApplicationUserConfigurations : IEntityTypeConfiguration<Applicatio
         builder.HasOne(a => a.CustomerProfile)
             .WithOne(c => c.ApplicationUser)
             .HasForeignKey<Customer>(a => a.ApplicationUserId);
-        
     }
 }

@@ -12,6 +12,5 @@ public sealed class Roadmap
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-    // قائمة الموارد المرتبة
     public ICollection<RoadmapResource> Resources { get; set; } = new List<RoadmapResource>();
 }

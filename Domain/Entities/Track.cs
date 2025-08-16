@@ -6,7 +6,7 @@ public sealed class Track
     public string Name { get; set; }
 
     public Guid DomainId { get; set; }
-    public Domain Domain { get; set; }
+    public DomainField DomainField { get; set; }
 
     public ICollection<TrackTechnology> TrackTechnologies { get; set; } = new List<TrackTechnology>();
     public ICollection<Topic> Topics { get; set; } = new List<Topic>();

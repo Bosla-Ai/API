@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Metadata.Conventions.Infrastructure;
 
 namespace Persistence.Data.Configurations;
 
-public class CustomerConfigurations : IEntityTypeConfiguration<Customer>
+public class CustomerConfigurations : IEntityTypeConfiguration<Customer> // app user and customer
 {
     public void Configure(EntityTypeBuilder<Customer> builder)
     {
