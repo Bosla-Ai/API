@@ -10,7 +10,7 @@ public sealed class Customer
     // For Option 1: Manual Input
     public LevelType? UserLevel { get; set; }
     public string? PreferredFramework { get; set; } // "React", "Angular", "Vue", etc.
-    public TrackCategory? SelectedTrack { get; set; }
+    public Domains? SelectedDomain { get; set; }
     public bool WantsDeepDive { get; set; } = false;
     public int? AvailableHoursPerWeek { get; set; }
     

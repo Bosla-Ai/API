@@ -34,4 +34,5 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<TopicTechnology> TopicTechnologies { get; set; }
     public DbSet<TrackTechnology> TrackTechnologies { get; set; }
     public DbSet<LLMInteraction> LLMInteractions { get; set; }
+    public DbSet<RefreshToken> RefreshTokens { get; set; }
 }

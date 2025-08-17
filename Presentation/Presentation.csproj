@@ -11,4 +11,9 @@
       <ProjectReference Include="..\Service\Service.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <PackageReference Include="AutoMapper" Version="15.0.1" />
+      <PackageReference Include="Microsoft.AspNetCore.Mvc.ApiExplorer" Version="2.3.0" />
+    </ItemGroup>
+
 </Project>
