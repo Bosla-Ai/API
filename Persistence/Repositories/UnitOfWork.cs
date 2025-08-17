@@ -20,8 +20,8 @@ public class UnitOfWork : IUnitOfWork
         return await _context.SaveChangesAsync();
     }
 
-    public IGenericRepository<TEntity, TKey> GetRepo<TEntity, TKey>()
+    public IGenericRepository<TEntity, TKey> GetRepo<TEntity, TKey>() where TEntity : class
     {
-         return (IGenericRepository<TEntity,TKey>) Repositories.GetOrAdd(typeof(TEntity).Name,(name)=>new GenericRepository<TEntity,TKey>(this));
+         return (IGenericRepository<TEntity,TKey>) Repositories.GetOrAdd(typeof(TEntity).Name,(name)=>new GenericRepository<TEntity,TKey>(_context));
     }
 }
