@@ -2,9 +2,8 @@ using Shared.Enums;
 
 namespace Domain.Entities;
 
-public sealed class Technology
+public sealed class Technology : BaseEntity
 {
-    public int Id { get; set; }
     public string Name { get; set; }
     public TechnologyType Type { get; set; }
     public string Category { get; set; }

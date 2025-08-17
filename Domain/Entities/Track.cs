@@ -1,8 +1,7 @@
 namespace Domain.Entities;
 
-public sealed class Track
+public sealed class Track : BaseEntity
 {
-    public int Id { get; set; }
     public string Name { get; set; }
 
     public int DomainId { get; set; }

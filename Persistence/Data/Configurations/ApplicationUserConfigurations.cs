@@ -4,13 +4,14 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Persistence.Data.Configurations;
 
-public class ApplicationUserConfigurations : IEntityTypeConfiguration<ApplicationUser>
+public class ApplicationUserConfigurations : BaseEntityConfiguration<ApplicationUser>
 {
-    public void Configure(EntityTypeBuilder<ApplicationUser> builder)
+    public override void Configure(EntityTypeBuilder<ApplicationUser> builder)
     {
-        builder.HasOne(a => a.CustomerProfile)
-            .WithOne(c => c.ApplicationUser)
-            .HasForeignKey<Customer>(a => a.ApplicationUserId);
-        
+        ConfigureOneToOneRelationship(
+            builder,
+            a => a.CustomerProfile,
+            c => c.ApplicationUser,
+            (Customer c) => c.ApplicationUserId);
     }
 }

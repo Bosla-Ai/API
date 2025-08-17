@@ -1,9 +1,7 @@
 namespace Domain.Entities;
 
-public class RoadmapResource
+public class RoadmapResource : BaseEntity
 {
-    public int Id { get; set; }
-
     public int RoadmapId { get; set; }
     public Roadmap Roadmap { get; set; }
 

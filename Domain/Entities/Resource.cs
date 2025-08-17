@@ -2,9 +2,8 @@ using Shared.Enums;
 
 namespace Domain.Entities;
 
-public class Resource
+public class Resource : BaseEntity
 {
-    public int Id { get; set; }
     public string Title { get; set; }
     public string Url { get; set; }
     public ResourceType ResourceType { get; set; }

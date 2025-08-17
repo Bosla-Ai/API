@@ -1,12 +1,30 @@
 namespace Domain.Entities;
 
-public class TrackTechnology
+public class TrackTechnology : BaseManyToManyEntity<Track, int, Technology, int>
 {
-    public int TrackId { get; set; }
-    public Track Track { get; set; }
+    public int TrackId 
+    { 
+        get => LeftId; 
+        set => LeftId = value; 
+    }
+    
+    public Track Track 
+    { 
+        get => Left; 
+        set => Left = value; 
+    }
 
-    public int TechnologyId { get; set; }
-    public Technology Technology { get; set; }
+    public int TechnologyId 
+    { 
+        get => RightId; 
+        set => RightId = value; 
+    }
+    
+    public Technology Technology 
+    { 
+        get => Right; 
+        set => Right = value; 
+    }
 
     public bool IsPrimary { get; set; } = false;
 }

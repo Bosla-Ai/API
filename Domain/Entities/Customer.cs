@@ -2,7 +2,7 @@ using Shared.Enums;
 
 namespace Domain.Entities;
 
-public sealed class Customer 
+public sealed class Customer : BaseAuditEntity
 {
     public string ApplicationUserId { get; set; }
     public ApplicationUser ApplicationUser { get; set; }
@@ -21,9 +21,6 @@ public sealed class Customer
     public DateTime? LastCvAnalysisDate { get; set; }
     
     // Computed Learning Score (for recommendation algorithm)
-    
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     
     public ICollection<Roadmap> RoadMaps { get; set; } = new List<Roadmap>();
 }
