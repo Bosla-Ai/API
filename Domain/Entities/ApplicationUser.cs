@@ -12,4 +12,5 @@ public sealed class ApplicationUser : IdentityUser
     
     // Navigation Properties
     public Customer? CustomerProfile { get; set; }
+    public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
 }

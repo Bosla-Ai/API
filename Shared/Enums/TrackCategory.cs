@@ -1,15 +1,13 @@
 namespace Shared.Enums;
 
-public enum TrackCategory
+public enum Domains
 {
+    UIUXDesign,
     WebDevelopment,
     MobileDevelopment,
-    DataScience,
-    MachineLearning,
-    CloudComputing,
     Cybersecurity,
-    DevOps,
+    ArtificialIntelligence,
+    CloudComputing,
     GameDevelopment,
-    BlockchainDevelopment,
-    UIUXDesign
+    BlockchainDevelopment
 }

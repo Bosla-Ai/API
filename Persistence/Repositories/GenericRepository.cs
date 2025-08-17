@@ -1,38 +1,58 @@
+using Domain;
 using Domain.Contracts;
-using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using Microsoft.EntityFrameworkCore;
+using Persistence.Data.Contexts;
 
 namespace Persistence.Repositories;
 
-public class GenericRepository<TEntity,TKey> : IGenericRepository<TEntity,TKey>
+public class GenericRepository<TEntity,TKey> : IGenericRepository<TEntity,TKey> where TEntity:class
 {
-    private readonly IUnitOfWork _unitOfWork;
-
-    public GenericRepository(IUnitOfWork unitOfWork)
+    private readonly ApplicationDbContext _context;
+    private readonly DbSet<TEntity> _dbSet;
+    public GenericRepository(ApplicationDbContext context)
     {
-        _unitOfWork = unitOfWork;
+        _context = context;
+        _dbSet = context.Set<TEntity>();
     }
     public async Task<TEntity> GetIdAsync(TKey id)
     {
-        return await _unitOfWork.GetRepo<TEntity, TKey>().GetIdAsync(id);
+        return await _dbSet.FindAsync(id);
     }
 
-    public async Task<IEnumerable<TEntity>> GetAllAsync()
+    public async Task<TEntity?> GetAsync(Specifications<TEntity> specification = null)
     {
-        return await _unitOfWork.GetRepo<TEntity, TKey>().GetAllAsync();
+        IQueryable<TEntity> query = _dbSet;
+        if (specification != null)
+        {
+            query = SpecificationsEvaluator.GetQuery(query, specification)!;
+        }
+        return await query.FirstOrDefaultAsync();
+    }
+
+    public async Task<IEnumerable<TEntity>> GetAllAsync(Specifications<TEntity> specification = null)
+    {
+        IQueryable<TEntity> query = _dbSet;
+        if (specification != null)
+        {
+            query = query.Where(specification.Criteria);
+        }
+        return await query.ToListAsync();
     }
 
     public async Task CreateAsync(TEntity entity)
     {
-        await _unitOfWork.GetRepo<TEntity, TKey>().CreateAsync(entity);
+        await _dbSet.AddAsync(entity);
     }
 
-    public async Task UpdateAsync(TEntity entity)
+    public Task UpdateAsync(TEntity entity)
     {
-        await _unitOfWork.GetRepo<TEntity, TKey>().UpdateAsync(entity);
+        _dbSet.Update(entity);
+        return Task.CompletedTask;
     }
 
-    public async Task DeleteAsync(TEntity entity)
+    public Task DeleteAsync(TEntity entity)
     {
-        await _unitOfWork.GetRepo<TEntity, TKey>().DeleteAsync(entity);
+        _dbSet.Remove(entity);
+        return Task.CompletedTask;
     }
 }
