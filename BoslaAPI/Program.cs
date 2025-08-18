@@ -9,9 +9,13 @@ using Microsoft.IdentityModel.Tokens;
 using Persistence.Data.Contexts;
 using Persistence.Repositories;
 using Persistence.Seeder;
+using Service.Abstraction;
 using Service.Extensions;
+using Service.Implementations;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddHttpClient(); //  method registers the HttpClientFactory in the dependency injection container, which can then provide HttpClient instances to your services.
 
 builder.Services.AddAutoMapper(cfg => { }, typeof(MappingConfiguration).Assembly);
 builder.Services.AddControllers();
@@ -23,6 +27,8 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
     .AddEntityFrameworkStores<ApplicationDbContext>()
     .AddDefaultTokenProviders();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+builder.Services.AddScoped<IUserService, UserService>();
+
 builder.Services.AddServices();
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("JWT"));
@@ -58,6 +64,9 @@ using (var scope = app.Services.CreateScope())
     var _roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
     await RoleSeeder.SeedRoles(_roleManager);
 }
+
+
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
