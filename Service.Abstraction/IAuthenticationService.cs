@@ -15,4 +15,9 @@ public interface IAuthenticationService
     Task<IdentityResult> AssignUserToRoleAsync(ApplicationUser user, string roleName);
 
     Task<IList<string>> GetRolesAsync(ApplicationUser user);
+    Task<IdentityResult> AddLoginAsync(ApplicationUser user, UserLoginInfo login);
+    Task<bool> IsLoginLinkedAsync(string userId, string loginProvider, string providerKey);
+    Task<ApplicationUser?> FindByLoginAsync(string loginProvider, string providerKey);
+    Task<IList<UserLoginInfo>> GetLoginsAsync(ApplicationUser user);
+    Task<IdentityResult> RemoveLoginAsync(ApplicationUser user, string loginProvider, string providerKey);
 }

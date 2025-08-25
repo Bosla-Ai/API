@@ -1,3 +1,6 @@
+using System.Net;
+using Domain.Responses;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Service.Abstraction;
@@ -22,13 +25,21 @@ public class UserController : ControllerBase
 
     /// Send a text query to the AI and get a response
     [HttpPost("ask-ai")]
-    public async Task<IActionResult> AskAI([FromBody] AiQueryRequest request)
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<APIResponse>> AskAI([FromBody] AiQueryRequest request)
     {
         try
         {
             if (request == null || string.IsNullOrWhiteSpace(request.Query))
             {
-                return BadRequest("Query cannot be empty");
+                return BadRequest(new APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.BadRequest,
+                    ErrorMessages = new List<string>() {"Query cannot be empty"}
+                });
             }
 
             _logger.LogInformation($"Received AI query request");
@@ -38,19 +49,29 @@ public class UserController : ControllerBase
 
             if (!response.Success)
             {
-                return BadRequest(response.ErrorMessage);
+                return BadRequest(new APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.BadRequest,
+                    ErrorMessages = new List<string>() {response.ErrorMessage!}
+                });
             }
 
-            return Ok(new
+            return Ok(new APIResponse<string>()
             {
-                response = response.Response,
-                success = true
+                StatusCode = HttpStatusCode.OK,
+                Data = response.Response!,
             });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing AI query");
-            return StatusCode(500, "An error occurred while processing your query.");
+            return StatusCode((int)HttpStatusCode.InternalServerError, new APIResponse()
+            {
+                IsSuccess = false,
+                StatusCode = HttpStatusCode.InternalServerError,
+                ErrorMessages = new List<string>() { "An error occurred while processing your query."}
+            });
         }
     }
 }
