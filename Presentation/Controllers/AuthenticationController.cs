@@ -41,6 +41,8 @@ public class AuthenticationController : ControllerBase
         _unitOfService = unitOfService;
         _accountHelper = accountHelper;
     }
+
+    [EnableRateLimiting("AuthPolicy")]
     [HttpGet("GoogleSignIn")]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public IActionResult GoogleSignIn(string returnUrl = "/")
@@ -175,6 +177,19 @@ public class AuthenticationController : ControllerBase
             var plainRefresh = _accountHelper.GeneratePlainRefreshToken();
             var (hash, salt) = _accountHelper.CreateTokenHashAndSalt(plainRefresh);
 
+            Response.Cookies.Append(StaticData.AccessToken, jwt, new CookieOptions()
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+            });
+            Response.Cookies.Append(StaticData.RefreshToken, plainRefresh, new CookieOptions()
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+            });
+
             var refreshEntity = new RefreshToken
             {
                 DeviceId = Guid.NewGuid(), // Or get from query parameter
@@ -217,6 +232,7 @@ public class AuthenticationController : ControllerBase
         }
     }
 
+    [EnableRateLimiting("AuthPolicy")]
     [HttpPost("RegisterCustomer")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -339,6 +355,19 @@ public class AuthenticationController : ControllerBase
             var plainRefresh = _accountHelper.GeneratePlainRefreshToken();
             var (hash, salt) = _accountHelper.CreateTokenHashAndSalt(plainRefresh);
 
+            Response.Cookies.Append(StaticData.AccessToken, jwt, new CookieOptions()
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+            });
+            Response.Cookies.Append(StaticData.RefreshToken, plainRefresh, new CookieOptions()
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+            });
+            
             var refreshEntity = new RefreshToken
             {
                 DeviceId = deviceId,
@@ -400,6 +429,7 @@ public class AuthenticationController : ControllerBase
         }
     }
 
+    [EnableRateLimiting("AuthPolicy")]
     [HttpPost("LogoutThisDevice")]
     [Authorize]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -414,7 +444,7 @@ public class AuthenticationController : ControllerBase
                 {
                     DeviceId = logoutRequest.DeviceId
                 });
-
+            
             if (token == null)
             {
                 return StatusCode(StatusCodes.Status401Unauthorized,new APIResponse()
@@ -430,6 +460,10 @@ public class AuthenticationController : ControllerBase
             token.RevokedReason = "User logged out";
             await _unitOfService.RefreshToken.UpdateAsync(token);
             await _unitOfService.SaveChangesAsync();
+            
+            Response.Cookies.Delete(StaticData.AccessToken);
+            Response.Cookies.Delete(StaticData.RefreshToken);
+            
             return Ok(new APIResponse()
             {
                 StatusCode = HttpStatusCode.OK,
@@ -446,6 +480,7 @@ public class AuthenticationController : ControllerBase
         }
     }
 
+    [EnableRateLimiting("AuthPolicy")]
     [HttpPost("LogoutAllDevices")]
     [Authorize]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -494,8 +529,11 @@ public class AuthenticationController : ControllerBase
                 t.RevokedReason = "User logged out for all active devices";
                 await _unitOfService.RefreshToken.UpdateAsync(t);
             }
-
             await _unitOfService.SaveChangesAsync();
+
+            Response.Cookies.Delete(StaticData.AccessToken);
+            Response.Cookies.Delete(StaticData.RefreshToken);
+            
             return Ok(new APIResponse()
             {
                 StatusCode = HttpStatusCode.OK,
@@ -512,6 +550,7 @@ public class AuthenticationController : ControllerBase
         }
     }
 
+    [EnableRateLimiting("AuthPolicy")]
     [HttpPost("RefreshToken")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
