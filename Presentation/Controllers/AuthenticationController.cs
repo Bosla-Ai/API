@@ -1,13 +1,17 @@
 using System.Net;
-using Domain.Contracts;
+using System.Security.Claims;
 using Domain.Entities;
 using Domain.Responses;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using AutoMapper;
 using Domain.Requests;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Service.Abstraction;
 using Service.Helpers;
 using Shared;
@@ -38,6 +42,197 @@ public class AuthenticationController : ControllerBase
         _accountHelper = accountHelper;
     }
 
+    [EnableRateLimiting("AuthPolicy")]
+    [HttpGet("GoogleSignIn")]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public IActionResult GoogleSignIn(string returnUrl = "/")
+    {
+        try
+        {
+            var state = Guid.NewGuid().ToString();
+            var props = new AuthenticationProperties
+            {
+                RedirectUri = Url.Action("ExternalCallback", 
+                    "Authentication", new { provider = "Google", returnUrl }
+                    ,Request.Scheme)
+                , Items = { ["state"] = state }
+            };
+            return Challenge(props, GoogleDefaults.AuthenticationScheme);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError
+                , new APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.InternalServerError,
+                    ErrorMessages = new List<string>() { ex.Message }
+                });
+        }
+    }
+
+    [HttpGet("signin-google")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<APIResponse>> ExternalCallback(string provider, string returnUrl = "/")
+    {
+        try
+        {
+            var result = await HttpContext.AuthenticateAsync(provider);
+            if (!result.Succeeded)
+            {
+                return BadRequest(new  APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.BadRequest,
+                    ErrorMessages = new List<string>(){"External authentication failed."}
+                });
+            }
+
+            var externalId = result.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var email = result.Principal?.FindFirst(ClaimTypes.Email)?.Value;
+
+            if (string.IsNullOrWhiteSpace(externalId))
+            {
+                return BadRequest(new APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.BadRequest,
+                    ErrorMessages = new List<string>(){"Provider did not return an identifier."}
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                return BadRequest(new APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.BadRequest,
+                    ErrorMessages = new List<string>(){"Email not received from external provider."}
+                });
+            }
+
+            var user = await _unitOfService.Authentication.GetUserByEmailAsync(email);
+            if (user == null)
+            {
+                user = new ApplicationUser
+                {
+                    UserName = email,
+                    Email = email,
+                    FirstName = "Unknown",
+                    EmailConfirmed = true
+                };
+
+                var createRes = await _unitOfService.Authentication
+                    .CreateUserAsync(user);
+                
+                if (!createRes.Succeeded)
+                {
+                    return StatusCode(StatusCodes.Status500InternalServerError,
+                        new APIResponse()
+                        {
+                            IsSuccess = false,
+                            StatusCode = HttpStatusCode.InternalServerError,
+                            ErrorMessages = createRes.Errors.Select(e => e.Description).ToList()
+                        });
+                }
+            }
+
+            var loginInfo = new UserLoginInfo(provider, externalId, provider);
+
+            var alreadyLinked = await _unitOfService.Authentication
+                .IsLoginLinkedAsync(user.Id, provider, externalId);
+            if (!alreadyLinked)
+            {
+                var addLoginResult = await _unitOfService.Authentication
+                    .AddLoginAsync(user, loginInfo);
+                if (addLoginResult == null)
+                {
+                    return StatusCode(StatusCodes.Status500InternalServerError
+                        , new APIResponse()
+                        {
+                            IsSuccess = false,
+                            StatusCode = HttpStatusCode.InternalServerError,
+                            ErrorMessages = new List<string>() { "AddLoginAsync returned null (check implementation)." }
+                        });
+                }
+
+                if (addLoginResult is IdentityResult identityResult && !identityResult.Succeeded)
+                {
+                    return StatusCode(StatusCodes.Status500InternalServerError
+                        , new APIResponse()
+                        {
+                            IsSuccess = false,
+                            StatusCode = HttpStatusCode.InternalServerError,
+                            ErrorMessages = identityResult.Errors.Select(e => e.Description).ToList()
+                        });
+                }
+            }
+
+            var roles = await _unitOfService.Authentication.GetRolesAsync(user);
+            var (jwt, jwtToken) = _accountHelper.GenerateJwtAccessToken(user, roles);
+
+            var plainRefresh = _accountHelper.GeneratePlainRefreshToken();
+            var (hash, salt) = _accountHelper.CreateTokenHashAndSalt(plainRefresh);
+
+            Response.Cookies.Append(StaticData.AccessToken, jwt, new CookieOptions()
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+            });
+            Response.Cookies.Append(StaticData.RefreshToken, plainRefresh, new CookieOptions()
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+            });
+
+            var refreshEntity = new RefreshToken
+            {
+                DeviceId = Guid.NewGuid(), // Or get from query parameter
+                TokenHash = hash,
+                TokenSalt = salt,
+                Created = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.AddDays(Convert.ToDouble(_configuration["JWT:RefreshTokenLifeTime"])),
+                UserId = user.Id,
+                JwtTokenId = jwtToken.Id
+            };
+
+            await _unitOfService.RefreshToken.CreateAsync(refreshEntity);
+            await _unitOfService.SaveChangesAsync();
+
+            return Ok(new APIResponse<LoginResponse>()
+            {
+                StatusCode = HttpStatusCode.OK,
+                Data = new LoginResponse()
+                {
+                    AccessToken = jwt,
+                    AccessTokenExpiration = jwtToken.ValidTo,
+                    RefreshToken = plainRefresh,
+                    RefreshTokenExpiration = refreshEntity.ExpiresAt,
+                    UserName = user.UserName!,
+                    Email = user.Email!,
+                    Role = roles.FirstOrDefault() ?? "",
+                    DeviceId = refreshEntity.DeviceId!
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError
+                , new APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.InternalServerError,
+                    ErrorMessages = new List<string>() { ex.Message }
+                });
+        }
+    }
+
+    [EnableRateLimiting("AuthPolicy")]
     [HttpPost("RegisterCustomer")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -68,7 +263,8 @@ public class AuthenticationController : ControllerBase
             }
             
             var customerUser = _mapper.Map<ApplicationUser>(customerDTO);
-            var customerUserCreationResult = await _unitOfService.Authentication.CreateUserAsync(customerUser , customerDTO.Password);
+            var customerUserCreationResult = await _unitOfService.Authentication
+                .CreateUserAsync(customerUser , customerDTO.Password);
             if (!customerUserCreationResult.Succeeded)
             {
                 return BadRequest(new APIResponse()
@@ -87,7 +283,7 @@ public class AuthenticationController : ControllerBase
                 {
                     IsSuccess = false,
                     StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessages = _accountHelper.AddIdentityErrors(customerUserCreationResult)
+                    ErrorMessages = _accountHelper.AddIdentityErrors(customerRoleAssigningResult)
                 });
             }
             
@@ -113,6 +309,7 @@ public class AuthenticationController : ControllerBase
         }
     }
     
+    [EnableRateLimiting("AuthPolicy")]
     [HttpPost("Login")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -121,6 +318,22 @@ public class AuthenticationController : ControllerBase
     {
         try
         {
+            if (loginDTO == null)
+                return BadRequest(new APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.BadRequest,
+                    ErrorMessages = new List<string>() {"LoginDTO is null"}
+                });
+        
+            if (string.IsNullOrWhiteSpace(loginDTO.Email) || string.IsNullOrWhiteSpace(loginDTO.Password))
+                return BadRequest(new APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.BadRequest,
+                    ErrorMessages = new List<string>(){"Wrong format of email or password"}
+                });
+            
             var user = await _unitOfService.Authentication.GetUserByEmailAsync(loginDTO.Email);
             if (user == null || !await _unitOfService.Authentication
                     .CheckPasswordAsync(user, loginDTO.Password))
@@ -142,6 +355,19 @@ public class AuthenticationController : ControllerBase
             var plainRefresh = _accountHelper.GeneratePlainRefreshToken();
             var (hash, salt) = _accountHelper.CreateTokenHashAndSalt(plainRefresh);
 
+            Response.Cookies.Append(StaticData.AccessToken, jwt, new CookieOptions()
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+            });
+            Response.Cookies.Append(StaticData.RefreshToken, plainRefresh, new CookieOptions()
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+            });
+            
             var refreshEntity = new RefreshToken
             {
                 DeviceId = deviceId,
@@ -203,7 +429,9 @@ public class AuthenticationController : ControllerBase
         }
     }
 
+    [EnableRateLimiting("AuthPolicy")]
     [HttpPost("LogoutThisDevice")]
+    [Authorize]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -216,7 +444,7 @@ public class AuthenticationController : ControllerBase
                 {
                     DeviceId = logoutRequest.DeviceId
                 });
-
+            
             if (token == null)
             {
                 return StatusCode(StatusCodes.Status401Unauthorized,new APIResponse()
@@ -232,6 +460,10 @@ public class AuthenticationController : ControllerBase
             token.RevokedReason = "User logged out";
             await _unitOfService.RefreshToken.UpdateAsync(token);
             await _unitOfService.SaveChangesAsync();
+            
+            Response.Cookies.Delete(StaticData.AccessToken);
+            Response.Cookies.Delete(StaticData.RefreshToken);
+            
             return Ok(new APIResponse()
             {
                 StatusCode = HttpStatusCode.OK,
@@ -248,7 +480,9 @@ public class AuthenticationController : ControllerBase
         }
     }
 
+    [EnableRateLimiting("AuthPolicy")]
     [HttpPost("LogoutAllDevices")]
+    [Authorize]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -264,11 +498,11 @@ public class AuthenticationController : ControllerBase
 
             if (token == null)
             {
-                return StatusCode(StatusCodes.Status401Unauthorized,new APIResponse()
+                return StatusCode(StatusCodes.Status401Unauthorized, new APIResponse()
                 {
                     IsSuccess = false,
                     StatusCode = HttpStatusCode.Unauthorized,
-                    ErrorMessages = new List<string>(){"Invalid Request"}
+                    ErrorMessages = new List<string>(){"No active tokens found"}
                 });
             }
 
@@ -280,7 +514,7 @@ public class AuthenticationController : ControllerBase
 
             if (tokens == null || !tokens.Any())
             {
-                return Ok(new APIResponse()
+                return BadRequest(new APIResponse()
                 {
                     IsSuccess = false,
                     StatusCode = HttpStatusCode.Unauthorized,
@@ -295,8 +529,11 @@ public class AuthenticationController : ControllerBase
                 t.RevokedReason = "User logged out for all active devices";
                 await _unitOfService.RefreshToken.UpdateAsync(t);
             }
-
             await _unitOfService.SaveChangesAsync();
+
+            Response.Cookies.Delete(StaticData.AccessToken);
+            Response.Cookies.Delete(StaticData.RefreshToken);
+            
             return Ok(new APIResponse()
             {
                 StatusCode = HttpStatusCode.OK,
@@ -313,15 +550,7 @@ public class AuthenticationController : ControllerBase
         }
     }
 
-    // [HttpPost("ResetPassword")]
-    // [ProducesResponseType(StatusCodes.Status200OK)]
-    // [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    // [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-    // public async Task<ActionResult<APIResponse>> ResetPassword([FromBody] ResetPasswordRequest ResetRequest)
-    // {
-    //     
-    // }
-    
+    [EnableRateLimiting("AuthPolicy")]
     [HttpPost("RefreshToken")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -373,7 +602,7 @@ public class AuthenticationController : ControllerBase
                     var allUserTokens = await _unitOfService.RefreshToken
                         .GetAllForUserDeviceNotRevokedAsync(new  RefreshTokenParameters()
                         {
-                            UserId = validToken!.UserId
+                            UserId = firstToken.UserId
                         });
                     foreach (var t in allUserTokens)
                     {
@@ -452,7 +681,7 @@ public class AuthenticationController : ControllerBase
                 DeviceId = validToken.DeviceId
             };
 
-            return Ok(new APIResponse()
+            return Ok(new APIResponse<LoginResponse>()
             {
                 StatusCode = HttpStatusCode.OK,
                 Data = loginResponse

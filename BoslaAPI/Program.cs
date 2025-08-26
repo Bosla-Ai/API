@@ -1,7 +1,11 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using BoslaAPI;
+using BoslaAPI.Extensions;
 using Domain.Contracts;
 using Domain.Entities;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -15,7 +19,7 @@ using Service.Implementations;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddHttpClient(); //  method registers the HttpClientFactory in the dependency injection container, which can then provide HttpClient instances to your services.
+builder.Services.AddHttpClient(); 
 
 builder.Services.AddAutoMapper(cfg => { }, typeof(MappingConfiguration).Assembly);
 builder.Services.AddControllers();
@@ -23,50 +27,47 @@ builder.Services.AddDbContext<ApplicationDbContext>(option =>
 {
     option.UseSqlServer(builder.Configuration.GetConnectionString("CS"));
 });
-builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
-    .AddEntityFrameworkStores<ApplicationDbContext>()
-    .AddDefaultTokenProviders();
+builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<IUserService, UserService>();
 
 builder.Services.AddServices();
-
-builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("JWT"));
-builder.Services.AddAuthentication(options =>
+builder.Services
+    .AddJwtConfiguration(builder.Configuration)
+    .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, cookie =>
     {
-        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+        cookie.Cookie.SameSite = SameSiteMode.Lax;
+        cookie.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     })
-    .AddJwtBearer(options =>
+    .AddGoogle("Google", options =>
     {
-        var JwtOptions = builder.Configuration.GetSection("JWT").Get<JwtOptions>();
-        options.TokenValidationParameters = new TokenValidationParameters()
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = JwtOptions!.Issuer,
-            ValidAudience = JwtOptions.Audience,
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(JwtOptions.Key)
-            )
-        };
+        options.ClientId = builder.Configuration["Authentication:Google:ClientId"]!;
+        options.ClientSecret = builder.Configuration["Authentication:Google:ClientSecret"]!;
+        options.CallbackPath = "/signin-google";
+        options.ClaimActions.MapJsonKey("urn:google:email_verified", "email_verified");
+        options.UsePkce = true;
     });
-builder.Services.AddAuthentication();
+
+    // .AddGitHub("Github", options =>
+    // {
+    //     options.ClientId = builder.Configuration["Authentication:Github:ClientId"]!;
+    //     options.ClientSecret = builder.Configuration["Authentication:Github:ClientSecret"]!;
+    //     options.CallbackPath = "/signin-github";
+    // })
+    // .AddLinkedIn("LinkedIn", options =>
+    // {
+    //     options.ClientId = builder.Configuration["Authentication:LinkedIn:ClientId"]!;
+    //     options.ClientSecret = builder.Configuration["Authentication:LinkedIn:ClientSecret"]!;
+    //     options.CallbackPath = "/signin-linkedin";
+    // });
+
+builder.Services.AddRateLimiterConfiguration();
+
 builder.Services.AddAuthorization();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
-using (var scope = app.Services.CreateScope())
-{
-    var _roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-    await RoleSeeder.SeedRoles(_roleManager);
-}
-
-
-
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -74,6 +75,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
