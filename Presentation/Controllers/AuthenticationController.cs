@@ -119,11 +119,12 @@ public class AuthenticationController : ControllerBase
                 {
                     UserName = email,
                     Email = email,
+                    FirstName = "Unknown",
                     EmailConfirmed = true
                 };
 
                 var createRes = await _unitOfService.Authentication
-                    .CreateUserAsync(user, Guid.NewGuid().ToString());
+                    .CreateUserAsync(user);
                 
                 if (!createRes.Succeeded)
                 {
@@ -132,8 +133,7 @@ public class AuthenticationController : ControllerBase
                         {
                             IsSuccess = false,
                             StatusCode = HttpStatusCode.InternalServerError,
-                            ErrorMessages = new List<string>()
-                                { createRes.Errors.Select(e => e.Description).ToString()! }
+                            ErrorMessages = createRes.Errors.Select(e => e.Description).ToList()
                         });
                 }
             }
@@ -164,8 +164,7 @@ public class AuthenticationController : ControllerBase
                         {
                             IsSuccess = false,
                             StatusCode = HttpStatusCode.InternalServerError,
-                            ErrorMessages = new List<string>()
-                                { identityResult.Errors.Select(e => e.Description).ToString()! }
+                            ErrorMessages = identityResult.Errors.Select(e => e.Description).ToList()
                         });
                 }
             }

@@ -10,6 +10,7 @@ public interface IAuthenticationService
     Task<ApplicationUser?> GetUserByIdAsync(string id);
 
     Task<IdentityResult> CreateUserAsync(ApplicationUser user, string password);
+    Task<IdentityResult> CreateUserAsync(ApplicationUser user);
     Task<bool> CheckPasswordAsync(ApplicationUser user, string password);
 
     Task<IdentityResult> AssignUserToRoleAsync(ApplicationUser user, string roleName);

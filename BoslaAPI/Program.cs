@@ -4,6 +4,7 @@ using BoslaAPI;
 using BoslaAPI.Extensions;
 using Domain.Contracts;
 using Domain.Entities;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -43,6 +44,7 @@ builder.Services
         options.ClientId = builder.Configuration["Authentication:Google:ClientId"]!;
         options.ClientSecret = builder.Configuration["Authentication:Google:ClientSecret"]!;
         options.CallbackPath = "/signin-google";
+        options.ClaimActions.MapJsonKey("urn:google:email_verified", "email_verified");
         options.UsePkce = true;
     });
 

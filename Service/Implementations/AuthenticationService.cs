@@ -32,6 +32,11 @@ public class AuthenticationService : IAuthenticationService
         return await _userManager.CreateAsync(user, password);
     }
 
+    public async Task<IdentityResult> CreateUserAsync(ApplicationUser user)
+    {
+        return await _userManager.CreateAsync(user);
+    }
+
     public Task<bool> CheckPasswordAsync(ApplicationUser user, string password)
     {
         return _userManager.CheckPasswordAsync(user, password);        
