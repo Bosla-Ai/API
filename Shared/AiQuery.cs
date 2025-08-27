@@ -2,9 +2,7 @@ namespace Shared;
 
 public class AiQueryRequest
 {
-    /// <summary>
-    /// The user's text query to be processed by the AI
-    /// </summary>
+    // The user's text query to be processed by the AI
     public string? Query { get; set; }
 }
 
