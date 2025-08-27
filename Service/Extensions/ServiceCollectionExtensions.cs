@@ -14,7 +14,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<IUserService, UserService>();
         
-        services.AddScoped<IUnitOfService, UnitOfService>(); // for generalization
+        services.AddScoped<IServiceManager, ServiceManager>(); // for generalization
         services.AddScoped<AuthenticationHelper>();
         return services;
     }

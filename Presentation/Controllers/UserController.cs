@@ -10,7 +10,7 @@ using Shared.DTOs.CustomerDTOs;
 namespace Presintation.Controllers;
 public class UserController(
     ILogger<UserController> logger,
-    IUnitOfService unitOfService)
+    IServiceManager serviceManager)
     : ApiController
 {
     /// Send a text query to the AI and get a response
@@ -32,7 +32,7 @@ public class UserController(
             logger.LogInformation($"Received AI query request");
 
             // Process the query through the UserService
-            var response = await unitOfService.User.ProcessUserQueryAsync(request.Query);
+            var response = await serviceManager.User.ProcessUserQueryAsync(request.Query);
 
             if (!response.Success)
             {
@@ -77,7 +77,7 @@ public class UserController(
                 });
             }
 
-            var customer = await unitOfService.Customer
+            var customer = await serviceManager.Customer
                 .GetALlCustomerDetailsAsync(customerId);
             
             if (customer == null)

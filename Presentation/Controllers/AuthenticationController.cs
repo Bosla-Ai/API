@@ -24,7 +24,7 @@ namespace Presintation.Controllers;
 public class AuthenticationController(
     IConfiguration configuration,
     IMapper mapper,
-    IUnitOfService unitOfService,
+    IServiceManager serviceManager,
     AuthenticationHelper accountHelper)
     : ApiController
 {
@@ -96,7 +96,7 @@ public class AuthenticationController(
                 });
             }
 
-            var user = await unitOfService.Authentication.GetUserByEmailAsync(email);
+            var user = await serviceManager.Authentication.GetUserByEmailAsync(email);
             if (user == null)
             {
                 user = new ApplicationUser
@@ -107,7 +107,7 @@ public class AuthenticationController(
                     EmailConfirmed = true
                 };
 
-                var createRes = await unitOfService.Authentication
+                var createRes = await serviceManager.Authentication
                     .CreateUserAsync(user);
 
                 if (!createRes.Succeeded)
@@ -125,17 +125,17 @@ public class AuthenticationController(
                 {
                     ApplicationUserId = user.Id,
                 };
-                await unitOfService.Customer.CreateAsync(customer);
-                await unitOfService.SaveChangesAsync();
+                await serviceManager.Customer.CreateAsync(customer);
+                await serviceManager.SaveChangesAsync();
             }
 
             var loginInfo = new UserLoginInfo(provider, externalId, provider);
 
-            var alreadyLinked = await unitOfService.Authentication
+            var alreadyLinked = await serviceManager.Authentication
                 .IsLoginLinkedAsync(user.Id, provider, externalId);
             if (!alreadyLinked)
             {
-                var addLoginResult = await unitOfService.Authentication
+                var addLoginResult = await serviceManager.Authentication
                     .AddLoginAsync(user, loginInfo);
                 if (addLoginResult == null)
                 {
@@ -160,7 +160,7 @@ public class AuthenticationController(
                 }
             }
 
-            var roles = await unitOfService.Authentication.GetRolesAsync(user);
+            var roles = await serviceManager.Authentication.GetRolesAsync(user);
             var (jwt, jwtToken) = accountHelper.GenerateJwtAccessToken(user, roles);
 
             var plainRefresh = accountHelper.GeneratePlainRefreshToken();
@@ -190,8 +190,8 @@ public class AuthenticationController(
                 JwtTokenId = jwtToken.Id
             };
 
-            await unitOfService.RefreshToken.CreateAsync(refreshEntity);
-            await unitOfService.SaveChangesAsync();
+            await serviceManager.RefreshToken.CreateAsync(refreshEntity);
+            await serviceManager.SaveChangesAsync();
 
             return Ok(new APIResponse<LoginResponse>()
             {
@@ -237,7 +237,7 @@ public class AuthenticationController(
                 });
             }
 
-            var userExists = await unitOfService.Authentication
+            var userExists = await serviceManager.Authentication
                 .GetUserByEmailAsync(customerDTO.Email);
             if (userExists != null)
             {
@@ -250,7 +250,7 @@ public class AuthenticationController(
             }
 
             var customerUser = mapper.Map<ApplicationUser>(customerDTO);
-            var customerUserCreationResult = await unitOfService.Authentication
+            var customerUserCreationResult = await serviceManager.Authentication
                 .CreateUserAsync(customerUser, customerDTO.Password);
             if (!customerUserCreationResult.Succeeded)
             {
@@ -263,7 +263,7 @@ public class AuthenticationController(
             }
 
             var customerRoleAssigningResult =
-                await unitOfService.Authentication.AssignUserToRoleAsync(customerUser, StaticData.CustomerRoleName);
+                await serviceManager.Authentication.AssignUserToRoleAsync(customerUser, StaticData.CustomerRoleName);
             if (!customerRoleAssigningResult.Succeeded)
             {
                 return BadRequest(new APIResponse()
@@ -276,8 +276,8 @@ public class AuthenticationController(
 
             var customer = mapper.Map<Customer>(customerDTO);
             customer.ApplicationUserId = customerUser.Id;
-            await unitOfService.Customer.CreateAsync(customer);
-            await unitOfService.SaveChangesAsync();
+            await serviceManager.Customer.CreateAsync(customer);
+            await serviceManager.SaveChangesAsync();
 
             return Ok(new APIResponse()
             {
@@ -318,8 +318,8 @@ public class AuthenticationController(
                     ErrorMessages = new List<string>() { "Wrong format of email or password" }
                 });
 
-            var user = await unitOfService.Authentication.GetUserByEmailAsync(loginDTO.Email);
-            if (user == null || !await unitOfService.Authentication
+            var user = await serviceManager.Authentication.GetUserByEmailAsync(loginDTO.Email);
+            if (user == null || !await serviceManager.Authentication
                     .CheckPasswordAsync(user, loginDTO.Password))
             {
                 return StatusCode(StatusCodes.Status401Unauthorized, new APIResponse()
@@ -330,7 +330,7 @@ public class AuthenticationController(
                 });
             }
 
-            var roles = await unitOfService.Authentication.GetRolesAsync(user);
+            var roles = await serviceManager.Authentication.GetRolesAsync(user);
 
             var deviceId = Guid.NewGuid();
 
@@ -365,7 +365,7 @@ public class AuthenticationController(
             };
 
             var existing =
-                await unitOfService.RefreshToken
+                await serviceManager.RefreshToken
                     .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
                     {
                         DeviceId = deviceId, UserId = user.Id
@@ -378,12 +378,12 @@ public class AuthenticationController(
                     item.IsRevoked = true;
                     item.RevokedAt = DateTime.UtcNow;
                     item.RevokedReason = "New login from same device";
-                    await unitOfService.RefreshToken.UpdateAsync(item);
+                    await serviceManager.RefreshToken.UpdateAsync(item);
                 }
             }
 
-            await unitOfService.RefreshToken.CreateAsync(refreshEntity);
-            await unitOfService.SaveChangesAsync();
+            await serviceManager.RefreshToken.CreateAsync(refreshEntity);
+            await serviceManager.SaveChangesAsync();
 
             var loginResponse = new LoginResponse()
             {
@@ -421,7 +421,7 @@ public class AuthenticationController(
     {
         try
         {
-            var token = await unitOfService.RefreshToken
+            var token = await serviceManager.RefreshToken
                 .GetWithDeviceIdNotRevokedAsync(new RefreshTokenParameters()
                 {
                     DeviceId = logoutRequest.DeviceId
@@ -440,8 +440,8 @@ public class AuthenticationController(
             token.IsRevoked = true;
             token.RevokedAt = DateTime.UtcNow;
             token.RevokedReason = "User logged out";
-            await unitOfService.RefreshToken.UpdateAsync(token);
-            await unitOfService.SaveChangesAsync();
+            await serviceManager.RefreshToken.UpdateAsync(token);
+            await serviceManager.SaveChangesAsync();
 
             Response.Cookies.Delete(StaticData.AccessToken);
             Response.Cookies.Delete(StaticData.RefreshToken);
@@ -469,7 +469,7 @@ public class AuthenticationController(
     {
         try
         {
-            var token = await unitOfService.RefreshToken
+            var token = await serviceManager.RefreshToken
                 .GetWithDeviceIdNotRevokedAsync(new RefreshTokenParameters()
                 {
                     DeviceId = logoutRequest.DeviceId
@@ -485,7 +485,7 @@ public class AuthenticationController(
                 });
             }
 
-            var tokens = await unitOfService.RefreshToken
+            var tokens = await serviceManager.RefreshToken
                 .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
                 {
                     UserId = logoutRequest.UserId
@@ -506,10 +506,10 @@ public class AuthenticationController(
                 t.IsRevoked = true;
                 t.RevokedAt = DateTime.UtcNow;
                 t.RevokedReason = "User logged out for all active devices";
-                await unitOfService.RefreshToken.UpdateAsync(t);
+                await serviceManager.RefreshToken.UpdateAsync(t);
             }
 
-            await unitOfService.SaveChangesAsync();
+            await serviceManager.SaveChangesAsync();
 
             Response.Cookies.Delete(StaticData.AccessToken);
             Response.Cookies.Delete(StaticData.RefreshToken);
@@ -546,7 +546,7 @@ public class AuthenticationController(
                 });
             }
 
-            var storedTokens = await unitOfService.RefreshToken
+            var storedTokens = await serviceManager.RefreshToken
                 .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
                 {
                     DeviceId = model.DeviceId
@@ -576,7 +576,7 @@ public class AuthenticationController(
                 try
                 {
                     var firstToken = storedTokens.First();
-                    var allUserTokens = await unitOfService.RefreshToken
+                    var allUserTokens = await serviceManager.RefreshToken
                         .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
                         {
                             UserId = firstToken.UserId
@@ -586,10 +586,10 @@ public class AuthenticationController(
                         t.IsRevoked = true;
                         t.RevokedAt = DateTime.UtcNow;
                         t.RevokedReason = "Refresh token reuse detected";
-                        await unitOfService.RefreshToken.UpdateAsync(t);
+                        await serviceManager.RefreshToken.UpdateAsync(t);
                     }
 
-                    await unitOfService.SaveChangesAsync();
+                    await serviceManager.SaveChangesAsync();
                 }
                 catch (Exception)
                 {
@@ -622,7 +622,7 @@ public class AuthenticationController(
             var newPlain = accountHelper.GeneratePlainRefreshToken();
             var (newHash, newSalt) = accountHelper.CreateTokenHashAndSalt(newPlain);
 
-            var user = await unitOfService.Authentication.GetUserByIdAsync(validToken.UserId);
+            var user = await serviceManager.Authentication.GetUserByIdAsync(validToken.UserId);
             if (user == null)
             {
                 return StatusCode(StatusCodes.Status401Unauthorized, new APIResponse()
@@ -633,7 +633,7 @@ public class AuthenticationController(
                 });
             }
 
-            var roles = await unitOfService.Authentication.GetRolesAsync(user);
+            var roles = await serviceManager.Authentication.GetRolesAsync(user);
             var (newJwt, newJwtToken) = accountHelper.GenerateJwtAccessToken(user, roles);
 
             validToken.TokenHash = newHash;
@@ -646,8 +646,8 @@ public class AuthenticationController(
             validToken.RevokedAt = null;
             validToken.RevokedReason = null;
 
-            await unitOfService.RefreshToken.UpdateAsync(validToken);
-            await unitOfService.SaveChangesAsync();
+            await serviceManager.RefreshToken.UpdateAsync(validToken);
+            await serviceManager.SaveChangesAsync();
 
             var loginResponse = new LoginResponse()
             {
