@@ -1,6 +1,6 @@
 namespace Service.Abstraction;
 
-public interface IUnitOfService
+public interface IServiceManager
 {
     public IAuthenticationService Authentication { get; }
     public ICustomerService Customer { get; }

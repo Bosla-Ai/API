@@ -3,7 +3,7 @@ using Service.Abstraction;
 
 namespace Service.Implementations;
 
-public class UnitOfService :  IUnitOfService
+public class ServiceManager :  IServiceManager
 {
     private readonly IUnitOfWork _unitOfWork;
     
@@ -13,7 +13,7 @@ public class UnitOfService :  IUnitOfService
     public IUserService User { get; }
 
 
-    public UnitOfService(
+    public ServiceManager(
         IUnitOfWork unitOfWork,
         IAuthenticationService authentication,
         ICustomerService customer,
