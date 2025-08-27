@@ -11,7 +11,7 @@ namespace Presintation.Controllers;
 public class UserController(
     ILogger<UserController> logger,
     IUserService userService)
-    : ControllerBase
+    : ApiController
 {
     /// Send a text query to the AI and get a response
     [HttpPost("ask-ai")]
