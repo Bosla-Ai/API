@@ -8,20 +8,13 @@ using Shared;
 using Shared.DTOs.CustomerDTOs;
 
 namespace Presintation.Controllers;
-
-[ApiController]
-[Route("api/[controller]")]
 public class UserController(
     ILogger<UserController> logger,
-    IUserService userService,
     IUnitOfService unitOfService)
-    : ControllerBase
+    : ApiController
 {
     /// Send a text query to the AI and get a response
     [HttpPost("ask-ai")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<APIResponse>> AskAI([FromBody] AiQueryRequest request)
     {
         try
@@ -32,14 +25,14 @@ public class UserController(
                 {
                     IsSuccess = false,
                     StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessages = new List<string>() {"Query cannot be empty"}
+                    ErrorMessages = new List<string>() { "Query cannot be empty" }
                 });
             }
 
             logger.LogInformation($"Received AI query request");
 
             // Process the query through the UserService
-            var response = await userService.ProcessUserQueryAsync(request.Query);
+            var response = await unitOfService.User.ProcessUserQueryAsync(request.Query);
 
             if (!response.Success)
             {
@@ -47,7 +40,7 @@ public class UserController(
                 {
                     IsSuccess = false,
                     StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessages = new List<string>() {response.ErrorMessage!}
+                    ErrorMessages = new List<string>() { response.ErrorMessage! }
                 });
             }
 
@@ -64,15 +57,12 @@ public class UserController(
             {
                 IsSuccess = false,
                 StatusCode = HttpStatusCode.InternalServerError,
-                ErrorMessages = new List<string>() { "An error occurred while processing your query."}
+                ErrorMessages = new List<string>() { "An error occurred while processing your query." }
             });
         }
     }
 
     [HttpGet("GetCustomerProfile/{customerId:guid}")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<APIResponse>> GetCustomerProfile(string customerId)
     {
         try
