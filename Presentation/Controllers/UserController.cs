@@ -1,10 +1,12 @@
 using System.Net;
+using AutoMapper;
 using Domain.Responses;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Service.Abstraction;
 using Shared;
+using Shared.DTOs.CustomerDTOs;
 
 namespace Presintation.Controllers;
 
@@ -14,13 +16,17 @@ public class UserController : ControllerBase
 {
     private readonly ILogger<UserController> _logger;
     private readonly IUserService _userService;
+    private readonly IUnitOfService _unitOfService;
 
     public UserController(
         ILogger<UserController> logger,
-        IUserService userService)
+        IUserService userService
+        ,IUnitOfService unitOfService
+        ,IMapper mapper)
     {
         _logger = logger;
         _userService = userService;
+        _unitOfService = unitOfService;
     }
 
     /// Send a text query to the AI and get a response
@@ -67,6 +73,53 @@ public class UserController : ControllerBase
         {
             _logger.LogError(ex, "Error processing AI query");
             return StatusCode((int)HttpStatusCode.InternalServerError, new APIResponse()
+            {
+                IsSuccess = false,
+                StatusCode = HttpStatusCode.InternalServerError,
+                ErrorMessages = new List<string>() { "An error occurred while processing your query."}
+            });
+        }
+    }
+
+    [HttpGet("GetCustomerProfile/{customerId:guid}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<APIResponse>> GetCustomerProfile(string customerId)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(customerId))
+            {
+                return BadRequest(new APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.BadRequest,
+                    ErrorMessages = new List<string>() { "CustomerId cannot be Null or Empty" }
+                });
+            }
+
+            var customer = await _unitOfService.Customer
+                .GetALlCustomerDetailsAsync(customerId);
+            
+            if (customer == null)
+            {
+                return NotFound(new APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.BadRequest,
+                    ErrorMessages = new List<string>() { "CustomerId cannot be Null or Empty" }
+                });
+            }
+            return Ok(new APIResponse<CustomerDTO>()
+            {
+                StatusCode = HttpStatusCode.OK,
+                Data = customer,
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new APIResponse()
             {
                 IsSuccess = false,
                 StatusCode = HttpStatusCode.InternalServerError,

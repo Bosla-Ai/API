@@ -138,6 +138,13 @@ public class AuthenticationController : ControllerBase
                             ErrorMessages = createRes.Errors.Select(e => e.Description).ToList()
                         });
                 }
+
+                var customer = new Customer()
+                {
+                    ApplicationUserId = user.Id,
+                };
+                await _unitOfService.Customer.CreateAsync(customer);
+                await _unitOfService.SaveChangesAsync();
             }
 
             var loginInfo = new UserLoginInfo(provider, externalId, provider);

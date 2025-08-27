@@ -16,12 +16,14 @@ using Persistence.Seeder;
 using Service.Abstraction;
 using Service.Extensions;
 using Service.Implementations;
+using Service.MappingProfiles;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHttpClient(); 
 
 builder.Services.AddAutoMapper(cfg => { }, typeof(MappingConfiguration).Assembly);
+builder.Services.AddAutoMapper(cfg => { }, typeof(CustomerMapping).Assembly);
 builder.Services.AddControllers();
 builder.Services.AddDbContext<ApplicationDbContext>(option =>
 {
