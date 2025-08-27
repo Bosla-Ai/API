@@ -1,5 +1,4 @@
 using System.Net;
-using AutoMapper;
 using Domain.Responses;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -12,23 +11,12 @@ namespace Presintation.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class UserController : ControllerBase
+public class UserController(
+    ILogger<UserController> logger,
+    IUserService userService,
+    IUnitOfService unitOfService)
+    : ControllerBase
 {
-    private readonly ILogger<UserController> _logger;
-    private readonly IUserService _userService;
-    private readonly IUnitOfService _unitOfService;
-
-    public UserController(
-        ILogger<UserController> logger,
-        IUserService userService
-        ,IUnitOfService unitOfService
-        ,IMapper mapper)
-    {
-        _logger = logger;
-        _userService = userService;
-        _unitOfService = unitOfService;
-    }
-
     /// Send a text query to the AI and get a response
     [HttpPost("ask-ai")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -48,10 +36,10 @@ public class UserController : ControllerBase
                 });
             }
 
-            _logger.LogInformation($"Received AI query request");
+            logger.LogInformation($"Received AI query request");
 
             // Process the query through the UserService
-            var response = await _userService.ProcessUserQueryAsync(request.Query);
+            var response = await userService.ProcessUserQueryAsync(request.Query);
 
             if (!response.Success)
             {
@@ -71,7 +59,7 @@ public class UserController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing AI query");
+            logger.LogError(ex, "Error processing AI query");
             return StatusCode((int)HttpStatusCode.InternalServerError, new APIResponse()
             {
                 IsSuccess = false,
@@ -99,7 +87,7 @@ public class UserController : ControllerBase
                 });
             }
 
-            var customer = await _unitOfService.Customer
+            var customer = await unitOfService.Customer
                 .GetALlCustomerDetailsAsync(customerId);
             
             if (customer == null)
