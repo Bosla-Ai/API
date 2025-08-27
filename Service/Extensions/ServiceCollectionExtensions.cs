@@ -12,6 +12,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAuthenticationService, AuthenticationService>();
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddScoped<ICustomerService, CustomerService>();
+        services.AddScoped<IUserService, UserService>();
         
         services.AddScoped<IUnitOfService, UnitOfService>(); // for generalization
         services.AddScoped<AuthenticationHelper>();

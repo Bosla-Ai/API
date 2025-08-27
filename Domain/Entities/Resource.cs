@@ -8,6 +8,9 @@ public class Resource
     public string Title { get; set; }
     public string Url { get; set; }
     public ResourceType ResourceType { get; set; }
+    public ResourceLanguage ResourceLanguage { get; set; }
+    public LearningStyle LearningStyle { get; set; }
+    public BudgetPreference CostType { get; set; }
     public LevelType Level { get; set; }
     public int DurationMinutes { get; set; }
     public double PopularityScore { get; set; } = 0.0; // normalized 0..1

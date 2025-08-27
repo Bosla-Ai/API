@@ -120,6 +120,13 @@ public class AuthenticationController(
                             ErrorMessages = createRes.Errors.Select(e => e.Description).ToList()
                         });
                 }
+
+                var customer = new Customer()
+                {
+                    ApplicationUserId = user.Id,
+                };
+                await unitOfService.Customer.CreateAsync(customer);
+                await unitOfService.SaveChangesAsync();
             }
 
             var loginInfo = new UserLoginInfo(provider, externalId, provider);

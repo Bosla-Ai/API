@@ -13,6 +13,8 @@ public sealed class Customer
     public Domains? SelectedDomain { get; set; }
     public bool WantsDeepDive { get; set; } = false;
     public int? AvailableHoursPerWeek { get; set; }
+    public BudgetPreference? BudgetPreference { get; set; } = Shared.Enums.BudgetPreference.Free;
+    public DateTime? TargetCompletionDate { get; set; }
     
     // For Option 2: CV Analysis Results
     public string? AnalyzedSkillsJson { get; set; } // JSON from LLM analysis

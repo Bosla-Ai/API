@@ -5,12 +5,12 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Service.Abstraction;
 using Shared;
+using Shared.DTOs.CustomerDTOs;
 
 namespace Presintation.Controllers;
-
 public class UserController(
     ILogger<UserController> logger,
-    IUserService userService)
+    IUnitOfService unitOfService)
     : ApiController
 {
     /// Send a text query to the AI and get a response
@@ -32,7 +32,7 @@ public class UserController(
             logger.LogInformation($"Received AI query request");
 
             // Process the query through the UserService
-            var response = await userService.ProcessUserQueryAsync(request.Query);
+            var response = await unitOfService.User.ProcessUserQueryAsync(request.Query);
 
             if (!response.Success)
             {
@@ -58,6 +58,50 @@ public class UserController(
                 IsSuccess = false,
                 StatusCode = HttpStatusCode.InternalServerError,
                 ErrorMessages = new List<string>() { "An error occurred while processing your query." }
+            });
+        }
+    }
+
+    [HttpGet("GetCustomerProfile/{customerId:guid}")]
+    public async Task<ActionResult<APIResponse>> GetCustomerProfile(string customerId)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(customerId))
+            {
+                return BadRequest(new APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.BadRequest,
+                    ErrorMessages = new List<string>() { "CustomerId cannot be Null or Empty" }
+                });
+            }
+
+            var customer = await unitOfService.Customer
+                .GetALlCustomerDetailsAsync(customerId);
+            
+            if (customer == null)
+            {
+                return NotFound(new APIResponse()
+                {
+                    IsSuccess = false,
+                    StatusCode = HttpStatusCode.BadRequest,
+                    ErrorMessages = new List<string>() { "CustomerId cannot be Null or Empty" }
+                });
+            }
+            return Ok(new APIResponse<CustomerDTO>()
+            {
+                StatusCode = HttpStatusCode.OK,
+                Data = customer,
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new APIResponse()
+            {
+                IsSuccess = false,
+                StatusCode = HttpStatusCode.InternalServerError,
+                ErrorMessages = new List<string>() { "An error occurred while processing your query."}
             });
         }
     }

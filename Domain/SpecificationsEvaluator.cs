@@ -1,5 +1,6 @@
 
 using Domain.Contracts;
+using Microsoft.EntityFrameworkCore;
 
 namespace Domain;
 
@@ -14,6 +15,15 @@ public static class SpecificationsEvaluator
         }
 
         query = query.Where(specifications.Criteria);
+
+        if (specifications.Includes.Any())
+        {
+            foreach (var include in specifications.Includes)
+            {
+                query = query.Include(include);
+            }
+        }
+        
         return query;
     }
 }
