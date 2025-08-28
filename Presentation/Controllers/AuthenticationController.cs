@@ -21,11 +21,7 @@ using Shared.Parameters;
 
 namespace Presintation.Controllers;
 
-public class AuthenticationController(
-    IConfiguration configuration,
-    IMapper mapper,
-    IServiceManager serviceManager,
-    AuthenticationHelper accountHelper)
+public class AuthenticationController(IServiceManager serviceManager, AuthenticationHelper accountHelper,IMapper mapper,IConfiguration configuration)
     : ApiController
 {
     [EnableRateLimiting("AuthPolicy")]
@@ -61,7 +57,7 @@ public class AuthenticationController(
     public async Task<ActionResult<APIResponse>> ExternalCallback(string provider, string returnUrl = "/")
     {
         try
-        { 
+        {
             var result = await HttpContext.AuthenticateAsync(provider);
             if (!result.Succeeded)
             {
@@ -160,9 +156,9 @@ public class AuthenticationController(
                 }
             }
 
-            var (loginResponse, refreshEntity) = 
-                await accountHelper.GenerateAndStoreTokensAsync(user,Guid.NewGuid());
-            
+            var (loginResponse, refreshEntity) =
+                await accountHelper.GenerateAndStoreTokensAsync(user, Guid.NewGuid());
+
             Response.Cookies.Append(StaticData.AccessToken, loginResponse.AccessToken, new CookieOptions()
             {
                 HttpOnly = true,
@@ -276,87 +272,21 @@ public class AuthenticationController(
     [HttpPost("Login")]
     public async Task<ActionResult<APIResponse>> Login([FromBody] LoginDTO loginDto)
     {
-        try
+        var response = await serviceManager.Authentication.LoginAsync(loginDto);
+
+        Response.Cookies.Append(StaticData.AccessToken, response.Data.AccessToken, new CookieOptions()
         {
-            if (loginDto == null)
-                return BadRequest(new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessages = new List<string>() { "LoginDTO is null" }
-                });
-
-            if (string.IsNullOrWhiteSpace(loginDto.Email) || string.IsNullOrWhiteSpace(loginDto.Password))
-                return BadRequest(new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessages = new List<string>() { "Wrong format of email or password" }
-                });
-
-            var user = await serviceManager.Authentication.GetUserByEmailAsync(loginDto.Email);
-            if (user == null || !await serviceManager.Authentication
-                    .CheckPasswordAsync(user, loginDto.Password))
-            {
-                return StatusCode(StatusCodes.Status401Unauthorized, new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.Unauthorized,
-                    ErrorMessages = new List<string>() { "Invalid Login" }
-                });
-            }
-
-            var (loginResponse, refreshEntity) = 
-                await accountHelper.GenerateAndStoreTokensAsync(user,Guid.NewGuid());
-            Response.Cookies.Append(StaticData.AccessToken, loginResponse.AccessToken, new CookieOptions()
-            {
-                HttpOnly = true,
-                Secure = true,
-                SameSite = SameSiteMode.None,
-            });
-            Response.Cookies.Append(StaticData.RefreshToken, loginResponse.RefreshToken, new CookieOptions()
-            {
-                HttpOnly = true,
-                Secure = true,
-                SameSite = SameSiteMode.None,
-            });
-
-            var existing =
-                await serviceManager.RefreshToken
-                    .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
-                    {
-                        DeviceId = loginResponse.DeviceId, UserId = user.Id
-                    });
-
-            if (existing != null && existing.Any())
-            {
-                foreach (var item in existing)
-                {
-                    item.IsRevoked = true;
-                    item.RevokedAt = DateTime.UtcNow;
-                    item.RevokedReason = "New login from same device";
-                    await serviceManager.RefreshToken.UpdateAsync(item);
-                }
-            }
-
-            await serviceManager.RefreshToken.CreateAsync(refreshEntity);
-            await serviceManager.SaveChangesAsync();
-
-            return Ok(new APIResponse<LoginResponse>()
-            {
-                StatusCode = HttpStatusCode.OK,
-                Data = loginResponse
-            });
-        }
-        catch (Exception ex)
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.None,
+        });
+        Response.Cookies.Append(StaticData.RefreshToken, response.Data.RefreshToken, new CookieOptions()
         {
-            return StatusCode((int)HttpStatusCode.InternalServerError, new APIResponse()
-            {
-                IsSuccess = false,
-                StatusCode = HttpStatusCode.InternalServerError,
-                ErrorMessages = new List<string>() { ex.Message }
-            });
-        }
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.None,
+        });
+        return Ok(response);
     }
 
     [EnableRateLimiting("AuthPolicy")]
@@ -533,6 +463,7 @@ public class AuthenticationController(
                         t.RevokedReason = "Refresh token reuse detected";
                         await serviceManager.RefreshToken.UpdateAsync(t);
                     }
+
                     await serviceManager.SaveChangesAsync();
                 }
                 catch (Exception)
@@ -562,7 +493,7 @@ public class AuthenticationController(
                     ErrorMessages = new List<string>() { "Invalid RefreshToken" }
                 });
             }
-            
+
             var user = await serviceManager.Authentication.GetUserByIdAsync(validToken.UserId);
             if (user == null)
             {
@@ -573,7 +504,7 @@ public class AuthenticationController(
                     ErrorMessages = new List<string>() { "Invalid User" }
                 });
             }
-            
+
             var newPlain = accountHelper.GeneratePlainRefreshToken();
             var (newHash, newSalt) = accountHelper.CreateTokenHashAndSalt(newPlain);
             var roles = await serviceManager.Authentication.GetRolesAsync(user);
