@@ -8,17 +8,19 @@ using Domain.Responses;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
+using Service.Abstraction;
+using Shared;
 
 namespace Service.Helpers;
 
 public class AuthenticationHelper
 {
+    private readonly IServiceManager _serviceManager;
     private readonly IConfiguration _configuration;
-    protected APIResponse _response;
-    public AuthenticationHelper(IConfiguration configuration)
+    public AuthenticationHelper(IConfiguration configuration , IServiceManager serviceManager)
     {
         _configuration = configuration;
-        _response = new APIResponse();
+        _serviceManager = serviceManager;
     }
 
     public (string hash, string salt) CreateTokenHashAndSalt(string token)
@@ -92,5 +94,45 @@ public class AuthenticationHelper
     public List<string> AddIdentityErrors(IdentityResult result)
     {
         return result.Errors.Select(e => e.Description).ToList();
+    }
+    
+    public async Task<(LoginResponse loginResponse,RefreshToken refreshEntity)>
+        GenerateAndStoreTokensAsync(
+            ApplicationUser user,
+            Guid deviceId)
+    {
+        var roles = await _serviceManager.Authentication.GetRolesAsync(user);
+        var (jwt, jwtToken) = GenerateJwtAccessToken(user, roles);
+
+        var plainRefresh = GeneratePlainRefreshToken();
+        var (hash, salt) = CreateTokenHashAndSalt(plainRefresh);
+
+        var refreshEntity = new RefreshToken
+        {
+            DeviceId = deviceId,
+            TokenHash = hash,
+            TokenSalt = salt,
+            Created = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddDays(Convert.ToDouble(_configuration["JWT:RefreshTokenLifeTime"]!)),
+            UserId = user.Id,
+            JwtTokenId = jwtToken.Id
+        };
+
+        await _serviceManager.RefreshToken.CreateAsync(refreshEntity);
+        await _serviceManager.SaveChangesAsync();
+
+        var loginResponse = new LoginResponse
+        {
+            AccessToken = jwt,
+            AccessTokenExpiration = jwtToken.ValidTo,
+            RefreshToken = plainRefresh,
+            RefreshTokenExpiration = refreshEntity.ExpiresAt,
+            UserName = user.UserName!,
+            Email = user.Email!,
+            Role = roles.FirstOrDefault() ?? "",
+            DeviceId = deviceId
+        };
+
+        return (loginResponse,refreshEntity);
     }
 }

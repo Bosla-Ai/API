@@ -61,7 +61,7 @@ public class AuthenticationController(
     public async Task<ActionResult<APIResponse>> ExternalCallback(string provider, string returnUrl = "/")
     {
         try
-        {
+        { 
             var result = await HttpContext.AuthenticateAsync(provider);
             if (!result.Succeeded)
             {
@@ -160,35 +160,21 @@ public class AuthenticationController(
                 }
             }
 
-            var roles = await serviceManager.Authentication.GetRolesAsync(user);
-            var (jwt, jwtToken) = accountHelper.GenerateJwtAccessToken(user, roles);
-
-            var plainRefresh = accountHelper.GeneratePlainRefreshToken();
-            var (hash, salt) = accountHelper.CreateTokenHashAndSalt(plainRefresh);
-
-            Response.Cookies.Append(StaticData.AccessToken, jwt, new CookieOptions()
+            var (loginResponse, refreshEntity) = 
+                await accountHelper.GenerateAndStoreTokensAsync(user,Guid.NewGuid());
+            
+            Response.Cookies.Append(StaticData.AccessToken, loginResponse.AccessToken, new CookieOptions()
             {
                 HttpOnly = true,
                 Secure = true,
                 SameSite = SameSiteMode.None,
             });
-            Response.Cookies.Append(StaticData.RefreshToken, plainRefresh, new CookieOptions()
+            Response.Cookies.Append(StaticData.RefreshToken, loginResponse.RefreshToken, new CookieOptions()
             {
                 HttpOnly = true,
                 Secure = true,
                 SameSite = SameSiteMode.None,
             });
-
-            var refreshEntity = new RefreshToken
-            {
-                DeviceId = Guid.NewGuid(), // Or get from query parameter
-                TokenHash = hash,
-                TokenSalt = salt,
-                Created = DateTime.UtcNow,
-                ExpiresAt = DateTime.UtcNow.AddDays(Convert.ToDouble(configuration["JWT:RefreshTokenLifeTime"])),
-                UserId = user.Id,
-                JwtTokenId = jwtToken.Id
-            };
 
             await serviceManager.RefreshToken.CreateAsync(refreshEntity);
             await serviceManager.SaveChangesAsync();
@@ -196,17 +182,7 @@ public class AuthenticationController(
             return Ok(new APIResponse<LoginResponse>()
             {
                 StatusCode = HttpStatusCode.OK,
-                Data = new LoginResponse()
-                {
-                    AccessToken = jwt,
-                    AccessTokenExpiration = jwtToken.ValidTo,
-                    RefreshToken = plainRefresh,
-                    RefreshTokenExpiration = refreshEntity.ExpiresAt,
-                    UserName = user.UserName!,
-                    Email = user.Email!,
-                    Role = roles.FirstOrDefault() ?? "",
-                    DeviceId = refreshEntity.DeviceId!
-                }
+                Data = loginResponse
             });
         }
         catch (Exception ex)
@@ -330,45 +306,26 @@ public class AuthenticationController(
                 });
             }
 
-            var roles = await serviceManager.Authentication.GetRolesAsync(user);
-
-            var deviceId = Guid.NewGuid();
-
-            var (jwt, jwtToken) = accountHelper.GenerateJwtAccessToken(user, roles);
-
-            var plainRefresh = accountHelper.GeneratePlainRefreshToken();
-            var (hash, salt) = accountHelper.CreateTokenHashAndSalt(plainRefresh);
-
-            Response.Cookies.Append(StaticData.AccessToken, jwt, new CookieOptions()
+            var (loginResponse, refreshEntity) = 
+                await accountHelper.GenerateAndStoreTokensAsync(user,Guid.NewGuid());
+            Response.Cookies.Append(StaticData.AccessToken, loginResponse.AccessToken, new CookieOptions()
             {
                 HttpOnly = true,
                 Secure = true,
                 SameSite = SameSiteMode.None,
             });
-            Response.Cookies.Append(StaticData.RefreshToken, plainRefresh, new CookieOptions()
+            Response.Cookies.Append(StaticData.RefreshToken, loginResponse.RefreshToken, new CookieOptions()
             {
                 HttpOnly = true,
                 Secure = true,
                 SameSite = SameSiteMode.None,
             });
-
-            var refreshEntity = new RefreshToken
-            {
-                DeviceId = deviceId,
-                TokenHash = hash,
-                TokenSalt = salt,
-                Created = DateTime.UtcNow,
-                ExpiresAt = DateTime.UtcNow
-                    .AddDays(Convert.ToDouble(configuration["JWT:RefreshTokenLifeTime"])),
-                UserId = user.Id,
-                JwtTokenId = jwtToken.Id
-            };
 
             var existing =
                 await serviceManager.RefreshToken
                     .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
                     {
-                        DeviceId = deviceId, UserId = user.Id
+                        DeviceId = loginResponse.DeviceId, UserId = user.Id
                     });
 
             if (existing != null && existing.Any())
@@ -384,18 +341,6 @@ public class AuthenticationController(
 
             await serviceManager.RefreshToken.CreateAsync(refreshEntity);
             await serviceManager.SaveChangesAsync();
-
-            var loginResponse = new LoginResponse()
-            {
-                AccessToken = jwt,
-                AccessTokenExpiration = jwtToken.ValidTo,
-                RefreshToken = plainRefresh,
-                RefreshTokenExpiration = refreshEntity.ExpiresAt,
-                UserName = user.UserName!,
-                Email = user.Email!,
-                Role = roles.FirstOrDefault() ?? "",
-                DeviceId = deviceId
-            };
 
             return Ok(new APIResponse<LoginResponse>()
             {
@@ -588,7 +533,6 @@ public class AuthenticationController(
                         t.RevokedReason = "Refresh token reuse detected";
                         await serviceManager.RefreshToken.UpdateAsync(t);
                     }
-
                     await serviceManager.SaveChangesAsync();
                 }
                 catch (Exception)
@@ -618,10 +562,7 @@ public class AuthenticationController(
                     ErrorMessages = new List<string>() { "Invalid RefreshToken" }
                 });
             }
-
-            var newPlain = accountHelper.GeneratePlainRefreshToken();
-            var (newHash, newSalt) = accountHelper.CreateTokenHashAndSalt(newPlain);
-
+            
             var user = await serviceManager.Authentication.GetUserByIdAsync(validToken.UserId);
             if (user == null)
             {
@@ -632,7 +573,9 @@ public class AuthenticationController(
                     ErrorMessages = new List<string>() { "Invalid User" }
                 });
             }
-
+            
+            var newPlain = accountHelper.GeneratePlainRefreshToken();
+            var (newHash, newSalt) = accountHelper.CreateTokenHashAndSalt(newPlain);
             var roles = await serviceManager.Authentication.GetRolesAsync(user);
             var (newJwt, newJwtToken) = accountHelper.GenerateJwtAccessToken(user, roles);
 
