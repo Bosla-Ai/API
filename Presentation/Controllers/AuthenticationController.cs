@@ -274,11 +274,11 @@ public class AuthenticationController(
 
     [EnableRateLimiting("AuthPolicy")]
     [HttpPost("Login")]
-    public async Task<ActionResult<APIResponse>> Login([FromBody] LoginDTO loginDTO)
+    public async Task<ActionResult<APIResponse>> Login([FromBody] LoginDTO loginDto)
     {
         try
         {
-            if (loginDTO == null)
+            if (loginDto == null)
                 return BadRequest(new APIResponse()
                 {
                     IsSuccess = false,
@@ -286,7 +286,7 @@ public class AuthenticationController(
                     ErrorMessages = new List<string>() { "LoginDTO is null" }
                 });
 
-            if (string.IsNullOrWhiteSpace(loginDTO.Email) || string.IsNullOrWhiteSpace(loginDTO.Password))
+            if (string.IsNullOrWhiteSpace(loginDto.Email) || string.IsNullOrWhiteSpace(loginDto.Password))
                 return BadRequest(new APIResponse()
                 {
                     IsSuccess = false,
@@ -294,9 +294,9 @@ public class AuthenticationController(
                     ErrorMessages = new List<string>() { "Wrong format of email or password" }
                 });
 
-            var user = await serviceManager.Authentication.GetUserByEmailAsync(loginDTO.Email);
+            var user = await serviceManager.Authentication.GetUserByEmailAsync(loginDto.Email);
             if (user == null || !await serviceManager.Authentication
-                    .CheckPasswordAsync(user, loginDTO.Password))
+                    .CheckPasswordAsync(user, loginDto.Password))
             {
                 return StatusCode(StatusCodes.Status401Unauthorized, new APIResponse()
                 {
