@@ -53,14 +53,7 @@ public class AuthenticationService(
                 await refreshTokenService.UpdateAsync(item);
             }
         }
-        try
-        {
-            await unitOfWork.SaveChangesAsync();
-        }
-        catch (Exception ex)
-        {
-            throw new Exception($"SaveChanges failed: {ex.InnerException?.Message ?? ex.Message}", ex);
-        }
+        await unitOfWork.SaveChangesAsync();
         return loginResponse;
     }
 
@@ -99,7 +92,8 @@ public class AuthenticationService(
         var existing = await userManager.FindByLoginAsync(login.LoginProvider, login.ProviderKey);
         if (existing != null && existing.Id != user.Id)
         {
-            return IdentityResult.Failed(new IdentityError { Description = "External login already linked to another account." });
+            return IdentityResult.Failed(new IdentityError
+                { Description = "External login already linked to another account." });
         }
         return await userManager.AddLoginAsync(user, login);
     }
@@ -107,9 +101,9 @@ public class AuthenticationService(
     public async Task<bool> IsLoginLinkedAsync(string userId, string loginProvider, string providerKey)
     {
         var user = await userManager.FindByIdAsync(userId);
-        if(user == null) return false;
+        if (user == null) return false;
         var logins = await userManager.GetLoginsAsync(user);
-        return logins.Any(l => l.LoginProvider == loginProvider 
+        return logins.Any(l => l.LoginProvider == loginProvider
                                && l.ProviderKey == providerKey);
     }
 

@@ -21,11 +21,7 @@ using Shared.Parameters;
 
 namespace Presintation.Controllers;
 
-public class AuthenticationController(
-    IConfiguration configuration,
-    IMapper mapper,
-    IServiceManager serviceManager,
-    AuthenticationHelper accountHelper)
+public class AuthenticationController(IServiceManager serviceManager, AuthenticationHelper accountHelper,IMapper mapper,IConfiguration configuration)
     : ApiController
 {
     [EnableRateLimiting("AuthPolicy")]
@@ -61,7 +57,7 @@ public class AuthenticationController(
     public async Task<ActionResult<APIResponse>> ExternalCallback(string provider, string returnUrl = "/")
     {
         try
-        { 
+        {
             var result = await HttpContext.AuthenticateAsync(provider);
             if (!result.Succeeded)
             {
@@ -160,9 +156,9 @@ public class AuthenticationController(
                 }
             }
 
-            var (loginResponse, refreshEntity) = 
-                await accountHelper.GenerateAndStoreTokensAsync(user,Guid.NewGuid());
-            
+            var (loginResponse, refreshEntity) =
+                await accountHelper.GenerateAndStoreTokensAsync(user, Guid.NewGuid());
+
             Response.Cookies.Append(StaticData.AccessToken, loginResponse.AccessToken, new CookieOptions()
             {
                 HttpOnly = true,
@@ -466,6 +462,7 @@ public class AuthenticationController(
                         t.RevokedReason = "Refresh token reuse detected";
                         await serviceManager.RefreshToken.UpdateAsync(t);
                     }
+
                     await serviceManager.SaveChangesAsync();
                 }
                 catch (Exception)
@@ -495,7 +492,7 @@ public class AuthenticationController(
                     ErrorMessages = new List<string>() { "Invalid RefreshToken" }
                 });
             }
-            
+
             var user = await serviceManager.Authentication.GetUserByIdAsync(validToken.UserId);
             if (user == null)
             {
@@ -506,7 +503,7 @@ public class AuthenticationController(
                     ErrorMessages = new List<string>() { "Invalid User" }
                 });
             }
-            
+
             var newPlain = accountHelper.GeneratePlainRefreshToken();
             var (newHash, newSalt) = accountHelper.CreateTokenHashAndSalt(newPlain);
             var roles = await serviceManager.Authentication.GetRolesAsync(user);
