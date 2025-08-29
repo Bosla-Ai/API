@@ -70,7 +70,6 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseMiddleware<ExceptionMiddleware>();
 app.UseMiddleware<APIResponseMiddleware>();
 app.UseHttpsRedirection();
 app.UseRateLimiter();

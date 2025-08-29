@@ -81,7 +81,6 @@ public class APIResponseMiddleware
             await HandleExceptionAsync(context, HttpStatusCode.InternalServerError, "Something went wrong.");
         }
     }
-
     private static Task HandleExceptionAsync(HttpContext context, HttpStatusCode statusCode, string message)
     {
         context.Response.ContentType = "application/json";
