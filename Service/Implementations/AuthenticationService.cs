@@ -1,3 +1,6 @@
+using System.Net;
+using System.Security.Claims;
+using Azure;
 using Domain.Entities;
 using Domain.Contracts;
 using Domain.Exceptions;
@@ -5,6 +8,7 @@ using Domain.Responses;
 using Microsoft.AspNetCore.Identity;
 using Service.Abstraction;
 using Service.Helpers;
+using Shared;
 using Shared.DTOs.LoginDTOs;
 using Shared.Parameters;
 
@@ -12,6 +16,7 @@ namespace Service.Implementations;
 
 public class AuthenticationService(
     IRefreshTokenService refreshTokenService,
+    ICustomerService customerService,
     IUnitOfWork unitOfWork,
     UserManager<ApplicationUser> userManager,
     RoleManager<IdentityRole> roleManager,
@@ -53,6 +58,62 @@ public class AuthenticationService(
                 await refreshTokenService.UpdateAsync(item);
             }
         }
+        await unitOfWork.SaveChangesAsync();
+        return loginResponse;
+    }
+
+    public async Task<LoginResponse> GoogleLoginAsync(ClaimsPrincipal principal , string provider, string returnUrl = "/")
+    {
+        var externalId = principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var email = principal?.FindFirst(ClaimTypes.Email)?.Value;
+
+        if (string.IsNullOrWhiteSpace(externalId))
+            throw new BadRequestException("Provider did not return an identifier.");
+
+        if (string.IsNullOrWhiteSpace(email))
+            throw new BadRequestException("Email not received from external provider.");
+
+        var user = await userManager.FindByEmailAsync(email);
+        if (user == null)
+        {
+            user = new ApplicationUser
+            {
+                UserName = email,
+                Email = email,
+                FirstName = "Unknown",
+                EmailConfirmed = true
+            };
+
+            var createRes = await CreateUserAsync(user);
+
+            if (!createRes.Succeeded)
+                throw new BadRequestException(createRes.Errors.Select(e => e.Description).FirstOrDefault()!);
+            
+            var customer = new Customer()
+            {
+                ApplicationUserId = user.Id,
+            };
+            await customerService.CreateAsync(customer);
+        }
+
+        var loginInfo = new UserLoginInfo(provider, externalId, provider);
+
+        var alreadyLinked = await 
+            IsLoginLinkedAsync(user.Id, provider, externalId);
+        
+        if (!alreadyLinked)
+        {
+            var addLoginResult = await AddLoginAsync(user, loginInfo);
+            if (!addLoginResult.Succeeded)
+                throw new BadRequestException(addLoginResult.Errors.First().Description);
+
+            if (addLoginResult is IdentityResult identityResult && !identityResult.Succeeded)
+                throw new BadRequestException(identityResult.Errors.First().Description);
+        }
+
+        var (loginResponse, refreshEntity) = await accountHelper
+            .GenerateAndStoreTokensAsync(user, Guid.NewGuid());
+
         await unitOfWork.SaveChangesAsync();
         return loginResponse;
     }
