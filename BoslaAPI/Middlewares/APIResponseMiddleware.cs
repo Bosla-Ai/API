@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using Domain.Exceptions;
 using Domain.Responses;
@@ -11,8 +12,8 @@ public class APIResponseMiddleware
     private readonly ILogger<APIResponseMiddleware> _logger;
 
     public APIResponseMiddleware(
-        RequestDelegate next
-        , ILogger<APIResponseMiddleware> logger)
+        RequestDelegate next,
+        ILogger<APIResponseMiddleware> logger)
     {
         _next = next;
         _logger = logger;
@@ -20,50 +21,66 @@ public class APIResponseMiddleware
 
     public async Task Invoke(HttpContext context)
     {
+        var originalBody = context.Response.Body;
+
+        using var newBody = new MemoryStream();
+        context.Response.Body = newBody;
+
         try
         {
-            var originalBody = context.Response.Body;
+            await _next(context);
 
-            using (var newBody = new MemoryStream())
+            newBody.Seek(0, SeekOrigin.Begin);
+            var bodyText = await new StreamReader(newBody).ReadToEndAsync();
+
+            newBody.Seek(0, SeekOrigin.Begin);
+
+            object? data = null;
+            if (!string.IsNullOrWhiteSpace(bodyText))
             {
-                context.Response.Body = newBody;
-
-                await _next(context); 
-
-                newBody.Seek(0, SeekOrigin.Begin);
-                var bodyText = await new StreamReader(newBody).ReadToEndAsync();
-                newBody.Seek(0, SeekOrigin.Begin);
-
-                object data = string.IsNullOrWhiteSpace(bodyText) ? null :
-                              JsonSerializer.Deserialize<object>(bodyText);
-
-                var apiResponse = new APIResponse<object>
+                try
                 {
-                    IsSuccess = context.Response.StatusCode < 400,
-                    StatusCode = (HttpStatusCode)context.Response.StatusCode,
-                    Data = data
-                };
-
-                context.Response.ContentType = "application/json";
-                var wrappedJson = JsonSerializer.Serialize(apiResponse);
-                await context.Response.WriteAsync(wrappedJson);
+                    data = JsonSerializer.Deserialize<object>(bodyText);
+                }
+                catch
+                {
+                    data = bodyText;
+                }
             }
+
+            var apiResponse = new APIResponse
+            {
+                IsSuccess = context.Response.StatusCode < 400,
+                StatusCode = (HttpStatusCode)context.Response.StatusCode,
+                Data = data
+            };
+
+            var wrappedJson = JsonSerializer.Serialize(apiResponse);
+            var bytes = Encoding.UTF8.GetBytes(wrappedJson);
+
+            context.Response.Body = originalBody; 
+            context.Response.ContentType = "application/json";
+            context.Response.ContentLength = bytes.Length;
+
+            await context.Response.Body.WriteAsync(bytes, 0, bytes.Length);
         }
         catch (BadRequestException ex)
         {
+            context.Response.Body = originalBody;
             await HandleExceptionAsync(context, HttpStatusCode.BadRequest, ex.Message);
         }
         catch (UnauthorizedException ex)
         {
+            context.Response.Body = originalBody;
             await HandleExceptionAsync(context, HttpStatusCode.Unauthorized, ex.Message);
         }
         catch (Exception ex)
         {
+            context.Response.Body = originalBody;
             _logger.LogError(ex, "Unhandled exception");
             await HandleExceptionAsync(context, HttpStatusCode.InternalServerError, "Something went wrong.");
         }
     }
-
     private static Task HandleExceptionAsync(HttpContext context, HttpStatusCode statusCode, string message)
     {
         context.Response.ContentType = "application/json";
@@ -76,6 +93,9 @@ public class APIResponseMiddleware
             ErrorMessages = new List<string> { message }
         };
 
-        return context.Response.WriteAsync(JsonSerializer.Serialize(response));
+        var json = JsonSerializer.Serialize(response);
+        context.Response.ContentLength = Encoding.UTF8.GetByteCount(json);
+
+        return context.Response.WriteAsync(json);
     }
 }
