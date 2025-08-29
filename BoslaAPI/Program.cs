@@ -1,18 +1,12 @@
-using System.Text;
-using System.Threading.RateLimiting;
 using BoslaAPI;
 using BoslaAPI.Extensions;
+using BoslaAPI.Middlewares;
 using Domain.Contracts;
-using Domain.Entities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 using Persistence.Data.Contexts;
 using Persistence.Repositories;
-using Persistence.Seeder;
 using Service.Abstraction;
 using Service.Extensions;
 using Service.Implementations;
@@ -76,6 +70,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseMiddleware<ExceptionMiddleware>();
 app.UseHttpsRedirection();
 app.UseRateLimiter();
 app.UseAuthentication();

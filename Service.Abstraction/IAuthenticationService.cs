@@ -1,12 +1,14 @@
 using Domain.Entities;
+using Domain.Responses;
 using Microsoft.AspNetCore.Identity;
+using Shared.DTOs.LoginDTOs;
 
 namespace Service.Abstraction;
 
 public interface IAuthenticationService
 {
     Task<ApplicationUser?> GetUserByEmailAsync(string email);
-
+    Task<LoginResponse> LoginAsync(LoginDTO loginDto);
     Task<ApplicationUser?> GetUserByIdAsync(string id);
 
     Task<IdentityResult> CreateUserAsync(ApplicationUser user, string password);

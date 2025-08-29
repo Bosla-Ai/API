@@ -274,89 +274,22 @@ public class AuthenticationController(
 
     [EnableRateLimiting("AuthPolicy")]
     [HttpPost("Login")]
-    public async Task<ActionResult<APIResponse>> Login([FromBody] LoginDTO loginDTO)
+    public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginDTO loginDto)
     {
-        try
+        var response = await serviceManager.Authentication.LoginAsync(loginDto);
+        Response.Cookies.Append(StaticData.AccessToken, response.AccessToken, new CookieOptions()
         {
-            if (loginDTO == null)
-                return BadRequest(new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessages = new List<string>() { "LoginDTO is null" }
-                });
-
-            if (string.IsNullOrWhiteSpace(loginDTO.Email) || string.IsNullOrWhiteSpace(loginDTO.Password))
-                return BadRequest(new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessages = new List<string>() { "Wrong format of email or password" }
-                });
-
-            var user = await serviceManager.Authentication.GetUserByEmailAsync(loginDTO.Email);
-            if (user == null || !await serviceManager.Authentication
-                    .CheckPasswordAsync(user, loginDTO.Password))
-            {
-                return StatusCode(StatusCodes.Status401Unauthorized, new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.Unauthorized,
-                    ErrorMessages = new List<string>() { "Invalid Login" }
-                });
-            }
-
-            var (loginResponse, refreshEntity) = 
-                await accountHelper.GenerateAndStoreTokensAsync(user,Guid.NewGuid());
-            Response.Cookies.Append(StaticData.AccessToken, loginResponse.AccessToken, new CookieOptions()
-            {
-                HttpOnly = true,
-                Secure = true,
-                SameSite = SameSiteMode.None,
-            });
-            Response.Cookies.Append(StaticData.RefreshToken, loginResponse.RefreshToken, new CookieOptions()
-            {
-                HttpOnly = true,
-                Secure = true,
-                SameSite = SameSiteMode.None,
-            });
-
-            var existing =
-                await serviceManager.RefreshToken
-                    .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
-                    {
-                        DeviceId = loginResponse.DeviceId, UserId = user.Id
-                    });
-
-            if (existing != null && existing.Any())
-            {
-                foreach (var item in existing)
-                {
-                    item.IsRevoked = true;
-                    item.RevokedAt = DateTime.UtcNow;
-                    item.RevokedReason = "New login from same device";
-                    await serviceManager.RefreshToken.UpdateAsync(item);
-                }
-            }
-
-            await serviceManager.RefreshToken.CreateAsync(refreshEntity);
-            await serviceManager.SaveChangesAsync();
-
-            return Ok(new APIResponse<LoginResponse>()
-            {
-                StatusCode = HttpStatusCode.OK,
-                Data = loginResponse
-            });
-        }
-        catch (Exception ex)
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.None,
+        });
+        Response.Cookies.Append(StaticData.RefreshToken, response.RefreshToken, new CookieOptions()
         {
-            return StatusCode((int)HttpStatusCode.InternalServerError, new APIResponse()
-            {
-                IsSuccess = false,
-                StatusCode = HttpStatusCode.InternalServerError,
-                ErrorMessages = new List<string>() { ex.Message }
-            });
-        }
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.None,
+        });
+        return Ok(response);
     }
 
     [EnableRateLimiting("AuthPolicy")]

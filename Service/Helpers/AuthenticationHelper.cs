@@ -1,28 +1,23 @@
 using System.IdentityModel.Tokens.Jwt;
-using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using Domain.Contracts;
 using Domain.Entities;
 using Domain.Responses;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using Service.Abstraction;
-using Shared;
 
 namespace Service.Helpers;
 
-public class AuthenticationHelper
+public class AuthenticationHelper(
+    UserManager<ApplicationUser> userManager
+    , IRefreshTokenService refreshTokenService
+    , IUnitOfWork unitOfWork
+    , IConfiguration configuration)
 {
-    private readonly IServiceManager _serviceManager;
-    private readonly IConfiguration _configuration;
-    public AuthenticationHelper(IConfiguration configuration , IServiceManager serviceManager)
-    {
-        _configuration = configuration;
-        _serviceManager = serviceManager;
-    }
-
     public (string hash, string salt) CreateTokenHashAndSalt(string token)
     {
         var saltBytes = RandomNumberGenerator.GetBytes(16);
@@ -74,16 +69,16 @@ public class AuthenticationHelper
         }
 
         var key = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(_configuration["JWT:Key"]!)
+            Encoding.UTF8.GetBytes(configuration["JWT:Key"]!)
         );
 
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var jwtToken = new JwtSecurityToken(
-            issuer: _configuration["JWT:Issuer"],
-            audience: _configuration["JWT:Audience"],
+            issuer: configuration["JWT:Issuer"],
+            audience: configuration["JWT:Audience"],
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(Convert.ToDouble(_configuration["JWT:ExpiresAt"]!)),
+            expires: DateTime.UtcNow.AddMinutes(Convert.ToDouble(configuration["JWT:ExpiresAt"]!)),
             signingCredentials: creds
         );
 
@@ -101,7 +96,7 @@ public class AuthenticationHelper
             ApplicationUser user,
             Guid deviceId)
     {
-        var roles = await _serviceManager.Authentication.GetRolesAsync(user);
+        var roles = await userManager.GetRolesAsync(user);
         var (jwt, jwtToken) = GenerateJwtAccessToken(user, roles);
 
         var plainRefresh = GeneratePlainRefreshToken();
@@ -113,13 +108,12 @@ public class AuthenticationHelper
             TokenHash = hash,
             TokenSalt = salt,
             Created = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(Convert.ToDouble(_configuration["JWT:RefreshTokenLifeTime"]!)),
+            ExpiresAt = DateTime.UtcNow.AddDays(Convert.ToDouble(configuration["JWT:RefreshTokenLifeTime"]!)),
             UserId = user.Id,
             JwtTokenId = jwtToken.Id
         };
 
-        await _serviceManager.RefreshToken.CreateAsync(refreshEntity);
-        await _serviceManager.SaveChangesAsync();
+        await refreshTokenService.CreateAsync(refreshEntity);
 
         var loginResponse = new LoginResponse
         {
