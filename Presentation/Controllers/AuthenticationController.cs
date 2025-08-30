@@ -59,47 +59,14 @@ public class AuthenticationController(IServiceManager serviceManager, Authentica
     [Authorize]
     public async Task<ActionResult<APIResponse>> LogoutThisDevice([FromBody] LogoutRequest logoutRequest)
     {
-        try
+        var response = await serviceManager.Authentication
+            .LogoutThisDeviceAsync(logoutRequest);
+        if (response != null)
         {
-            var token = await serviceManager.RefreshToken
-                .GetWithDeviceIdNotRevokedAsync(new RefreshTokenParameters()
-                {
-                    DeviceId = logoutRequest.DeviceId
-                });
-
-            if (token == null)
-            {
-                return StatusCode(StatusCodes.Status401Unauthorized, new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.Unauthorized,
-                    ErrorMessages = new List<string>() { "Invalid Logout" }
-                });
-            }
-
-            token.IsRevoked = true;
-            token.RevokedAt = DateTime.UtcNow;
-            token.RevokedReason = "User logged out";
-            await serviceManager.RefreshToken.UpdateAsync(token);
-            await serviceManager.SaveChangesAsync();
-
             Response.Cookies.Delete(StaticData.AccessToken);
             Response.Cookies.Delete(StaticData.RefreshToken);
-
-            return Ok(new APIResponse()
-            {
-                StatusCode = HttpStatusCode.OK,
-            });
         }
-        catch (Exception ex)
-        {
-            return StatusCode((int)HttpStatusCode.InternalServerError, new APIResponse()
-            {
-                IsSuccess = false,
-                StatusCode = HttpStatusCode.InternalServerError,
-                ErrorMessages = new List<string>() { ex.Message }
-            });
-        }
+        return Ok(response);
     }
 
     [EnableRateLimiting("AuthPolicy")]
@@ -107,67 +74,14 @@ public class AuthenticationController(IServiceManager serviceManager, Authentica
     [Authorize]
     public async Task<ActionResult<APIResponse>> LogoutAllDevices([FromBody] LogoutForAllRequest logoutRequest)
     {
-        try
+        var response = await serviceManager.Authentication
+            .LogoutAllDevicesAsync(logoutRequest);
+        if (response != null)
         {
-            var token = await serviceManager.RefreshToken
-                .GetWithDeviceIdNotRevokedAsync(new RefreshTokenParameters()
-                {
-                    DeviceId = logoutRequest.DeviceId
-                });
-
-            if (token == null)
-            {
-                return StatusCode(StatusCodes.Status401Unauthorized, new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.Unauthorized,
-                    ErrorMessages = new List<string>() { "No active tokens found" }
-                });
-            }
-
-            var tokens = await serviceManager.RefreshToken
-                .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
-                {
-                    UserId = logoutRequest.UserId
-                });
-
-            if (tokens == null || !tokens.Any())
-            {
-                return BadRequest(new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.Unauthorized,
-                    ErrorMessages = new List<string>() { "Invalid Request" }
-                });
-            }
-
-            foreach (var t in tokens)
-            {
-                t.IsRevoked = true;
-                t.RevokedAt = DateTime.UtcNow;
-                t.RevokedReason = "User logged out for all active devices";
-                await serviceManager.RefreshToken.UpdateAsync(t);
-            }
-
-            await serviceManager.SaveChangesAsync();
-
             Response.Cookies.Delete(StaticData.AccessToken);
             Response.Cookies.Delete(StaticData.RefreshToken);
-
-            return Ok(new APIResponse()
-            {
-                StatusCode = HttpStatusCode.OK,
-            });
         }
-        catch (Exception ex)
-        {
-            return StatusCode((int)HttpStatusCode.InternalServerError, new APIResponse()
-            {
-                IsSuccess = false,
-                StatusCode = HttpStatusCode.InternalServerError,
-                ErrorMessages = new List<string>() { ex.Message }
-            });
-        }
+        return Ok(response);
     }
 
     [EnableRateLimiting("AuthPolicy")]

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Domain.Entities;
+using Domain.Requests;
 using Domain.Responses;
 using Microsoft.AspNetCore.Identity;
 using Shared.DTOs.CustomerDTOs;
@@ -13,6 +14,8 @@ public interface IAuthenticationService
     Task<ApplicationUser?> GetUserByEmailAsync(string email);
     Task<APIResponse> RegisterCustomerAsync(CustomerRegisterDTO customerDto);
     Task<LoginResponse> LoginAsync(LoginDTO loginDto);
+    Task<APIResponse> LogoutThisDeviceAsync(LogoutRequest logoutRequest);
+    Task<APIResponse> LogoutAllDevicesAsync(LogoutForAllRequest logoutRequest);
     Task<LoginResponse> GoogleLoginAsync(ClaimsPrincipal principal , string provider, string returnUrl = "/");
     Task<ApplicationUser?> GetUserByIdAsync(string id);
 

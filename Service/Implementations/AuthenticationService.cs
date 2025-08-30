@@ -5,6 +5,7 @@ using Azure;
 using Domain.Entities;
 using Domain.Contracts;
 using Domain.Exceptions;
+using Domain.Requests;
 using Domain.Responses;
 using Microsoft.AspNetCore.Identity;
 using Service.Abstraction;
@@ -98,6 +99,66 @@ public class AuthenticationService(
         }
         await unitOfWork.SaveChangesAsync();
         return loginResponse;
+    }
+
+    public async Task<APIResponse> LogoutThisDeviceAsync(LogoutRequest logoutRequest)
+    {
+        var token = await refreshTokenService
+            .GetWithDeviceIdNotRevokedAsync(new RefreshTokenParameters()
+            {
+                DeviceId = logoutRequest.DeviceId
+            });
+
+        if (token == null)
+            throw new UnauthorizedException("Invalid Logout request.");
+
+        token.IsRevoked = true;
+        token.RevokedAt = DateTime.UtcNow;
+        token.RevokedReason = "User logged out";
+        await refreshTokenService.UpdateAsync(token);
+        await unitOfWork.SaveChangesAsync();
+        
+        return new APIResponse()
+        {
+            StatusCode = HttpStatusCode.OK,
+        };
+    }
+
+    public async Task<APIResponse> LogoutAllDevicesAsync(LogoutForAllRequest logoutRequest)
+    {
+        var token = await refreshTokenService
+            .GetWithDeviceIdNotRevokedAsync(new RefreshTokenParameters()
+            {
+                DeviceId = logoutRequest.DeviceId
+            });
+
+        if (token == null)
+            throw new UnauthorizedException("No Active Tokens Founded");
+
+        var tokens = await refreshTokenService
+            .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
+            {
+                UserId = logoutRequest.UserId
+            });
+
+        if (tokens == null || !tokens.Any())
+            throw new BadRequestException("Invalid Logout request.");
+
+        foreach (var t in tokens)
+        {
+            t.IsRevoked = true;
+            t.RevokedAt = DateTime.UtcNow;
+            t.RevokedReason = "User logged out for all active devices";
+            await refreshTokenService.UpdateAsync(t);
+        }
+
+        await unitOfWork.SaveChangesAsync();
+
+
+        return new APIResponse()
+        {
+            StatusCode = HttpStatusCode.OK,
+        };
     }
 
     public async Task<LoginResponse> GoogleLoginAsync(ClaimsPrincipal principal , string provider, string returnUrl = "/")
