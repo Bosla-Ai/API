@@ -91,7 +91,7 @@ public class AuthenticationHelper(
         return result.Errors.Select(e => e.Description).ToList();
     }
     
-    public async Task<(LoginResponse loginResponse,RefreshToken refreshEntity)>
+    public async Task<LoginResponse>
         GenerateAndStoreTokensAsync(
             ApplicationUser user,
             Guid deviceId)
@@ -127,6 +127,6 @@ public class AuthenticationHelper(
             DeviceId = deviceId
         };
 
-        return (loginResponse,refreshEntity);
+        return loginResponse;
     }
 }

@@ -1,17 +1,16 @@
 using System.Net;
 using System.Security.Claims;
 using AutoMapper;
-using Azure;
 using Domain.Entities;
 using Domain.Contracts;
 using Domain.Exceptions;
 using Domain.Requests;
 using Domain.Responses;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
 using Service.Helpers;
 using Shared;
-using Shared.DTOs.CustomerDTOs;
 using Shared.DTOs.LoginDTOs;
 using Shared.DTOs.RegisterDTOs;
 using Shared.Parameters;
@@ -23,6 +22,7 @@ public class AuthenticationService(
     ICustomerService customerService,
     IUnitOfWork unitOfWork,
     IMapper mapper,
+    IConfiguration configuration, 
     UserManager<ApplicationUser> userManager,
     RoleManager<IdentityRole> roleManager,
     AuthenticationHelper accountHelper) : IAuthenticationService
@@ -77,7 +77,7 @@ public class AuthenticationService(
                 .CheckPasswordAsync(user, loginDto.Password))
             throw new UnauthorizedException("Invalid credentials.");
 
-        var (loginResponse, refreshEntity) = await accountHelper
+        var loginResponse = await accountHelper
             .GenerateAndStoreTokensAsync(user, Guid.NewGuid());
 
         var existing =
@@ -161,6 +161,70 @@ public class AuthenticationService(
         };
     }
 
+    public async Task<APIResponse<LoginResponse>> RefreshAsync(RefreshRequest refreshRequest)
+    {
+        if (refreshRequest.DeviceId == null || string.IsNullOrWhiteSpace(refreshRequest.RefreshToken))
+            throw new UnauthorizedException("Refresh or Device Id is Invalid");
+
+        var storedTokens = await refreshTokenService
+            .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
+            {
+                DeviceId = refreshRequest.DeviceId
+            });
+        if (storedTokens == null || !storedTokens.Any())
+            throw new UnauthorizedException("Invalid Refresh Token");
+        
+        RefreshToken validToken = null;
+        foreach (var token in storedTokens)
+        {
+            if (accountHelper.VerifyTokenWithSalt(
+                    refreshRequest.RefreshToken
+                    , token.TokenHash
+                    , token.TokenSalt))
+            {
+                validToken = token;
+                break;
+            }
+        }
+
+        if (validToken == null)
+        {
+            var firstToken = storedTokens.First();
+            var allUserTokens = await refreshTokenService
+                .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
+                {
+                    UserId = firstToken.UserId
+                });
+            foreach (var t in allUserTokens)
+            {
+                t.IsRevoked = true;
+                t.RevokedAt = DateTime.UtcNow;
+                t.RevokedReason = "Refresh token reuse detected";
+                await refreshTokenService.UpdateAsync(t);
+            }
+            throw new UnauthorizedException("Refresh token reuse detected");            
+        }
+
+        if (validToken.IsRevoked || validToken.ExpiresAt < DateTime.UtcNow)
+            throw new UnauthorizedException("Invalid Refresh Token");
+            
+        var user = await GetUserByIdAsync(validToken.UserId);
+        if (user == null)
+            throw new NotFoundException("User not found");
+
+        var loginResponse = await accountHelper
+            .GenerateAndStoreTokensAsync(user, Guid.NewGuid());
+
+        await unitOfWork.SaveChangesAsync();
+
+        return new APIResponse<LoginResponse>()
+        {
+            StatusCode = HttpStatusCode.OK,
+            Data = loginResponse
+        };
+    }
+
+
     public async Task<LoginResponse> GoogleLoginAsync(ClaimsPrincipal principal , string provider, string returnUrl = "/")
     {
         var externalId = principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -210,7 +274,7 @@ public class AuthenticationService(
                 throw new BadRequestException(identityResult.Errors.First().Description);
         }
 
-        var (loginResponse, refreshEntity) = await accountHelper
+        var loginResponse = await accountHelper
             .GenerateAndStoreTokensAsync(user, Guid.NewGuid());
 
         await unitOfWork.SaveChangesAsync();

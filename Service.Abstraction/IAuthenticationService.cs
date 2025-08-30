@@ -16,6 +16,7 @@ public interface IAuthenticationService
     Task<LoginResponse> LoginAsync(LoginDTO loginDto);
     Task<APIResponse> LogoutThisDeviceAsync(LogoutRequest logoutRequest);
     Task<APIResponse> LogoutAllDevicesAsync(LogoutForAllRequest logoutRequest);
+    Task<APIResponse<LoginResponse>> RefreshAsync(RefreshRequest refreshRequest);
     Task<LoginResponse> GoogleLoginAsync(ClaimsPrincipal principal , string provider, string returnUrl = "/");
     Task<ApplicationUser?> GetUserByIdAsync(string id);
 
