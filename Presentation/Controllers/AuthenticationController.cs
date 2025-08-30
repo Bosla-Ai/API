@@ -29,75 +29,9 @@ public class AuthenticationController(IServiceManager serviceManager, Authentica
     [HttpPost("RegisterCustomer")]
     public async Task<ActionResult<APIResponse>> RegisterCustomer([FromBody] CustomerRegisterDTO customerDTO)
     {
-        try
-        {
-            if (customerDTO == null)
-            {
-                return BadRequest(new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessages = new List<string>() { "CustomerDTO is null" }
-                });
-            }
-
-            var userExists = await serviceManager.Authentication
-                .GetUserByEmailAsync(customerDTO.Email);
-            if (userExists != null)
-            {
-                return BadRequest(new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessages = new List<string>() { "This email is already registered!" }
-                });
-            }
-
-            var customerUser = mapper.Map<ApplicationUser>(customerDTO);
-            var customerUserCreationResult = await serviceManager.Authentication
-                .CreateUserAsync(customerUser, customerDTO.Password);
-            if (!customerUserCreationResult.Succeeded)
-            {
-                return BadRequest(new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessages = accountHelper.AddIdentityErrors(customerUserCreationResult)
-                });
-            }
-
-            var customerRoleAssigningResult =
-                await serviceManager.Authentication.AssignUserToRoleAsync(customerUser, StaticData.CustomerRoleName);
-            if (!customerRoleAssigningResult.Succeeded)
-            {
-                return BadRequest(new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.BadRequest,
-                    ErrorMessages = accountHelper.AddIdentityErrors(customerRoleAssigningResult)
-                });
-            }
-
-            var customer = mapper.Map<Customer>(customerDTO);
-            customer.ApplicationUserId = customerUser.Id;
-            await serviceManager.Customer.CreateAsync(customer);
-            await serviceManager.SaveChangesAsync();
-
-            return Ok(new APIResponse()
-            {
-                StatusCode = HttpStatusCode.OK,
-                Data = $"User {customerUser.UserName} Registered Successfully"
-            });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode((int)HttpStatusCode.InternalServerError, new APIResponse()
-            {
-                IsSuccess = false,
-                StatusCode = HttpStatusCode.InternalServerError,
-                ErrorMessages = new List<string>() { ex.Message }
-            });
-        }
+        var response = await serviceManager.Authentication
+            .RegisterCustomerAsync(customerDTO);
+        return Ok(response);
     }
 
     [EnableRateLimiting("AuthPolicy")]

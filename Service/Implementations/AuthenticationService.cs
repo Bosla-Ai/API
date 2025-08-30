@@ -1,5 +1,6 @@
 using System.Net;
 using System.Security.Claims;
+using AutoMapper;
 using Azure;
 using Domain.Entities;
 using Domain.Contracts;
@@ -9,7 +10,9 @@ using Microsoft.AspNetCore.Identity;
 using Service.Abstraction;
 using Service.Helpers;
 using Shared;
+using Shared.DTOs.CustomerDTOs;
 using Shared.DTOs.LoginDTOs;
+using Shared.DTOs.RegisterDTOs;
 using Shared.Parameters;
 
 namespace Service.Implementations;
@@ -18,6 +21,7 @@ public class AuthenticationService(
     IRefreshTokenService refreshTokenService,
     ICustomerService customerService,
     IUnitOfWork unitOfWork,
+    IMapper mapper,
     UserManager<ApplicationUser> userManager,
     RoleManager<IdentityRole> roleManager,
     AuthenticationHelper accountHelper) : IAuthenticationService
@@ -26,6 +30,40 @@ public class AuthenticationService(
     public async Task<ApplicationUser?> GetUserByEmailAsync(string email)
     {
         return await userManager.FindByEmailAsync(email);
+    }
+
+    public async Task<APIResponse> RegisterCustomerAsync(CustomerRegisterDTO customerDTO)
+    {
+        if (customerDTO == null)
+            throw new BadRequestException("Customer DTO is null");
+
+        var userExists = await GetUserByEmailAsync(customerDTO.Email);
+        if (userExists != null)
+            throw new BadRequestException("Customer already exists");
+
+        var customerUser = mapper.Map<ApplicationUser>(customerDTO);
+        var customerUserCreationResult = await 
+            CreateUserAsync(customerUser, customerDTO.Password);
+        
+        if (!customerUserCreationResult.Succeeded)
+            throw new BadRequestException(accountHelper.AddIdentityErrors(customerUserCreationResult).FirstOrDefault()!);
+        
+        var customerRoleAssigningResult =
+            await AssignUserToRoleAsync(customerUser, StaticData.CustomerRoleName);
+        
+        if (!customerRoleAssigningResult.Succeeded)
+            throw new BadRequestException(accountHelper.AddIdentityErrors(customerRoleAssigningResult).FirstOrDefault()!);
+
+        var customer = mapper.Map<Customer>(customerDTO);
+        customer.ApplicationUserId = customerUser.Id;
+        await customerService.CreateAsync(customer);
+        await unitOfWork.SaveChangesAsync();
+
+        return new APIResponse<string>()
+        {
+            StatusCode = HttpStatusCode.OK,
+            Data = $"User {customerUser.UserName} Registered Successfully"
+        };
     }
 
     public async Task<LoginResponse> LoginAsync(LoginDTO loginDto)

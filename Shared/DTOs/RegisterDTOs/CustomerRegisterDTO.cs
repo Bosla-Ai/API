@@ -18,9 +18,4 @@ public sealed class CustomerRegisterDTO
     public string PasswordConfirm { get; set; }
     [Phone]
     public string PhoneNumber { get; set; }
-    public LevelType? UserLevel { get; set; }
-    public Domains? SelectedDomain { get; set; }
-    public string? PreferredFramework { get; set; }
-    public bool WantsDeepDive { get; set; } = false;
-    public int? AvailableHoursPerWeek { get; set; }
 }
