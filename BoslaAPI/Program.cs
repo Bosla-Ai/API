@@ -14,7 +14,7 @@ using Service.MappingProfiles;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddHttpClient(); 
+builder.Services.AddHttpClient();
 
 builder.Services.AddAutoMapper(cfg => { }, typeof(MappingConfiguration).Assembly);
 builder.Services.AddAutoMapper(cfg => { }, typeof(CustomerMapping).Assembly);
@@ -44,24 +44,29 @@ builder.Services
         options.UsePkce = true;
     });
 
-    // .AddGitHub("Github", options =>
-    // {
-    //     options.ClientId = builder.Configuration["Authentication:Github:ClientId"]!;
-    //     options.ClientSecret = builder.Configuration["Authentication:Github:ClientSecret"]!;
-    //     options.CallbackPath = "/signin-github";
-    // })
-    // .AddLinkedIn("LinkedIn", options =>
-    // {
-    //     options.ClientId = builder.Configuration["Authentication:LinkedIn:ClientId"]!;
-    //     options.ClientSecret = builder.Configuration["Authentication:LinkedIn:ClientSecret"]!;
-    //     options.CallbackPath = "/signin-linkedin";
-    // });
+// .AddGitHub("Github", options =>
+// {
+//     options.ClientId = builder.Configuration["Authentication:Github:ClientId"]!;
+//     options.ClientSecret = builder.Configuration["Authentication:Github:ClientSecret"]!;
+//     options.CallbackPath = "/signin-github";
+// })
+// .AddLinkedIn("LinkedIn", options =>
+// {
+//     options.ClientId = builder.Configuration["Authentication:LinkedIn:ClientId"]!;
+//     options.ClientSecret = builder.Configuration["Authentication:LinkedIn:ClientSecret"]!;
+//     options.CallbackPath = "/signin-linkedin";
+// });
 
 builder.Services.AddRateLimiterConfiguration();
 
 builder.Services.AddAuthorization();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("CorsPolicy",
+        corsPolicyBuilder => { corsPolicyBuilder.AllowAnyHeader().AllowAnyMethod().WithOrigins("http://localhost:5173"); });
+});
 
 var app = builder.Build();
 if (app.Environment.IsDevelopment())
@@ -72,6 +77,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseMiddleware<APIResponseMiddleware>();
 app.UseHttpsRedirection();
+app.UseCors("CorsPolicy");
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
