@@ -21,7 +21,7 @@ builder.Services.AddAutoMapper(cfg => { }, typeof(CustomerMapping).Assembly);
 builder.Services.AddControllers();
 builder.Services.AddDbContext<ApplicationDbContext>(option =>
 {
-    option.UseSqlServer(builder.Configuration.GetConnectionString("CS"));
+    option.UseSqlServer(builder.Configuration.GetConnectionString("ServerConnection"));
 });
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
