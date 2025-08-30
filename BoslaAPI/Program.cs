@@ -4,9 +4,11 @@ using BoslaAPI.Middlewares;
 using Domain.Contracts;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Persistence.Data.Contexts;
 using Persistence.Repositories;
+using Persistence.Seeder;
 using Service.Abstraction;
 using Service.Extensions;
 using Service.Implementations;
@@ -16,12 +18,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHttpClient();
 
-builder.Services.AddAutoMapper(cfg => { }, typeof(MappingConfiguration).Assembly);
 builder.Services.AddAutoMapper(cfg => { }, typeof(CustomerMapping).Assembly);
 builder.Services.AddControllers();
 builder.Services.AddDbContext<ApplicationDbContext>(option =>
 {
-    option.UseSqlServer(builder.Configuration.GetConnectionString("ServerConnection"));
+    option.UseSqlServer(builder.Configuration.GetConnectionString("CS"));
 });
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
@@ -69,6 +70,14 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+    /* SeedRoles in First run of the application */
+// using (var scope = app.Services.CreateScope())
+// {
+//     var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+//     await RoleSeeder.SeedRoles(roleManager);
+// }
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();

@@ -4,11 +4,11 @@ using Service.Abstraction;
 
 namespace Service.Implementations;
 
-public sealed class ApplicationUserServiceService : IApplicationUserService
+public sealed class ApplicationUserService : IApplicationUserService
 {
     private readonly IUnitOfWork _unitOfWork;
 
-    public ApplicationUserServiceService(IUnitOfWork unitOfWork)
+    public ApplicationUserService(IUnitOfWork unitOfWork)
     {
         _unitOfWork = unitOfWork;
     }
