@@ -74,6 +74,16 @@ public class APIResponseMiddleware
             context.Response.Body = originalBody;
             await HandleExceptionAsync(context, HttpStatusCode.Unauthorized, ex.Message);
         }
+        catch (NotFoundException ex)
+        {
+            context.Response.Body = originalBody;
+            await HandleExceptionAsync(context, HttpStatusCode.NotFound, ex.Message);
+        }
+        catch (InternalServerErrorException ex)
+        {
+            context.Response.Body = originalBody;
+            await HandleExceptionAsync(context, HttpStatusCode.InternalServerError, ex.Message);
+        }
         catch (Exception ex)
         {
             context.Response.Body = originalBody;
