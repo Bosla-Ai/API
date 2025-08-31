@@ -26,8 +26,6 @@ builder.Services.AddDbContext<ApplicationDbContext>(option =>
 });
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
-builder.Services.AddScoped<IUserService, UserService>();
-
 builder.Services.AddServices();
 builder.Services
     .AddJwtConfiguration(builder.Configuration)
