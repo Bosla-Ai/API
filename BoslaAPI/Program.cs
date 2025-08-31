@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Persistence.Data.Contexts;
+using Persistence.Data.DataSeeding;
 using Persistence.Repositories;
 using Persistence.Seeder;
 using Service.Abstraction;
@@ -26,6 +27,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(option =>
 });
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+builder.Services.AddScoped<IDbInitializer, DbInitializer>();
 builder.Services.AddServices();
 builder.Services
     .AddJwtConfiguration(builder.Configuration)
@@ -68,6 +70,7 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+await app.DbSeedingAsync();
 
     /* SeedRoles in First run of the application */
 // using (var scope = app.Services.CreateScope())
