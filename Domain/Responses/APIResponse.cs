@@ -1,34 +1,28 @@
 using System.Net;
+using System.Text.Json.Serialization;
 
 namespace Domain.Responses;
 
 public class APIResponse
 {
-    public bool IsSuccess { get; set; }
     public HttpStatusCode StatusCode { get; set; }
-    public object Data { get; set; }
-    public List<string> ErrorMessages { get; set; }
-    
-    public APIResponse(){}
 
-    public APIResponse(HttpStatusCode statusCode, object data = null, List<string> errors = null)
-    {
-        StatusCode = statusCode;
-        Data = data;
-        ErrorMessages = errors ?? new List<string>();
-        IsSuccess = (int)statusCode >= 200 && (int)statusCode < 300;
-    }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsSuccess => ((int)StatusCode >= 200 && (int)StatusCode < 300);
+
+    public List<string> ErrorMessages { get; set; } = new();
 }
 
 public sealed class APIResponse<T> : APIResponse
 {
-    public new T Data { get; set; }
+    public T Data { get; set; } = default!;
     
-    public APIResponse() : base() {}
+    public APIResponse() { }
 
-    public APIResponse(HttpStatusCode statusCode, T data = default, List<string> errors = null)
-        : base(statusCode, data, errors)
+    public APIResponse(HttpStatusCode statusCode, T data = default, List<string>? errors = null)
     {
-        Data = data;
+        StatusCode = statusCode;
+        Data = data!;
+        ErrorMessages = errors ?? new List<string>();
     }
 }

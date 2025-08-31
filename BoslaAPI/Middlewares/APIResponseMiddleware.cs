@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Domain.Exceptions;
 using Domain.Responses;
 
@@ -10,10 +11,13 @@ public class APIResponseMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<APIResponseMiddleware> _logger;
+    private readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
 
-    public APIResponseMiddleware(
-        RequestDelegate next,
-        ILogger<APIResponseMiddleware> logger)
+    public APIResponseMiddleware(RequestDelegate next, ILogger<APIResponseMiddleware> logger)
     {
         _next = next;
         _logger = logger;
@@ -23,46 +27,94 @@ public class APIResponseMiddleware
     {
         var originalBody = context.Response.Body;
 
-        using var newBody = new MemoryStream();
-        context.Response.Body = newBody;
+        await using var buffer = new MemoryStream();
+        context.Response.Body = buffer;
 
         try
         {
             await _next(context);
 
-            newBody.Seek(0, SeekOrigin.Begin);
-            var bodyText = await new StreamReader(newBody).ReadToEndAsync();
+            buffer.Seek(0, SeekOrigin.Begin);
+            var bodyText = await new StreamReader(buffer).ReadToEndAsync();
 
-            newBody.Seek(0, SeekOrigin.Begin);
+            // Restore original stream so we can write final bytes to it
+            context.Response.Body = originalBody;
 
+            // If response is not JSON (based on content-type) => return original bytes unchanged
+            var contentType = context.Response.ContentType ?? string.Empty;
+            if (!contentType.Contains("application/json", StringComparison.OrdinalIgnoreCase))
+            {
+                // write back raw original buffer
+                buffer.Seek(0, SeekOrigin.Begin);
+                await buffer.CopyToAsync(originalBody);
+                return;
+            }
+
+            // handle empty body (e.g., 204) — we still return a wrapped response or empty depending on your policy
+            if (string.IsNullOrWhiteSpace(bodyText) && context.Response.StatusCode == StatusCodes.Status204NoContent)
+            {
+                context.Response.ContentLength = 0;
+                return;
+            }
+
+            // Try parse JSON to decide if already an APIResponse (avoid double wrap)
+            bool isAlreadyWrapped = false;
             object? data = null;
+
             if (!string.IsNullOrWhiteSpace(bodyText))
             {
                 try
                 {
-                    data = JsonSerializer.Deserialize<object>(bodyText);
+                    using var doc = JsonDocument.Parse(bodyText);
+                    var root = doc.RootElement;
+
+                    if (root.ValueKind == JsonValueKind.Object)
+                    {
+                        // check for typical APIResponse shape (case-insensitive check via camelCase expected)
+                        if (root.TryGetProperty("statusCode", out _) ||
+                            root.TryGetProperty("isSuccess", out _) ||
+                            root.TryGetProperty("data", out _))
+                        {
+                            isAlreadyWrapped = true;
+                        }
+                        else
+                        {
+                            // keep the object as data (deserialize to object)
+                            data = JsonSerializer.Deserialize<object>(bodyText, _jsonOptions);
+                        }
+                    }
+                    else
+                    {
+                        // if root isn't object (e.g., string/array/number) pass it as-is
+                        data = JsonSerializer.Deserialize<object>(bodyText, _jsonOptions) ?? bodyText;
+                    }
                 }
                 catch
                 {
+                    // not valid JSON => keep raw string
                     data = bodyText;
                 }
             }
 
-            var apiResponse = new APIResponse
+            if (isAlreadyWrapped)
             {
-                IsSuccess = context.Response.StatusCode < 400,
-                StatusCode = (HttpStatusCode)context.Response.StatusCode,
-                Data = data
-            };
+                // return original JSON unchanged
+                var originalBytes = Encoding.UTF8.GetBytes(bodyText);
+                context.Response.ContentType = "application/json";
+                context.Response.ContentLength = originalBytes.Length;
+                await originalBody.WriteAsync(originalBytes, 0, originalBytes.Length);
+                return;
+            }
 
-            var wrappedJson = JsonSerializer.Serialize(apiResponse);
+            // Build the wrapped APIResponse<object>
+            var apiResponse = new APIResponse<object>((HttpStatusCode)context.Response.StatusCode, data);
+
+            var wrappedJson = JsonSerializer.Serialize(apiResponse, _jsonOptions);
             var bytes = Encoding.UTF8.GetBytes(wrappedJson);
 
-            context.Response.Body = originalBody; 
             context.Response.ContentType = "application/json";
             context.Response.ContentLength = bytes.Length;
-
-            await context.Response.Body.WriteAsync(bytes, 0, bytes.Length);
+            await originalBody.WriteAsync(bytes, 0, bytes.Length);
         }
         catch (BadRequestException ex)
         {
@@ -87,23 +139,19 @@ public class APIResponseMiddleware
         catch (Exception ex)
         {
             context.Response.Body = originalBody;
-            _logger.LogError(ex, "Unhandled exception");
+            _logger.LogError(ex, "Unhandled exception in APIResponseMiddleware");
             await HandleExceptionAsync(context, HttpStatusCode.InternalServerError, "Something went wrong.");
         }
     }
-    private static Task HandleExceptionAsync(HttpContext context, HttpStatusCode statusCode, string message)
+
+    private Task HandleExceptionAsync(HttpContext context, HttpStatusCode statusCode, string message)
     {
         context.Response.ContentType = "application/json";
         context.Response.StatusCode = (int)statusCode;
 
-        var response = new APIResponse
-        {
-            IsSuccess = false,
-            StatusCode = statusCode,
-            ErrorMessages = new List<string> { message }
-        };
+        var response = new APIResponse<object>((HttpStatusCode)statusCode, null, new List<string> { message });
 
-        var json = JsonSerializer.Serialize(response);
+        var json = JsonSerializer.Serialize(response, _jsonOptions);
         context.Response.ContentLength = Encoding.UTF8.GetByteCount(json);
 
         return context.Response.WriteAsync(json);

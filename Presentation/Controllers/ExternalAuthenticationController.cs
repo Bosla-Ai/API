@@ -37,12 +37,8 @@ public class ExternalAuthenticationController(
         catch (Exception ex)
         {
             return StatusCode(StatusCodes.Status500InternalServerError
-                , new APIResponse()
-                {
-                    IsSuccess = false,
-                    StatusCode = HttpStatusCode.InternalServerError,
-                    ErrorMessages = new List<string>() { ex.Message }
-                });
+                , new APIResponse<string>(HttpStatusCode.InternalServerError, null,
+                    new List<string> { ex.Message }));
         }
     }
 
@@ -72,5 +68,4 @@ public class ExternalAuthenticationController(
         
         return Ok(response);
     }
-
 }
