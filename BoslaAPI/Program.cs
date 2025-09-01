@@ -4,6 +4,7 @@ using BoslaAPI.Middlewares;
 using Domain.Contracts;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Persistence.Data.Contexts;
@@ -59,6 +60,11 @@ builder.Services
 // });
 
 builder.Services.AddRateLimiterConfiguration();
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+});
 
 builder.Services.AddAuthorization();
 builder.Services.AddEndpointsApiExplorer();
@@ -72,13 +78,6 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 await app.DbSeedingAsync();
 
-    /* SeedRoles in First run of the application */
-// using (var scope = app.Services.CreateScope())
-// {
-//     var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-//     await RoleSeeder.SeedRoles(roleManager);
-// }
-
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -86,7 +85,11 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseMiddleware<APIResponseMiddleware>();
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment()) // for production
+{
+    // app.UseHttpsRedirection();
+}
+app.UseForwardedHeaders();
 app.UseCors("CorsPolicy");
 app.UseRateLimiter();
 app.UseAuthentication();
