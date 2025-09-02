@@ -25,6 +25,7 @@ builder.Services.AddControllers();
 builder.Services.AddDbContext<ApplicationDbContext>(option =>
 {
     option.UseSqlServer(builder.Configuration.GetConnectionString("ServerConnection"));
+    // option.UseSqlServer(builder.Configuration.GetConnectionString("CS")); // forDevelopment
 });
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();

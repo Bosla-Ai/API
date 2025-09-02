@@ -1,6 +1,6 @@
 namespace Domain.Responses;
 
-public sealed class LoginResponse
+public sealed class LoginServerResponse
 {
     public string AccessToken { get; set; }
     public DateTime AccessTokenExpiration { get; set; }

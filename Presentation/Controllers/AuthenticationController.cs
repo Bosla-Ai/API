@@ -32,15 +32,8 @@ public class AuthenticationController(
         var response = await serviceManager.Authentication.LoginAsync(loginDto);
         if (response != null)
         {
-            var accessTokenLifeTime = response.AccessTokenExpiration;
-            var refreshTokenLifeTime = response.RefreshTokenExpiration;
-            
-            var accessTokenOptions = GetCookieOptions(accessTokenLifeTime);
-            var refreshTokenOptions = GetCookieOptions(refreshTokenLifeTime);
-            
-            Response.Cookies.Append(StaticData.AccessToken, response.AccessToken, accessTokenOptions);
-            Response.Cookies.Append(StaticData.RefreshToken, response.RefreshToken, refreshTokenOptions);
-            Response.Cookies.Append(StaticData.DeviceId, Convert.ToString(response.DeviceId)!, refreshTokenOptions);
+            ClearAuthCookies();
+            SetAuthCookies(response);
         }
         return Ok(response);
     }
@@ -62,9 +55,7 @@ public class AuthenticationController(
         
         if (response != null)
         {
-            Response.Cookies.Delete(StaticData.AccessToken);
-            Response.Cookies.Delete(StaticData.RefreshToken);
-            Response.Cookies.Delete(StaticData.DeviceId);
+            ClearAuthCookies();
         }
         return Ok(response);
     }
@@ -85,9 +76,7 @@ public class AuthenticationController(
             .LogoutAllDevicesAsync(logoutRequest);
         if (response != null)
         {
-            Response.Cookies.Delete(StaticData.AccessToken);
-            Response.Cookies.Delete(StaticData.RefreshToken);
-            Response.Cookies.Delete(StaticData.DeviceId);
+            ClearAuthCookies();
         }
         return Ok(response);
     }
@@ -108,24 +97,20 @@ public class AuthenticationController(
         
         var response = await serviceManager.Authentication
             .RefreshAsync(refreshRequest);
-        
+
         if (response != null)
         {
-            var accessTokenLifeTime = response.Data.AccessTokenExpiration;
-            var refreshTokenLifeTime = response.Data.RefreshTokenExpiration;
-            
-            var accessTokenOptions = GetCookieOptions(accessTokenLifeTime);
-            var refreshTokenOptions = GetCookieOptions(refreshTokenLifeTime);
-            
-            Response.Cookies.Delete(StaticData.AccessToken);
-            Response.Cookies.Delete(StaticData.RefreshToken);
-            Response.Cookies.Delete(StaticData.DeviceId);
-
-            Response.Cookies.Append(StaticData.AccessToken, response.Data.AccessToken, accessTokenOptions);
-            Response.Cookies.Append(StaticData.RefreshToken, response.Data.RefreshToken, refreshTokenOptions);
-            Response.Cookies.Append(StaticData.DeviceId, Convert.ToString(response.Data.DeviceId)!, refreshTokenOptions);
+            ClearAuthCookies();
+            SetAuthCookies(response.Data);
         }
+
         return Ok(response);
+    }
+
+    [Authorize]
+    public async Task<APIResponse> Me()
+    {
+        
     }
 
     private CookieOptions GetCookieOptions(DateTime lifeTime)
@@ -137,5 +122,21 @@ public class AuthenticationController(
             SameSite = SameSiteMode.None,
             Expires = lifeTime
         };
+    }
+    private void SetAuthCookies(LoginResponse response)
+    {
+        var accessTokenOptions = GetCookieOptions(response.AccessTokenExpiration);
+        var refreshTokenOptions = GetCookieOptions(response.RefreshTokenExpiration);
+
+        Response.Cookies.Append(StaticData.AccessToken, response.AccessToken, accessTokenOptions);
+        Response.Cookies.Append(StaticData.RefreshToken, response.RefreshToken, refreshTokenOptions);
+        Response.Cookies.Append(StaticData.DeviceId, response.DeviceId.ToString(), refreshTokenOptions);
+    }
+
+    private void ClearAuthCookies()
+    {
+        Response.Cookies.Delete(StaticData.AccessToken);
+        Response.Cookies.Delete(StaticData.RefreshToken);
+        Response.Cookies.Delete(StaticData.DeviceId);
     }
 }
