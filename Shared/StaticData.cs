@@ -8,4 +8,5 @@ public static class StaticData
     
     public const string AccessToken = "AccessToken";
     public const string RefreshToken = "RefreshToken";
+    public const string DeviceId = "DeviceId";
 }
