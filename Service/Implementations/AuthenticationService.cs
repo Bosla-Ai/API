@@ -138,7 +138,7 @@ public class AuthenticationService(
         var tokens = await refreshTokenService
             .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
             {
-                UserId = logoutRequest.UserId
+                UserId = token.UserId
             });
 
         if (tokens == null || !tokens.Any())

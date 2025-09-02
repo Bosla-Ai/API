@@ -13,10 +13,6 @@
     </ItemGroup>
 
     <ItemGroup>
-      <Folder Include="Constants\" />
-    </ItemGroup>
-
-    <ItemGroup>
       <Reference Include="AutoMapper">
         <HintPath>..\..\..\.nuget\packages\automapper\15.0.1\lib\net8.0\AutoMapper.dll</HintPath>
       </Reference>

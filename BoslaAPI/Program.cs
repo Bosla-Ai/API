@@ -4,9 +4,11 @@ using BoslaAPI.Middlewares;
 using Domain.Contracts;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Persistence.Data.Contexts;
+using Persistence.Data.DataSeeding;
 using Persistence.Repositories;
 using Persistence.Seeder;
 using Service.Abstraction;
@@ -22,10 +24,11 @@ builder.Services.AddAutoMapper(cfg => { }, typeof(CustomerMapping).Assembly);
 builder.Services.AddControllers();
 builder.Services.AddDbContext<ApplicationDbContext>(option =>
 {
-    option.UseSqlServer(builder.Configuration.GetConnectionString("CS"));
+    option.UseSqlServer(builder.Configuration.GetConnectionString("ServerConnection"));
 });
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+builder.Services.AddScoped<IDbInitializer, DbInitializer>();
 builder.Services.AddServices();
 builder.Services
     .AddJwtConfiguration(builder.Configuration)
@@ -57,6 +60,11 @@ builder.Services
 // });
 
 builder.Services.AddRateLimiterConfiguration();
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+});
 
 builder.Services.AddAuthorization();
 builder.Services.AddEndpointsApiExplorer();
@@ -68,13 +76,7 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
-
-    /* SeedRoles in First run of the application */
-// using (var scope = app.Services.CreateScope())
-// {
-//     var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-//     await RoleSeeder.SeedRoles(roleManager);
-// }
+await app.DbSeedingAsync();
 
 if (app.Environment.IsDevelopment())
 {
@@ -83,7 +85,11 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseMiddleware<APIResponseMiddleware>();
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment()) // for production
+{
+    // app.UseHttpsRedirection();
+}
+app.UseForwardedHeaders();
 app.UseCors("CorsPolicy");
 app.UseRateLimiter();
 app.UseAuthentication();
