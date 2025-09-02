@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Claims;
 using AutoMapper;
+using DocumentFormat.OpenXml.Drawing.Charts;
 using Domain.Entities;
 using Domain.Contracts;
 using Domain.Exceptions;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
 using Service.Helpers;
 using Shared;
+using Shared.DTOs.ApplicationUserDTOs;
 using Shared.DTOs.LoginDTOs;
 using Shared.DTOs.RegisterDTOs;
 using Shared.Parameters;
@@ -67,7 +69,7 @@ public class AuthenticationService(
         };
     }
 
-    public async Task<LoginResponse> LoginAsync(LoginDTO loginDto)
+    public async Task<(APIResponse<LoginClientResponse> apiResponse , LoginServerResponse loginServerResponse)> LoginAsync(LoginDTO loginDto)
     {
         if (loginDto == null)
             throw new BadRequestException("Login data is required.");
@@ -77,14 +79,14 @@ public class AuthenticationService(
                 .CheckPasswordAsync(user, loginDto.Password))
             throw new UnauthorizedException("Invalid credentials.");
 
-        var loginResponse = await accountHelper
+        var loginServerResponse = await accountHelper
             .GenerateAndStoreTokensAsync(user, Guid.NewGuid());
 
         var existing =
             await refreshTokenService
                 .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
                 {
-                    DeviceId = loginResponse.DeviceId, UserId = user.Id
+                    DeviceId = loginServerResponse.DeviceId, UserId = user.Id
                 });
 
         if (existing != null && existing.Any())
@@ -98,7 +100,11 @@ public class AuthenticationService(
             }
         }
         await unitOfWork.SaveChangesAsync();
-        return loginResponse;
+        return (new APIResponse<LoginClientResponse>()
+        {
+            StatusCode = HttpStatusCode.OK,
+            Data = mapper.Map<LoginClientResponse>(loginServerResponse)
+        }, loginServerResponse);
     }
 
     public async Task<APIResponse> LogoutThisDeviceAsync(LogoutRequest logoutRequest)
@@ -161,7 +167,8 @@ public class AuthenticationService(
         };
     }
 
-    public async Task<APIResponse<LoginResponse>> RefreshAsync(RefreshRequest refreshRequest)
+    public async Task<(APIResponse<LoginClientResponse> apiResponse 
+        , LoginServerResponse loginServerResponse)> RefreshAsync(RefreshRequest refreshRequest)
     {
         if (refreshRequest.DeviceId == null || string.IsNullOrWhiteSpace(refreshRequest.RefreshToken))
             throw new UnauthorizedException("Refresh or Device Id is Invalid");
@@ -212,20 +219,32 @@ public class AuthenticationService(
         if (user == null)
             throw new NotFoundException("User not found");
 
-        var loginResponse = await accountHelper
+        var loginServerResponse = await accountHelper
             .GenerateAndStoreTokensAsync(user, Guid.NewGuid());
 
         await unitOfWork.SaveChangesAsync();
 
-        return new APIResponse<LoginResponse>()
+        return (new APIResponse<LoginClientResponse>()
         {
             StatusCode = HttpStatusCode.OK,
-            Data = loginResponse
+            Data = mapper.Map<LoginClientResponse>(loginServerResponse)
+        }, loginServerResponse);
+    }
+
+    public async Task<APIResponse<ApplicationUserDTO>> GetMeAsync(string userId)
+    {
+        var user = await GetUserByIdAsync(userId);
+        if (user == null)
+            throw new NotFoundException("User not found");
+        return new APIResponse<ApplicationUserDTO>()
+        {
+            StatusCode = HttpStatusCode.OK,
+            Data = mapper.Map<ApplicationUserDTO>(user)
         };
     }
 
 
-    public async Task<LoginResponse> GoogleLoginAsync(ClaimsPrincipal principal , string provider, string returnUrl = "/")
+    public async Task<LoginServerResponse> GoogleLoginAsync(ClaimsPrincipal principal , string provider, string returnUrl = "/")
     {
         var externalId = principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         var email = principal?.FindFirst(ClaimTypes.Email)?.Value;

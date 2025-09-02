@@ -3,7 +3,7 @@ using Domain.Entities;
 using Domain.Requests;
 using Domain.Responses;
 using Microsoft.AspNetCore.Identity;
-using Shared.DTOs.CustomerDTOs;
+using Shared.DTOs.ApplicationUserDTOs;
 using Shared.DTOs.LoginDTOs;
 using Shared.DTOs.RegisterDTOs;
 
@@ -13,12 +13,14 @@ public interface IAuthenticationService
 {
     Task<ApplicationUser?> GetUserByEmailAsync(string email);
     Task<APIResponse> RegisterCustomerAsync(CustomerRegisterDTO customerDto);
-    Task<LoginResponse> LoginAsync(LoginDTO loginDto);
+    Task<(APIResponse<LoginClientResponse> apiResponse 
+        , LoginServerResponse loginServerResponse)> LoginAsync(LoginDTO loginDto);
     Task<APIResponse> LogoutThisDeviceAsync(LogoutRequest logoutRequest);
     Task<APIResponse> LogoutAllDevicesAsync(LogoutForAllRequest logoutRequest);
-    Task<APIResponse<LoginResponse>> RefreshAsync(RefreshRequest refreshRequest);
-    Task<APIResponse> Me();
-    Task<LoginResponse> GoogleLoginAsync(ClaimsPrincipal principal , string provider, string returnUrl = "/");
+    Task<(APIResponse<LoginClientResponse> apiResponse 
+        , LoginServerResponse loginServerResponse)> RefreshAsync(RefreshRequest refreshRequest);
+    Task<APIResponse<ApplicationUserDTO>> GetMeAsync(string userId);
+    Task<LoginServerResponse> GoogleLoginAsync(ClaimsPrincipal principal , string provider, string returnUrl = "/");
     Task<ApplicationUser?> GetUserByIdAsync(string id);
 
     Task<IdentityResult> CreateUserAsync(ApplicationUser user, string password);

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using Shared.Enums;
 
 namespace Shared.DTOs.RegisterDTOs;
@@ -18,4 +19,6 @@ public sealed class CustomerRegisterDTO
     public string PasswordConfirm { get; set; }
     [Phone]
     public string PhoneNumber { get; set; }
+
+    [JsonIgnore] public string Role { get; set; } = StaticData.CustomerRoleName;
 }

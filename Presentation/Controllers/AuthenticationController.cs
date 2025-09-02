@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Domain.Responses;
 using Microsoft.AspNetCore.Http;
 using Domain.Requests;
@@ -6,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Service.Abstraction;
 using Shared;
+using Shared.DTOs.ApplicationUserDTOs;
 using Shared.DTOs.LoginDTOs;
 using Shared.DTOs.RegisterDTOs;
 
@@ -27,13 +30,15 @@ public class AuthenticationController(
 
     [EnableRateLimiting("AuthPolicy")]
     [HttpPost("Login")]
-    public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginDTO loginDto)
+    public async Task<ActionResult<LoginClientResponse>> Login([FromBody] LoginDTO loginDto)
     {
-        var response = await serviceManager.Authentication.LoginAsync(loginDto);
+        var (response,loginServerResponse) = await serviceManager
+            .Authentication.LoginAsync(loginDto);
+        
         if (response != null)
         {
             ClearAuthCookies();
-            SetAuthCookies(response);
+            SetAuthCookies(loginServerResponse);
         }
         return Ok(response);
     }
@@ -83,7 +88,7 @@ public class AuthenticationController(
 
     [EnableRateLimiting("AuthPolicy")]
     [HttpPost("RefreshToken")]
-    public async Task<ActionResult<APIResponse<LoginResponse>>> Refresh()
+    public async Task<ActionResult<APIResponse<LoginClientResponse>>> Refresh()
     {
         var refreshToken = Request.Cookies[StaticData.RefreshToken];
         var accessToken = Request.Cookies[StaticData.AccessToken];
@@ -95,22 +100,26 @@ public class AuthenticationController(
             DeviceId = Guid.TryParse(deviceId, out var parsedDeviceId) ? parsedDeviceId : Guid.Empty
         };
         
-        var response = await serviceManager.Authentication
+        var (response,loginServerResponse) = await serviceManager.Authentication
             .RefreshAsync(refreshRequest);
 
-        if (response != null)
+        if (loginServerResponse != null)
         {
             ClearAuthCookies();
-            SetAuthCookies(response.Data);
+            SetAuthCookies(loginServerResponse);
         }
 
         return Ok(response);
     }
 
+    [HttpGet("Me")]
     [Authorize]
-    public async Task<APIResponse> Me()
+    public async Task<ActionResult<APIResponse<ApplicationUserDTO>>> Me()
     {
-        
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var response = await serviceManager.Authentication
+            .GetMeAsync(userId!);
+        return Ok(response);
     }
 
     private CookieOptions GetCookieOptions(DateTime lifeTime)
@@ -123,7 +132,7 @@ public class AuthenticationController(
             Expires = lifeTime
         };
     }
-    private void SetAuthCookies(LoginResponse response)
+    private void SetAuthCookies(LoginServerResponse response)
     {
         var accessTokenOptions = GetCookieOptions(response.AccessTokenExpiration);
         var refreshTokenOptions = GetCookieOptions(response.RefreshTokenExpiration);
