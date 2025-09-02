@@ -52,20 +52,29 @@ public class ExternalAuthenticationController(
         
         var response = await serviceManager.Authentication
             .GoogleLoginAsync(result.Principal, provider, returnUrl);
-        
-        Response.Cookies.Append(StaticData.AccessToken, response.AccessToken, new CookieOptions()
+
+        if (response != null)
         {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.None,
-        });
-        Response.Cookies.Append(StaticData.RefreshToken, response.RefreshToken, new CookieOptions()
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.None,
-        });
-        
+            var accessTokenLifeTime = response.AccessTokenExpiration;
+            var refreshTokenLifeTime = response.RefreshTokenExpiration;
+            
+            var accessTokenOptions = GetCookieOptions(accessTokenLifeTime);
+            var refreshTokenOptions = GetCookieOptions(refreshTokenLifeTime);
+            
+            Response.Cookies.Append(StaticData.AccessToken, response.AccessToken, accessTokenOptions);
+            Response.Cookies.Append(StaticData.RefreshToken, response.RefreshToken, refreshTokenOptions);
+            Response.Cookies.Append(StaticData.DeviceId, Convert.ToString(response.DeviceId)!, refreshTokenOptions);
+        }
         return Ok(response);
+    }
+    private CookieOptions GetCookieOptions(DateTime lifeTime)
+    {
+        return new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.None,
+            Expires = lifeTime
+        };
     }
 }
