@@ -4,26 +4,20 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Domain.Exceptions;
 using Domain.Responses;
+using Newtonsoft.Json;
+using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace BoslaAPI.Middlewares;
 
-public class APIResponseMiddleware
+public class ApiResponseMiddleware(RequestDelegate next, ILogger<ApiResponseMiddleware> logger)
 {
-    private readonly RequestDelegate _next;
-    private readonly ILogger<APIResponseMiddleware> _logger;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public APIResponseMiddleware(RequestDelegate next, ILogger<APIResponseMiddleware> logger)
-    {
-        _next = next;
-        _logger = logger;
-    }
-
-    public async Task Invoke(HttpContext context)
+    public async Task InvokeAsync(HttpContext context)
     {
         var originalBody = context.Response.Body;
 
@@ -32,7 +26,13 @@ public class APIResponseMiddleware
 
         try
         {
-            await _next(context);
+            await next.Invoke(context);
+            if (context.Response.StatusCode == StatusCodes.Status404NotFound)
+            {
+                context.Response.Body = originalBody;
+                await HandelNotFoundAsync(context);
+                return;
+            }
 
             buffer.Seek(0, SeekOrigin.Begin);
             var bodyText = await new StreamReader(buffer).ReadToEndAsync();
@@ -139,7 +139,7 @@ public class APIResponseMiddleware
         catch (Exception ex)
         {
             context.Response.Body = originalBody;
-            _logger.LogError(ex, "Unhandled exception in APIResponseMiddleware");
+            logger.LogError(ex, "Unhandled exception in APIResponseMiddleware");
             await HandleExceptionAsync(context, HttpStatusCode.InternalServerError, "Something went wrong.");
         }
     }
@@ -155,5 +155,16 @@ public class APIResponseMiddleware
         context.Response.ContentLength = Encoding.UTF8.GetByteCount(json);
 
         return context.Response.WriteAsync(json);
+    }
+
+    private async Task HandelNotFoundAsync(HttpContext httpContext)
+    {
+        httpContext.Response.ContentType = "application/json";
+        var response = new APIResponse()
+        {
+            StatusCode = (HttpStatusCode)StatusCodes.Status404NotFound,
+            ErrorMessages = new List<string>() { $"This End Point {httpContext.Request.Path} was not found." }
+        };
+        await httpContext.Response.WriteAsync(JsonSerializer.Serialize(response));
     }
 }
