@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Claims;
 using AutoMapper;
+using DocumentFormat.OpenXml.Drawing.Charts;
 using Domain.Entities;
 using Domain.Contracts;
 using Domain.Exceptions;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
 using Service.Helpers;
 using Shared;
+using Shared.DTOs.ApplicationUserDTOs;
 using Shared.DTOs.LoginDTOs;
 using Shared.DTOs.RegisterDTOs;
 using Shared.Parameters;
@@ -22,16 +24,74 @@ public class AuthenticationService(
     ICustomerService customerService,
     IUnitOfWork unitOfWork,
     IMapper mapper,
-    IConfiguration configuration, 
+    IConfiguration configuration,
     UserManager<ApplicationUser> userManager,
     RoleManager<IdentityRole> roleManager,
     AuthenticationHelper accountHelper) : IAuthenticationService
 {
-
     public async Task<ApplicationUser?> GetUserByEmailAsync(string email)
     {
         return await userManager.FindByEmailAsync(email);
     }
+
+    #region GithubAuthentication
+    public async Task<LoginServerResponse> GitHubLoginAsync(ClaimsPrincipal principal, string provider,
+        string returnUrl = "/")
+    {
+        var externalId = principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var email = principal?.FindFirst(ClaimTypes.Email)?.Value;
+        var name = principal?.FindFirst(ClaimTypes.Name)?.Value ??
+                   principal?.FindFirst("urn:github:login")?.Value;
+
+        if (string.IsNullOrWhiteSpace(externalId))
+            throw new BadRequestException("GitHub did not return an identifier.");
+
+        if (string.IsNullOrWhiteSpace(email))
+            throw new BadRequestException("Email not received from GitHub provider.");
+
+        var user = await userManager.FindByEmailAsync(email);
+        if (user == null)
+        {
+            user = new ApplicationUser
+            {
+                UserName = email,
+                Email = email,
+                FirstName = name ?? "GitHub User",
+                EmailConfirmed = true
+            };
+
+            var createRes = await CreateUserAsync(user);
+
+            if (!createRes.Succeeded)
+                throw new BadRequestException(createRes.Errors.Select(e => e.Description).FirstOrDefault()!);
+
+            var customer = new Customer()
+            {
+                ApplicationUserId = user.Id,
+            };
+            await customerService.CreateAsync(customer);
+        }
+
+        var loginInfo = new UserLoginInfo(provider, externalId, provider);
+
+        var alreadyLinked = await
+            IsLoginLinkedAsync(user.Id, provider, externalId);
+
+        if (!alreadyLinked)
+        {
+            var addLoginResult = await AddLoginAsync(user, loginInfo);
+            if (!addLoginResult.Succeeded)
+                throw new BadRequestException(addLoginResult.Errors.First().Description);
+        }
+
+        var loginResponse = await accountHelper
+            .GenerateAndStoreTokensAsync(user, Guid.NewGuid());
+
+        await unitOfWork.SaveChangesAsync();
+        return loginResponse;
+    }
+
+    #endregion
 
     public async Task<APIResponse> RegisterCustomerAsync(CustomerRegisterDTO customerDTO)
     {
@@ -43,17 +103,19 @@ public class AuthenticationService(
             throw new BadRequestException("Customer already exists");
 
         var customerUser = mapper.Map<ApplicationUser>(customerDTO);
-        var customerUserCreationResult = await 
+        var customerUserCreationResult = await
             CreateUserAsync(customerUser, customerDTO.Password);
-        
+
         if (!customerUserCreationResult.Succeeded)
-            throw new BadRequestException(accountHelper.AddIdentityErrors(customerUserCreationResult).FirstOrDefault()!);
-        
+            throw new BadRequestException(accountHelper.AddIdentityErrors(customerUserCreationResult)
+                .FirstOrDefault()!);
+
         var customerRoleAssigningResult =
             await AssignUserToRoleAsync(customerUser, StaticData.CustomerRoleName);
-        
+
         if (!customerRoleAssigningResult.Succeeded)
-            throw new BadRequestException(accountHelper.AddIdentityErrors(customerRoleAssigningResult).FirstOrDefault()!);
+            throw new BadRequestException(
+                accountHelper.AddIdentityErrors(customerRoleAssigningResult).FirstOrDefault()!);
 
         var customer = mapper.Map<Customer>(customerDTO);
         customer.ApplicationUserId = customerUser.Id;
@@ -67,7 +129,8 @@ public class AuthenticationService(
         };
     }
 
-    public async Task<LoginResponse> LoginAsync(LoginDTO loginDto)
+    public async Task<(APIResponse<LoginClientResponse> apiResponse, LoginServerResponse loginServerResponse)>
+        LoginAsync(LoginDTO loginDto)
     {
         if (loginDto == null)
             throw new BadRequestException("Login data is required.");
@@ -77,14 +140,14 @@ public class AuthenticationService(
                 .CheckPasswordAsync(user, loginDto.Password))
             throw new UnauthorizedException("Invalid credentials.");
 
-        var loginResponse = await accountHelper
+        var loginServerResponse = await accountHelper
             .GenerateAndStoreTokensAsync(user, Guid.NewGuid());
 
         var existing =
             await refreshTokenService
                 .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
                 {
-                    DeviceId = loginResponse.DeviceId, UserId = user.Id
+                    DeviceId = loginServerResponse.DeviceId, UserId = user.Id
                 });
 
         if (existing != null && existing.Any())
@@ -97,8 +160,13 @@ public class AuthenticationService(
                 await refreshTokenService.UpdateAsync(item);
             }
         }
+
         await unitOfWork.SaveChangesAsync();
-        return loginResponse;
+        return (new APIResponse<LoginClientResponse>()
+        {
+            StatusCode = HttpStatusCode.OK,
+            Data = mapper.Map<LoginClientResponse>(loginServerResponse)
+        }, loginServerResponse);
     }
 
     public async Task<APIResponse> LogoutThisDeviceAsync(LogoutRequest logoutRequest)
@@ -117,7 +185,7 @@ public class AuthenticationService(
         token.RevokedReason = "User logged out";
         await refreshTokenService.UpdateAsync(token);
         await unitOfWork.SaveChangesAsync();
-        
+
         return new APIResponse()
         {
             StatusCode = HttpStatusCode.OK,
@@ -138,7 +206,7 @@ public class AuthenticationService(
         var tokens = await refreshTokenService
             .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
             {
-                UserId = logoutRequest.UserId
+                UserId = token.UserId
             });
 
         if (tokens == null || !tokens.Any())
@@ -161,7 +229,8 @@ public class AuthenticationService(
         };
     }
 
-    public async Task<APIResponse<LoginResponse>> RefreshAsync(RefreshRequest refreshRequest)
+    public async Task<(APIResponse<LoginClientResponse> apiResponse
+        , LoginServerResponse loginServerResponse)> RefreshAsync(RefreshRequest refreshRequest)
     {
         if (refreshRequest.DeviceId == null || string.IsNullOrWhiteSpace(refreshRequest.RefreshToken))
             throw new UnauthorizedException("Refresh or Device Id is Invalid");
@@ -173,7 +242,7 @@ public class AuthenticationService(
             });
         if (storedTokens == null || !storedTokens.Any())
             throw new UnauthorizedException("Invalid Refresh Token");
-        
+
         RefreshToken validToken = null;
         foreach (var token in storedTokens)
         {
@@ -202,30 +271,44 @@ public class AuthenticationService(
                 t.RevokedReason = "Refresh token reuse detected";
                 await refreshTokenService.UpdateAsync(t);
             }
-            throw new UnauthorizedException("Refresh token reuse detected");            
+
+            throw new UnauthorizedException("Refresh token reuse detected");
         }
 
         if (validToken.IsRevoked || validToken.ExpiresAt < DateTime.UtcNow)
             throw new UnauthorizedException("Invalid Refresh Token");
-            
+
         var user = await GetUserByIdAsync(validToken.UserId);
         if (user == null)
             throw new NotFoundException("User not found");
 
-        var loginResponse = await accountHelper
+        var loginServerResponse = await accountHelper
             .GenerateAndStoreTokensAsync(user, Guid.NewGuid());
 
         await unitOfWork.SaveChangesAsync();
 
-        return new APIResponse<LoginResponse>()
+        return (new APIResponse<LoginClientResponse>()
         {
             StatusCode = HttpStatusCode.OK,
-            Data = loginResponse
+            Data = mapper.Map<LoginClientResponse>(loginServerResponse)
+        }, loginServerResponse);
+    }
+
+    public async Task<APIResponse<ApplicationUserDTO>> GetMeAsync(string userId)
+    {
+        var user = await GetUserByIdAsync(userId);
+        if (user == null)
+            throw new NotFoundException("User not found");
+        return new APIResponse<ApplicationUserDTO>()
+        {
+            StatusCode = HttpStatusCode.OK,
+            Data = mapper.Map<ApplicationUserDTO>(user)
         };
     }
 
 
-    public async Task<LoginResponse> GoogleLoginAsync(ClaimsPrincipal principal , string provider, string returnUrl = "/")
+    public async Task<LoginServerResponse> GoogleLoginAsync(ClaimsPrincipal principal, string provider,
+        string returnUrl = "/")
     {
         var externalId = principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         var email = principal?.FindFirst(ClaimTypes.Email)?.Value;
@@ -251,7 +334,7 @@ public class AuthenticationService(
 
             if (!createRes.Succeeded)
                 throw new BadRequestException(createRes.Errors.Select(e => e.Description).FirstOrDefault()!);
-            
+
             var customer = new Customer()
             {
                 ApplicationUserId = user.Id,
@@ -261,9 +344,9 @@ public class AuthenticationService(
 
         var loginInfo = new UserLoginInfo(provider, externalId, provider);
 
-        var alreadyLinked = await 
+        var alreadyLinked = await
             IsLoginLinkedAsync(user.Id, provider, externalId);
-        
+
         if (!alreadyLinked)
         {
             var addLoginResult = await AddLoginAsync(user, loginInfo);
@@ -298,7 +381,7 @@ public class AuthenticationService(
 
     public Task<bool> CheckPasswordAsync(ApplicationUser user, string password)
     {
-        return userManager.CheckPasswordAsync(user, password);        
+        return userManager.CheckPasswordAsync(user, password);
     }
 
     public async Task<IdentityResult> AssignUserToRoleAsync(ApplicationUser user, string roleName)
@@ -319,6 +402,7 @@ public class AuthenticationService(
             return IdentityResult.Failed(new IdentityError
                 { Description = "External login already linked to another account." });
         }
+
         return await userManager.AddLoginAsync(user, login);
     }
 

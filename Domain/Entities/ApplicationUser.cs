@@ -7,6 +7,7 @@ public sealed class ApplicationUser : IdentityUser
 {
     public string FirstName { get; set; }
     public string? LastName { get; set; }
+    public string Role { get; set; }
     public DateTime DateJoined { get; set; } = DateTime.UtcNow;
     public bool IsActive { get; set; } = true;
     

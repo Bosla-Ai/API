@@ -91,7 +91,7 @@ public class AuthenticationHelper(
         return result.Errors.Select(e => e.Description).ToList();
     }
     
-    public async Task<LoginResponse>
+    public async Task<LoginServerResponse>
         GenerateAndStoreTokensAsync(
             ApplicationUser user,
             Guid deviceId)
@@ -115,7 +115,7 @@ public class AuthenticationHelper(
 
         await refreshTokenService.CreateAsync(refreshEntity);
 
-        var loginResponse = new LoginResponse
+        var loginResponse = new LoginServerResponse
         {
             AccessToken = jwt,
             AccessTokenExpiration = jwtToken.ValidTo,

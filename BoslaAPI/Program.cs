@@ -25,6 +25,7 @@ builder.Services.AddControllers();
 builder.Services.AddDbContext<ApplicationDbContext>(option =>
 {
     option.UseSqlServer(builder.Configuration.GetConnectionString("ServerConnection"));
+    // option.UseSqlServer(builder.Configuration.GetConnectionString("CS")); // forDevelopment
 });
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
@@ -44,20 +45,20 @@ builder.Services
         options.CallbackPath = "/signin-google";
         options.ClaimActions.MapJsonKey("urn:google:email_verified", "email_verified");
         options.UsePkce = true;
+    })
+    .AddGitHub("Github", options =>
+    {
+        options.ClientId = builder.Configuration["Authentication:Github:ClientId"]!;
+        options.ClientSecret = builder.Configuration["Authentication:Github:ClientSecret"]!;
+        options.CallbackPath = "/signin-github";
+        //options.Scope.Add("user:email"); // Request email access
     });
-
-// .AddGitHub("Github", options =>
-// {
-//     options.ClientId = builder.Configuration["Authentication:Github:ClientId"]!;
-//     options.ClientSecret = builder.Configuration["Authentication:Github:ClientSecret"]!;
-//     options.CallbackPath = "/signin-github";
-// })
-// .AddLinkedIn("LinkedIn", options =>
-// {
-//     options.ClientId = builder.Configuration["Authentication:LinkedIn:ClientId"]!;
-//     options.ClientSecret = builder.Configuration["Authentication:LinkedIn:ClientSecret"]!;
-//     options.CallbackPath = "/signin-linkedin";
-// });
+    // .AddLinkedIn("LinkedIn", options =>
+    // {
+    //     options.ClientId = builder.Configuration["Authentication:LinkedIn:ClientId"]!;
+    //     options.ClientSecret = builder.Configuration["Authentication:LinkedIn:ClientSecret"]!;
+    //     options.CallbackPath = "/signin-linkedin";
+    // });
 
 builder.Services.AddRateLimiterConfiguration();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -72,7 +73,14 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("CorsPolicy",
-        corsPolicyBuilder => { corsPolicyBuilder.AllowAnyHeader().AllowAnyMethod().WithOrigins("http://localhost:5173"); });
+        corsPolicyBuilder =>
+        {
+            corsPolicyBuilder
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials()
+                .WithOrigins("http://localhost:5173");
+        });
 });
 
 var app = builder.Build();
@@ -84,11 +92,12 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseMiddleware<APIResponseMiddleware>();
+app.UseMiddleware<ApiResponseMiddleware>();
 if (!app.Environment.IsDevelopment()) // for production
 {
     // app.UseHttpsRedirection();
 }
+
 app.UseForwardedHeaders();
 app.UseCors("CorsPolicy");
 app.UseRateLimiter();

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Shared;
 
 namespace BoslaAPI.Extensions;
 
@@ -31,6 +32,20 @@ public static class JwtExtensions
                     IssuerSigningKey = new SymmetricSecurityKey(
                         Encoding.UTF8.GetBytes(jwtOptions.Key)
                     )
+                };
+                options.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = context =>
+                    {
+                        if (string.IsNullOrEmpty(context?.Token)
+                            && context!.Request.Cookies
+                                .ContainsKey(StaticData.AccessToken))
+                        {
+                            context.Token = context.Request.Cookies[StaticData.AccessToken];
+                        }
+
+                        return Task.CompletedTask;
+                    }
                 };
             });
     }

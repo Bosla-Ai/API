@@ -19,6 +19,57 @@ public class ExternalAuthenticationController(
     IServiceManager serviceManager) : ApiController
 {
     [EnableRateLimiting("AuthPolicy")]
+    [HttpGet("GitHubSignIn")]
+    public IActionResult GitHubSignIn(string returnUrl = "/")
+    {
+        try
+        {
+            var state = Guid.NewGuid().ToString();
+            var props = new AuthenticationProperties
+            {
+                RedirectUri = Url.Action("GitHubExternalCallback",
+                    "ExternalAuthentication", new { provider = "Github", returnUrl }
+                    , Request.Scheme),
+                Items = { ["state"] = state }
+            };
+            return Challenge(props, "Github");
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError
+                , new APIResponse<string>(HttpStatusCode.InternalServerError, null,
+                    new List<string> { ex.Message }));
+        }
+    }
+
+    [HttpGet("signin-github")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public async Task<ActionResult<APIResponse>> GitHubExternalCallback(string provider, string returnUrl = "/")
+    {
+        var result = await HttpContext.AuthenticateAsync(provider);
+        if (!result.Succeeded)
+            throw new BadRequestException("GitHub authentication failed.");
+
+        var response = await serviceManager.Authentication
+            .GitHubLoginAsync(result.Principal, provider, returnUrl);
+
+        if (response != null)
+        {
+            var accessTokenLifeTime = response.AccessTokenExpiration;
+            var refreshTokenLifeTime = response.RefreshTokenExpiration;
+
+            var accessTokenOptions = GetCookieOptions(accessTokenLifeTime);
+            var refreshTokenOptions = GetCookieOptions(refreshTokenLifeTime);
+
+            Response.Cookies.Append(StaticData.AccessToken, response.AccessToken, accessTokenOptions);
+            Response.Cookies.Append(StaticData.RefreshToken, response.RefreshToken, refreshTokenOptions);
+            Response.Cookies.Append(StaticData.DeviceId, Convert.ToString(response.DeviceId)!, refreshTokenOptions);
+        }
+
+        return Ok(response);
+    }
+
+    [EnableRateLimiting("AuthPolicy")]
     [HttpGet("GoogleSignIn")]
     public IActionResult GoogleSignIn(string returnUrl = "/")
     {
@@ -49,23 +100,34 @@ public class ExternalAuthenticationController(
         var result = await HttpContext.AuthenticateAsync(provider);
         if (!result.Succeeded)
             throw new BadRequestException("External authentication failed.");
-        
+
         var response = await serviceManager.Authentication
             .GoogleLoginAsync(result.Principal, provider, returnUrl);
-        
-        Response.Cookies.Append(StaticData.AccessToken, response.AccessToken, new CookieOptions()
+
+        if (response != null)
         {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.None,
-        });
-        Response.Cookies.Append(StaticData.RefreshToken, response.RefreshToken, new CookieOptions()
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.None,
-        });
-        
+            var accessTokenLifeTime = response.AccessTokenExpiration;
+            var refreshTokenLifeTime = response.RefreshTokenExpiration;
+
+            var accessTokenOptions = GetCookieOptions(accessTokenLifeTime);
+            var refreshTokenOptions = GetCookieOptions(refreshTokenLifeTime);
+
+            Response.Cookies.Append(StaticData.AccessToken, response.AccessToken, accessTokenOptions);
+            Response.Cookies.Append(StaticData.RefreshToken, response.RefreshToken, refreshTokenOptions);
+            Response.Cookies.Append(StaticData.DeviceId, Convert.ToString(response.DeviceId)!, refreshTokenOptions);
+        }
+
         return Ok(response);
+    }
+
+    private CookieOptions GetCookieOptions(DateTime lifeTime)
+    {
+        return new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.None,
+            Expires = lifeTime
+        };
     }
 }
