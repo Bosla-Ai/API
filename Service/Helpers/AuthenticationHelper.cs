@@ -121,6 +121,8 @@ public class AuthenticationHelper(
             AccessTokenExpiration = jwtToken.ValidTo,
             RefreshToken = plainRefresh,
             RefreshTokenExpiration = refreshEntity.ExpiresAt,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
             UserName = user.UserName!,
             Email = user.Email!,
             Role = roles.FirstOrDefault() ?? "",
