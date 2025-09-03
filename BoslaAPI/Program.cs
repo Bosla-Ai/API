@@ -101,10 +101,12 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseMiddleware<ApiResponseMiddleware>();
-if (!app.Environment.IsDevelopment()) // for production
+app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
-    // app.UseHttpsRedirection();
-}
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor |
+                       ForwardedHeaders.XForwardedProto |
+                       ForwardedHeaders.XForwardedHost
+});
 
 app.UseForwardedHeaders();
 app.UseCors("CorsPolicy");
