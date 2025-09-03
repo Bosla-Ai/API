@@ -51,14 +51,22 @@ builder.Services
         options.ClientId = builder.Configuration["Authentication:Github:ClientId"]!;
         options.ClientSecret = builder.Configuration["Authentication:Github:ClientSecret"]!;
         options.CallbackPath = "/signin-github";
-        //options.Scope.Add("user:email"); // Request email access
+        options.Scope.Add("user:email"); // Request email access
+        options.ClaimActions.MapJsonKey("urn:github:login", "login");
+        options.ClaimActions.MapJsonKey("urn:github:url", "html_url");
+        options.ClaimActions.MapJsonKey("urn:github:avatar", "avatar_url");
+    })
+    .AddLinkedIn("LinkedIn", options =>
+    {
+        options.ClientId = builder.Configuration["Authentication:LinkedIn:ClientId"]!;
+        options.ClientSecret = builder.Configuration["Authentication:LinkedIn:ClientSecret"]!;
+        options.CallbackPath = "/signin-linkedin";
+        options.Scope.Add("r_liteprofile");
+        options.Scope.Add("r_emailaddress");
+        // The provider will populate standard claims (NameIdentifier, Email, Name) with these scopes.
+        // You can map extras if you need them:
+        // options.ClaimActions.MapCustomJson("urn:linkedin:profileUrl", user => user.GetString("vanityName"));
     });
-    // .AddLinkedIn("LinkedIn", options =>
-    // {
-    //     options.ClientId = builder.Configuration["Authentication:LinkedIn:ClientId"]!;
-    //     options.ClientSecret = builder.Configuration["Authentication:LinkedIn:ClientSecret"]!;
-    //     options.CallbackPath = "/signin-linkedin";
-    // });
 
 builder.Services.AddRateLimiterConfiguration();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
