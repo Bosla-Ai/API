@@ -14,10 +14,49 @@ using Shared;
 
 namespace Presintation.Controllers;
 
-[Route("api/[controller]")]
 public class ExternalAuthenticationController(
     IServiceManager serviceManager) : ApiController
 {
+    [EnableRateLimiting("AuthPolicy")]
+    [HttpGet("LinkedInSignIn")]
+    public IActionResult LinkedInSignIn(string returnUrl = "/")
+    {
+        var state = Guid.NewGuid().ToString();
+        var props = new AuthenticationProperties
+        {
+            RedirectUri = Url.Action("LinkedInExternalCallback", "ExternalAuthentication",
+                new { provider = "LinkedIn", returnUrl }, Request.Scheme),
+            Items = { ["state"] = state }
+        };
+        return Challenge(props, "LinkedIn");
+    }
+
+    [HttpGet("signin-linkedin")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public async Task<ActionResult<APIResponse>> LinkedInExternalCallback(string provider, string returnUrl = "/")
+    {
+        var result = await HttpContext.AuthenticateAsync(provider);
+        if (!result.Succeeded)
+            throw new BadRequestException("LinkedIn authentication failed.");
+
+        // If you add a dedicated LinkedInLoginAsync, call it here.
+        // Or reuse a generic ExternalLoginAsync if you refactor.
+        var response = await serviceManager.Authentication
+            .LinkedInLoginAsync(result.Principal, provider, returnUrl);
+
+        if (response != null)
+        {
+            var accessTokenOptions = GetCookieOptions(response.AccessTokenExpiration);
+            var refreshTokenOptions = GetCookieOptions(response.RefreshTokenExpiration);
+
+            Response.Cookies.Append(StaticData.AccessToken, response.AccessToken, accessTokenOptions);
+            Response.Cookies.Append(StaticData.RefreshToken, response.RefreshToken, refreshTokenOptions);
+            Response.Cookies.Append(StaticData.DeviceId, Convert.ToString(response.DeviceId)!, refreshTokenOptions);
+        }
+
+        return Ok(response);
+    }
+
     [EnableRateLimiting("AuthPolicy")]
     [HttpGet("GitHubSignIn")]
     public IActionResult GitHubSignIn(string returnUrl = "/")

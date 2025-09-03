@@ -22,6 +22,7 @@ public interface IAuthenticationService
     Task<APIResponse<ApplicationUserDTO>> GetMeAsync(string userId);
     Task<LoginServerResponse> GoogleLoginAsync(ClaimsPrincipal principal , string provider, string returnUrl = "/");
     Task<LoginServerResponse> GitHubLoginAsync(ClaimsPrincipal principal, string provider, string returnUrl = "/");
+    Task<LoginServerResponse> LinkedInLoginAsync(ClaimsPrincipal principal, string provider, string returnUrl = "/");
     Task<ApplicationUser?> GetUserByIdAsync(string id);
 
     Task<IdentityResult> CreateUserAsync(ApplicationUser user, string password);

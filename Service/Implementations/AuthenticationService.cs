@@ -34,7 +34,57 @@ public class AuthenticationService(
         return await userManager.FindByEmailAsync(email);
     }
 
+    #region Linked In Auth
+
+    public async Task<LoginServerResponse> LinkedInLoginAsync(ClaimsPrincipal principal, string provider,
+        string returnUrl = "/")
+    {
+        // Same pattern used in Google/GitHub: require externalId + email
+        var externalId = principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var email = principal?.FindFirst(ClaimTypes.Email)?.Value;
+        var name = principal?.FindFirst(ClaimTypes.Name)?.Value;
+
+        if (string.IsNullOrWhiteSpace(externalId))
+            throw new BadRequestException("LinkedIn did not return an identifier.");
+        if (string.IsNullOrWhiteSpace(email))
+            throw new BadRequestException("Email not received from LinkedIn provider.");
+
+        var user = await userManager.FindByEmailAsync(email);
+        if (user == null)
+        {
+            user = new ApplicationUser
+            {
+                UserName = email,
+                Email = email,
+                FirstName = string.IsNullOrWhiteSpace(name) ? "LinkedIn User" : name,
+                EmailConfirmed = true
+            };
+
+            var createRes = await CreateUserAsync(user);
+            if (!createRes.Succeeded)
+                throw new BadRequestException(createRes.Errors.Select(e => e.Description).First());
+
+            var customer = new Customer { ApplicationUserId = user.Id };
+            await customerService.CreateAsync(customer);
+        }
+
+        var alreadyLinked = await IsLoginLinkedAsync(user.Id, provider, externalId);
+        if (!alreadyLinked)
+        {
+            var addLoginResult = await AddLoginAsync(user, new UserLoginInfo(provider, externalId, provider));
+            if (!addLoginResult.Succeeded)
+                throw new BadRequestException(addLoginResult.Errors.First().Description);
+        }
+
+        var loginResponse = await accountHelper.GenerateAndStoreTokensAsync(user, Guid.NewGuid());
+        await unitOfWork.SaveChangesAsync();
+        return loginResponse;
+    }
+
+    #endregion
+
     #region GithubAuthentication
+
     public async Task<LoginServerResponse> GitHubLoginAsync(ClaimsPrincipal principal, string provider,
         string returnUrl = "/")
     {
