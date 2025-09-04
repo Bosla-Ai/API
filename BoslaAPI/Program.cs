@@ -95,9 +95,8 @@ builder.Services.AddCors(options =>
                 .AllowAnyMethod()
                 .AllowCredentials()
                 .WithOrigins(
-                    "http://localhost:5173",     // Development
-                    "https://bosla.almiraj.xyz", // Production
-                    "https://bosla-ten.vercel.app" // Your frontend
+                    "http://localhost:5173"     // Development
+                    // "https://www.bosla.almiraj.xyz", // Production
                 );
         });
 });
