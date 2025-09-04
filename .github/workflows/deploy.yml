@@ -27,3 +27,4 @@ jobs:
             # Run a zsh login-like shell so .zshrc is evaluated, then execute the deploy script.
             # The zsh -lc will run the command in a zsh login/interactive-like shell and then exit.
             zsh -lc 'source $HOME/.zshrc >/dev/null 2>&1 || true; bash $HOME/scripts/deploy-backend.sh'
+
