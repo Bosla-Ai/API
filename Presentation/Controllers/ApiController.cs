@@ -10,9 +10,4 @@ namespace Presintation.Controllers;
 [ProducesResponseType(StatusCodes.Status500InternalServerError)]
 public class ApiController : ControllerBase
 {
-    [HttpGet("test")]
-    public IActionResult Index()
-    {
-        return Ok("Test");
-    }
 }
