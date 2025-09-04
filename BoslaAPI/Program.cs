@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using BoslaAPI;
 using BoslaAPI.Extensions;
 using BoslaAPI.Middlewares;
@@ -61,12 +62,17 @@ builder.Services
         options.ClientId = builder.Configuration["Authentication:LinkedIn:ClientId"]!;
         options.ClientSecret = builder.Configuration["Authentication:LinkedIn:ClientSecret"]!;
         options.CallbackPath = "/signin-linkedin";
-        options.Scope.Add("profile"); 
-        options.Scope.Add("email"); 
-        options.Scope.Add("openid");
-        // The provider will populate standard claims (NameIdentifier, Email, Name) with these scopes.
-        // You can map extras if you need them:
-        // options.ClaimActions.MapCustomJson("urn:linkedin:profileUrl", user => user.GetString("vanityName"));
+
+        // Clear any existing scopes and add current ones
+        options.Scope.Clear();
+        options.Scope.Add("profile");
+        options.Scope.Add("email");
+
+        // Configure claims mapping for current LinkedIn API
+        options.ClaimActions.MapJsonKey(ClaimTypes.NameIdentifier, "id");
+        options.ClaimActions.MapJsonKey(ClaimTypes.Name, "localizedFirstName");
+        options.ClaimActions.MapJsonKey(ClaimTypes.Email, "emailAddress");
+        options.ClaimActions.MapJsonKey("urn:linkedin:profileUrl", "publicProfileUrl");
     });
 
 builder.Services.AddRateLimiterConfiguration();
@@ -88,7 +94,11 @@ builder.Services.AddCors(options =>
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials()
-                .WithOrigins("http://localhost:5173");
+                .WithOrigins(
+                    "http://localhost:5173",     // Development
+                    "https://bosla.almiraj.xyz", // Production
+                    "https://bosla-ten.vercel.app" // Your frontend
+                );
         });
 });
 
