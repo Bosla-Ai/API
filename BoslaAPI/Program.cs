@@ -61,8 +61,9 @@ builder.Services
         options.ClientId = builder.Configuration["Authentication:LinkedIn:ClientId"]!;
         options.ClientSecret = builder.Configuration["Authentication:LinkedIn:ClientSecret"]!;
         options.CallbackPath = "/signin-linkedin";
-        options.Scope.Add("r_liteprofile");
-        options.Scope.Add("r_emailaddress");
+        options.Scope.Add("profile"); 
+        options.Scope.Add("email"); 
+        options.Scope.Add("openid");
         // The provider will populate standard claims (NameIdentifier, Email, Name) with these scopes.
         // You can map extras if you need them:
         // options.ClaimActions.MapCustomJson("urn:linkedin:profileUrl", user => user.GetString("vanityName"));
