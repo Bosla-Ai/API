@@ -25,7 +25,7 @@ builder.Services.AddControllers();
 builder.Services.AddDbContext<ApplicationDbContext>(option =>
 {
     // option.UseSqlServer(builder.Configuration.GetConnectionString("ServerConnection"));
-    option.UseSqlServer(builder.Configuration.GetConnectionString("CS")); // forDevelopment
+    option.UseSqlServer(builder.Configuration.GetConnectionString("ServerConnection")); // forDevelopment
 });
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
@@ -87,7 +87,7 @@ builder.Services.AddCors(options =>
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials()
-                .WithOrigins("http://localhost:5173");
+                .WithOrigins("http://localhost:5173" , "https://www.bosla.almiraj.xyz");
         });
 });
 
