@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using BoslaAPI;
 using BoslaAPI.Extensions;
 using BoslaAPI.Middlewares;
@@ -24,8 +25,8 @@ builder.Services.AddAutoMapper(cfg => { }, typeof(CustomerMapping).Assembly);
 builder.Services.AddControllers();
 builder.Services.AddDbContext<ApplicationDbContext>(option =>
 {
-    // option.UseSqlServer(builder.Configuration.GetConnectionString("ServerConnection"));
-    option.UseSqlServer(builder.Configuration.GetConnectionString("ServerConnection")); // forDevelopment
+    option.UseSqlServer(builder.Configuration.GetConnectionString("ServerConnection"));
+    // option.UseSqlServer(builder.Configuration.GetConnectionString("CS")); // forDevelopment
 });
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
@@ -61,11 +62,17 @@ builder.Services
         options.ClientId = builder.Configuration["Authentication:LinkedIn:ClientId"]!;
         options.ClientSecret = builder.Configuration["Authentication:LinkedIn:ClientSecret"]!;
         options.CallbackPath = "/signin-linkedin";
-        options.Scope.Add("r_liteprofile");
-        options.Scope.Add("r_emailaddress");
-        // The provider will populate standard claims (NameIdentifier, Email, Name) with these scopes.
-        // You can map extras if you need them:
-        // options.ClaimActions.MapCustomJson("urn:linkedin:profileUrl", user => user.GetString("vanityName"));
+
+        // Clear any existing scopes and add current ones
+        options.Scope.Clear();
+        options.Scope.Add("profile");
+        options.Scope.Add("email");
+
+        // Configure claims mapping for current LinkedIn API
+        options.ClaimActions.MapJsonKey(ClaimTypes.NameIdentifier, "id");
+        options.ClaimActions.MapJsonKey(ClaimTypes.Name, "localizedFirstName");
+        options.ClaimActions.MapJsonKey(ClaimTypes.Email, "emailAddress");
+        options.ClaimActions.MapJsonKey("urn:linkedin:profileUrl", "publicProfileUrl");
     });
 
 builder.Services.AddRateLimiterConfiguration();
@@ -94,11 +101,11 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 await app.DbSeedingAsync();
 
-if (app.Environment.IsDevelopment())
-{
+// if (app.Environment.IsDevelopment())
+// {
     app.UseSwagger();
     app.UseSwaggerUI();
-}
+// }
 
 app.UseMiddleware<ApiResponseMiddleware>();
 app.UseForwardedHeaders(new ForwardedHeadersOptions

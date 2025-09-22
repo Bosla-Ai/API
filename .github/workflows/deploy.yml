@@ -1,0 +1,30 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+# Prevent overlapping deploys
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run deployment script on server (load zsh first)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22                         # change to your port if not 22
+          script_stop: true
+          command_timeout: 30m
+          script: |
+            # Run a zsh login-like shell so .zshrc is evaluated, then execute the deploy script.
+            # The zsh -lc will run the command in a zsh login/interactive-like shell and then exit.
+            zsh -lc 'source $HOME/.zshrc >/dev/null 2>&1 || true; bash $HOME/scripts/deploy-backend.sh'
+
