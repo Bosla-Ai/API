@@ -21,7 +21,7 @@ public class ApiController : ControllerBase
             Secure = true,
             SameSite = SameSiteMode.None,
             Expires = lifeTime,
-            // Domain = ".almiraj.xyz",
+            Domain = ".almiraj.xyz",
         };
     }
     protected void SetAuthCookies(LoginServerResponse response)
