@@ -94,7 +94,7 @@ builder.Services.AddCors(options =>
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials()
-                .WithOrigins("http://localhost:5173" , "https://www.bosla.almiraj.xyz");
+                .WithOrigins("http://localhost:5173","https://www.bosla.almiraj.xyz");
         });
 });
 

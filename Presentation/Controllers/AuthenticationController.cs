@@ -1,4 +1,3 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Domain.Responses;
 using Microsoft.AspNetCore.Http;
@@ -120,32 +119,5 @@ public class AuthenticationController(
         var response = await serviceManager.Authentication
             .GetMeAsync(userId!);
         return Ok(response);
-    }
-
-    private CookieOptions GetCookieOptions(DateTime lifeTime)
-    {
-        return new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.None,
-            Expires = lifeTime
-        };
-    }
-    private void SetAuthCookies(LoginServerResponse response)
-    {
-        var accessTokenOptions = GetCookieOptions(response.AccessTokenExpiration);
-        var refreshTokenOptions = GetCookieOptions(response.RefreshTokenExpiration);
-
-        Response.Cookies.Append(StaticData.AccessToken, response.AccessToken, accessTokenOptions);
-        Response.Cookies.Append(StaticData.RefreshToken, response.RefreshToken, refreshTokenOptions);
-        Response.Cookies.Append(StaticData.DeviceId, response.DeviceId.ToString(), refreshTokenOptions);
-    }
-
-    private void ClearAuthCookies()
-    {
-        Response.Cookies.Delete(StaticData.AccessToken);
-        Response.Cookies.Delete(StaticData.RefreshToken);
-        Response.Cookies.Delete(StaticData.DeviceId);
     }
 }

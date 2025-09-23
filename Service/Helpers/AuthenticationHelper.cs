@@ -78,7 +78,7 @@ public class AuthenticationHelper(
             issuer: configuration["JWT:Issuer"],
             audience: configuration["JWT:Audience"],
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(Convert.ToDouble(configuration["JWT:ExpiresAt"]!)),
+            expires: DateTime.UtcNow.AddMinutes(Convert.ToDouble(configuration["JWT:Expires"]!)),
             signingCredentials: creds
         );
 
