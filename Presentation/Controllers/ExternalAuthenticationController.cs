@@ -19,7 +19,7 @@ public class ExternalAuthenticationController(
 {
     [EnableRateLimiting("AuthPolicy")]
     [HttpGet("LinkedInSignIn")]
-    public IActionResult LinkedInSignIn(string returnUrl = "/")
+    public IActionResult LinkedInSignIn(string returnUrl = "https://www.bosla.almiraj.xyz/")
     {
         var state = Guid.NewGuid().ToString();
         var props = new AuthenticationProperties
@@ -54,7 +54,7 @@ public class ExternalAuthenticationController(
             Response.Cookies.Append(StaticData.DeviceId, Convert.ToString(response.DeviceId)!, refreshTokenOptions);
         }
 
-        return Ok(response);
+        return Redirect(returnUrl);
     }
 
     [EnableRateLimiting("AuthPolicy")]
@@ -105,12 +105,12 @@ public class ExternalAuthenticationController(
             Response.Cookies.Append(StaticData.DeviceId, Convert.ToString(response.DeviceId)!, refreshTokenOptions);
         }
 
-        return Ok(response);
+        return Redirect(returnUrl);
     }
 
     [EnableRateLimiting("AuthPolicy")]
     [HttpGet("GoogleSignIn")]
-    public IActionResult GoogleSignIn(string returnUrl = "/")
+    public IActionResult GoogleSignIn(string returnUrl = "https://www.bosla.almiraj.xyz/")
     {
         try
         {
@@ -134,7 +134,7 @@ public class ExternalAuthenticationController(
 
     [HttpGet("signin-google")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public async Task<ActionResult<APIResponse>> GoogleExternalCallback(string provider, string returnUrl = "/")
+    public async Task<ActionResult<APIResponse>> GoogleExternalCallback(string provider, string returnUrl = "https://www.bosla.almiraj.xyz/")
     {
         var result = await HttpContext.AuthenticateAsync(provider);
         if (!result.Succeeded)
@@ -156,17 +156,6 @@ public class ExternalAuthenticationController(
             Response.Cookies.Append(StaticData.DeviceId, Convert.ToString(response.DeviceId)!, refreshTokenOptions);
         }
 
-        return Ok(response);
-    }
-
-    private CookieOptions GetCookieOptions(DateTime lifeTime)
-    {
-        return new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.None,
-            Expires = lifeTime
-        };
+        return Redirect(returnUrl);
     }
 }
