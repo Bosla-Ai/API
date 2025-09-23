@@ -21,7 +21,7 @@ public class ApiController : ControllerBase
             Secure = true,
             SameSite = SameSiteMode.None,
             Expires = lifeTime,
-            Domain = ".almiraj.xyz",
+            Domain = ".bosla.almiraj.xyz",
         };
     }
     protected void SetAuthCookies(LoginServerResponse response)
@@ -35,8 +35,8 @@ public class ApiController : ControllerBase
     }
     protected void ClearAuthCookies()
     {
-        Response.Cookies.Delete(StaticData.AccessToken);
-        Response.Cookies.Delete(StaticData.RefreshToken);
-        Response.Cookies.Delete(StaticData.DeviceId);
+        Response.Cookies.Delete(StaticData.AccessToken, new CookieOptions { Domain = ".bosla.almiraj.xyz", Secure = true, SameSite = SameSiteMode.None });
+        Response.Cookies.Delete(StaticData.RefreshToken, new CookieOptions { Domain = ".bosla.almiraj.xyz", Secure = true, SameSite = SameSiteMode.None });
+        Response.Cookies.Delete(StaticData.DeviceId, new CookieOptions { Domain = ".bosla.almiraj.xyz", Secure = true, SameSite = SameSiteMode.None });
     }
 }
