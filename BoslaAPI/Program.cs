@@ -38,6 +38,7 @@ builder.Services
     {
         cookie.Cookie.SameSite = SameSiteMode.Lax;
         cookie.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        cookie.Cookie.HttpOnly = true;
     })
     .AddGoogle("Google", options =>
     {
