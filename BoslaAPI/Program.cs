@@ -36,7 +36,7 @@ builder.Services
     .AddJwtConfiguration(builder.Configuration)
     .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, cookie =>
     {
-        cookie.Cookie.SameSite = SameSiteMode.Lax;
+        cookie.Cookie.SameSite = SameSiteMode.None;
         cookie.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         cookie.Cookie.HttpOnly = true;
     })
