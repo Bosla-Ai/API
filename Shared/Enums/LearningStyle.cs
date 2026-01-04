@@ -4,5 +4,5 @@ public enum LearningStyle
 {
     Visual,
     Reading,
-    HandsOn    
+    HandsOn
 }

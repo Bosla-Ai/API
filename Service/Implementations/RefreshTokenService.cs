@@ -14,7 +14,7 @@ public class RefreshTokenService : IRefreshTokenService
     {
         _unitOfWork = unitOfWork;
     }
-    public async Task<IEnumerable<RefreshToken>> 
+    public async Task<IEnumerable<RefreshToken>>
         GetAllForUserDeviceNotRevokedAsync(RefreshTokenParameters refreshTokenParameters)
     {
         return await _unitOfWork.GetRepo<RefreshToken, Guid>()
@@ -33,7 +33,7 @@ public class RefreshTokenService : IRefreshTokenService
 
     public async Task<RefreshToken> GetWithDeviceIdNotRevokedAsync(RefreshTokenParameters refreshTokenParameters)
     {
-        return await _unitOfWork.GetRepo<RefreshToken,Guid>()
+        return await _unitOfWork.GetRepo<RefreshToken, Guid>()
             .GetAsync(new RefreshTokenSpecification(refreshTokenParameters));
     }
 

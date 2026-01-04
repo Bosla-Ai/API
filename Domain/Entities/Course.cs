@@ -14,7 +14,7 @@ public sealed class Course
     public string Url { get; set; } = "";
     public BudgetPreference? CourseBudget { get; set; } = BudgetPreference.Free;
     public DateTime RetrievedAt { get; set; } = DateTime.UtcNow;
-    
+
     // Navigation properties
     public ICollection<RoadmapCourse> RoadmapCourses { get; set; } = new List<RoadmapCourse>();
     public ICollection<CourseTag> CourseTags { get; set; } = new List<CourseTag>();

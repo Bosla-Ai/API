@@ -197,7 +197,8 @@ public class AuthenticationService(
             await refreshTokenService
                 .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
                 {
-                    DeviceId = loginServerResponse.DeviceId, UserId = user.Id
+                    DeviceId = loginServerResponse.DeviceId,
+                    UserId = user.Id
                 });
 
         if (existing != null && existing.Any())
@@ -450,7 +451,7 @@ public class AuthenticationService(
         if (existing != null && existing.Id != user.Id)
         {
             return IdentityResult.Failed(new IdentityError
-                { Description = "External login already linked to another account." });
+            { Description = "External login already linked to another account." });
         }
 
         return await userManager.AddLoginAsync(user, login);
