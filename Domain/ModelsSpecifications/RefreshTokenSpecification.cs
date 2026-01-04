@@ -13,6 +13,6 @@ public class RefreshTokenSpecification : Specifications<RefreshToken>
                     && (!r.IsRevoked)
         )
     {
-        
+
     }
 }

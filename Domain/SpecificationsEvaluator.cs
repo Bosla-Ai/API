@@ -6,8 +6,8 @@ namespace Domain;
 
 public static class SpecificationsEvaluator
 {
-    public static IQueryable<TEntity?> GetQuery<TEntity>(IQueryable<TEntity> query 
-        ,Specifications<TEntity> specifications) where TEntity : class
+    public static IQueryable<TEntity?> GetQuery<TEntity>(IQueryable<TEntity> query
+        , Specifications<TEntity> specifications) where TEntity : class
     {
         if (specifications == null)
         {
@@ -23,7 +23,7 @@ public static class SpecificationsEvaluator
                 query = query.Include(include);
             }
         }
-        
+
         return query;
     }
 }

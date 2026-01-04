@@ -13,14 +13,14 @@ public interface IAuthenticationService
 {
     Task<ApplicationUser?> GetUserByEmailAsync(string email);
     Task<APIResponse> RegisterCustomerAsync(CustomerRegisterDTO customerDto);
-    Task<(APIResponse<LoginClientResponse> apiResponse 
+    Task<(APIResponse<LoginClientResponse> apiResponse
         , LoginServerResponse loginServerResponse)> LoginAsync(LoginDTO loginDto);
     Task<APIResponse> LogoutThisDeviceAsync(LogoutRequest logoutRequest);
     Task<APIResponse> LogoutAllDevicesAsync(LogoutForAllRequest logoutRequest);
-    Task<(APIResponse<LoginClientResponse> apiResponse 
+    Task<(APIResponse<LoginClientResponse> apiResponse
         , LoginServerResponse loginServerResponse)> RefreshAsync(RefreshRequest refreshRequest);
     Task<APIResponse<ApplicationUserDTO>> GetMeAsync(string userId);
-    Task<LoginServerResponse> GoogleLoginAsync(ClaimsPrincipal principal , string provider, string returnUrl = "/");
+    Task<LoginServerResponse> GoogleLoginAsync(ClaimsPrincipal principal, string provider, string returnUrl = "/");
     Task<LoginServerResponse> GitHubLoginAsync(ClaimsPrincipal principal, string provider, string returnUrl = "/");
     Task<LoginServerResponse> LinkedInLoginAsync(ClaimsPrincipal principal, string provider, string returnUrl = "/");
     Task<ApplicationUser?> GetUserByIdAsync(string id);

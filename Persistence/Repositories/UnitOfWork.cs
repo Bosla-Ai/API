@@ -24,7 +24,7 @@ public class UnitOfWork : IUnitOfWork
     {
         var typeName = typeof(TEntity).Name;
 
-        return (IGenericRepository<TEntity, TKey>) _repositories.GetOrAdd(typeName,
+        return (IGenericRepository<TEntity, TKey>)_repositories.GetOrAdd(typeName,
             _ => new GenericRepository<TEntity, TKey>(_context));
     }
 }
