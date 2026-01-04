@@ -5,6 +5,7 @@ using Domain.Requests;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
 using Shared;
 using Shared.DTOs.ApplicationUserDTOs;
@@ -14,8 +15,9 @@ using Shared.DTOs.RegisterDTOs;
 namespace Presintation.Controllers;
 
 public class AuthenticationController(
-    IServiceManager serviceManager)
-    : ApiController
+    IServiceManager serviceManager,
+    IConfiguration configuration)
+    : ApiController(configuration)
 {
     
     [EnableRateLimiting("AuthPolicy")]

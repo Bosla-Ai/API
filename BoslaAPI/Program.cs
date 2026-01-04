@@ -95,7 +95,7 @@ builder.Services.AddCors(options =>
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials()
-                .WithOrigins("http://localhost:5173","https://front.bosla.almiraj.xyz");
+                .WithOrigins("http://localhost:5173", "https://front.bosla.almiraj.xyz");
         });
 });
 
@@ -104,8 +104,8 @@ await app.DbSeedingAsync();
 
 // if (app.Environment.IsDevelopment())
 // {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+app.UseSwagger();
+app.UseSwaggerUI();
 // }
 
 app.UseMiddleware<ApiResponseMiddleware>();

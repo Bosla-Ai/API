@@ -11,17 +11,18 @@ namespace Presintation.Controllers;
 [ProducesResponseType(StatusCodes.Status200OK)]
 [ProducesResponseType(StatusCodes.Status400BadRequest)]
 [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-public class ApiController : ControllerBase
+public class ApiController(IConfiguration configuration) : ControllerBase
 {
     protected CookieOptions GetCookieOptions(DateTime lifeTime)
     {
+        var domain = configuration["CookieSettings:AllowedSubDomain"] ?? ".bosla.almiraj.xyz";
         return new CookieOptions
         {
             HttpOnly = true,
             Secure = true,
             SameSite = SameSiteMode.None,
             Expires = lifeTime,
-            Domain = ".bosla.almiraj.xyz",
+            Domain = domain,
         };
     }
     protected void SetAuthCookies(LoginServerResponse response)

@@ -9,13 +9,15 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
 using Shared;
 
 namespace Presintation.Controllers;
 
 public class ExternalAuthenticationController(
-    IServiceManager serviceManager) : ApiController
+    IServiceManager serviceManager,
+    IConfiguration configuration) : ApiController(configuration)
 {
     [EnableRateLimiting("AuthPolicy")]
     [HttpGet("LinkedInSignIn")]

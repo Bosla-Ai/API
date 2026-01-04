@@ -2,6 +2,7 @@ using System.Net;
 using Domain.Responses;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Service.Abstraction;
 using Shared;
@@ -9,8 +10,9 @@ using Shared;
 namespace Presintation.Controllers;
 public class UserController(
     ILogger<UserController> logger,
-    IServiceManager serviceManager)
-    : ApiController
+    IServiceManager serviceManager,
+    IConfiguration configuration)
+    : ApiController(configuration)
 {
     /// Send a text query to the AI and get a response
     [HttpPost("ask-ai")]

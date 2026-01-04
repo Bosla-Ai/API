@@ -17,9 +17,5 @@ public class CustomerConfigurations : IEntityTypeConfiguration<Customer> // app 
 
         builder.Property(c => c.UserLevel)
             .HasConversion<string>();
-        builder.Property(c => c.BudgetPreference)
-            .HasConversion<string>();
-        builder.Property(c => c.SelectedDomain)
-            .HasConversion<string>();
     }
 }

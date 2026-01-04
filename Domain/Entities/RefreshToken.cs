@@ -1,6 +1,6 @@
 namespace Domain.Entities;
 
-public class RefreshToken
+public sealed class RefreshToken
 {
     public int Id { get; set; }
     public string UserId { get; set; }

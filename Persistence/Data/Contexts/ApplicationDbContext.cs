@@ -25,14 +25,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     
     public DbSet<ApplicationUser> ApplicationUsers { get; set; }
     public DbSet<Customer> Customers { get; set; } // public DbSet<ResourceTag> ResourceTags { get; set; }
-    public DbSet<DomainField> Domains { get; set; }
-    public DbSet<Resource> Resources { get; set; }
-    public DbSet<Roadmap> Roadmaps { get; set; }
-    public DbSet<RoadmapResource> RoadmapResources { get; set; }
-    public DbSet<Topic> Topics { get; set; }
-    public DbSet<Track> Tracks { get; set; }
-    public DbSet<TopicTechnology> TopicTechnologies { get; set; }
-    public DbSet<TrackTechnology> TrackTechnologies { get; set; }
-    public DbSet<LLMInteraction> LLMInteractions { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
+    public DbSet<Course> Courses { get; set; }
 }
