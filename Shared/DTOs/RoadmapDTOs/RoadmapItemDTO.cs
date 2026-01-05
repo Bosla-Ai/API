@@ -25,6 +25,6 @@ public class RoadmapItemDTO
     [JsonPropertyName("score")]
     public double Score { get; set; }
 
-    [JsonPropertyName("platform")] 
+    [JsonPropertyName("platform")]
     public string? Platform { get; set; } // e.g. "Coursera", "Udemy"
 }

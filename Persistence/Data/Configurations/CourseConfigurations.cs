@@ -12,7 +12,7 @@ public class CourseConfigurations : IEntityTypeConfiguration<Course>
 
         // Unique Constraints
         builder.HasIndex(c => c.Url).IsUnique();
-        
+
         // Properties
         builder.Property(c => c.Title)
             .HasMaxLength(500)
@@ -22,13 +22,13 @@ public class CourseConfigurations : IEntityTypeConfiguration<Course>
             .HasMaxLength(1000);
 
         builder.Property(c => c.Instructor)
-            .HasMaxLength(200); 
+            .HasMaxLength(200);
 
         builder.Property(c => c.ImageUrl)
-            .HasMaxLength(1000); 
-            
+            .HasMaxLength(1000);
+
         builder.Property(c => c.Duration)
-            .HasMaxLength(50);   
+            .HasMaxLength(50);
 
         builder.Property(c => c.Rating)
             .HasDefaultValue(0.0);

@@ -11,7 +11,7 @@ namespace Presintation.Controllers;
 [ApiController]
 public class RoadmapGeneratorController(
     IServiceManager serviceManager
-    , IConfiguration configuration) : ApiController(configuration) 
+    , IConfiguration configuration) : ApiController(configuration)
 {
     [HttpPost("generate")]
     public async Task<IActionResult> Generate([FromBody] RoadmapRequestDTO request)
@@ -26,14 +26,14 @@ public class RoadmapGeneratorController(
             request.PreferPaid
         );
 
-        return Ok(result); 
+        return Ok(result);
     }
 
     [HttpPost("save")]
-    [Authorize] 
+    [Authorize]
     public async Task<IActionResult> SaveRoadmap([FromBody] RoadmapDTO request)
     {
-        var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value 
+        var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
                      ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         if (string.IsNullOrEmpty(userId))

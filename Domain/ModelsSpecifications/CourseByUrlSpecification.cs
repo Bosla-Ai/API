@@ -6,9 +6,9 @@ namespace Domain.ModelsSpecifications;
 
 public class CourseByUrlSpecification : Specifications<Course>
 {
-    public CourseByUrlSpecification(string url) 
+    public CourseByUrlSpecification(string url)
         : base(c => c.Url == url)
     {
-        
+
     }
 }

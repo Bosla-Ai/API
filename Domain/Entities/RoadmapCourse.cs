@@ -10,7 +10,7 @@ public sealed class RoadmapCourse
 
     public int Order { get; set; }  // optional: ordering inside roadmap
     public string? SectionName { get; set; }
-    
+
     public bool IsCompleted { get; set; } = false;
     public DateTime? CompletedAt { get; set; }
 }

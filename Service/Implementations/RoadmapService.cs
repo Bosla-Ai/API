@@ -50,16 +50,16 @@ public class RoadmapService : IRoadmapService
         };
 
         var httpClient = _httpClientFactory.CreateClient();
-        
+
         // Call the Python Microservice
         var response = await httpClient.PostAsJsonAsync(_pythonApiUrl, requestPayload);
-        
+
         if (!response.IsSuccessStatusCode)
             throw new Exception($"Python Scraper failed: {response.ReasonPhrase}");
 
         var roadmapData = await response.Content.ReadFromJsonAsync<RoadmapGenerationDTO>();
 
-        if (roadmapData == null) 
+        if (roadmapData == null)
             throw new Exception("Received empty data from Python Microservice.");
 
         var cacheOptions = new DistributedCacheEntryOptions
@@ -80,17 +80,17 @@ public class RoadmapService : IRoadmapService
             CustomerId = customerId,
             Title = request.Title,
             Description = request.Description,
-            SourceType = request.SourceType,     
-            TargetJobRole = request.TargetJobRole, 
+            SourceType = request.SourceType,
+            TargetJobRole = request.TargetJobRole,
             CreatedAt = DateTime.UtcNow,
             IsArchived = false,
-            RoadmapCourses = new List<RoadmapCourse>() 
+            RoadmapCourses = new List<RoadmapCourse>()
         };
 
         await _unitOfWork.GetRepo<Roadmap, int>().CreateAsync(roadmap);
 
         var allItems = new List<(RoadmapItemDTO Item, string Platform)>();
-        
+
         if (request.RoadmapData.Data.Udemy != null)
             allItems.AddRange(request.RoadmapData.Data.Udemy.Select(x => (x, "Udemy")));
 
@@ -118,7 +118,7 @@ public class RoadmapService : IRoadmapService
             else
             {
                 Enum.TryParse<Platforms>(platformName, true, out var platformEnum);
-                
+
                 courseToLink = new Course
                 {
                     Title = dto.Title,
@@ -126,19 +126,19 @@ public class RoadmapService : IRoadmapService
                     Description = dto.Description,
                     ImageUrl = dto.ImageUrl,
                     Duration = dto.Duration,
-                    Rating = dto.Score > 5 ? 5.0 : dto.Score, 
+                    Rating = dto.Score > 5 ? 5.0 : dto.Score,
                     Platform = platformEnum,
                     Language = "en", // Default
                     Difficulty = LevelType.Beginner, // Default
                     RetrievedAt = DateTime.UtcNow
                 };
-                
+
                 await _unitOfWork.GetRepo<Course, int>().CreateAsync(courseToLink);
             }
 
             var roadmapCourse = new RoadmapCourse
             {
-                Course = courseToLink, 
+                Course = courseToLink,
                 Order = orderCounter++,
                 SectionName = platformName, // e.g. "Coursera"
                 IsCompleted = false
@@ -148,7 +148,7 @@ public class RoadmapService : IRoadmapService
         }
 
         var result = await _unitOfWork.SaveChangesAsync();
-        
+
         return result > 0;
     }
 }

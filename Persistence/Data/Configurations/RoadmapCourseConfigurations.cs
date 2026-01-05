@@ -19,10 +19,10 @@ public class RoadmapCourseConfigurations : IEntityTypeConfiguration<RoadmapCours
 
         builder.Property(rc => rc.IsCompleted)
             .HasDefaultValue(false);
-        
+
         builder.Property(rc => rc.CompletedAt)
             .IsRequired(false);
-        
+
         // Relationships
         builder.HasOne(rc => rc.Roadmap)
             .WithMany(r => r.RoadmapCourses)

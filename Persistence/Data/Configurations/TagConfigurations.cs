@@ -12,7 +12,7 @@ public class TagConfigurations : IEntityTypeConfiguration<Tag>
 
         // Unique Constraints
         builder.HasIndex(t => t.Name).IsUnique();
-        
+
         // Properties
         builder.Property(t => t.Name)
             .HasMaxLength(50)

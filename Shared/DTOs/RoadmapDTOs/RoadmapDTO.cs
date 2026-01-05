@@ -7,7 +7,7 @@ public class RoadmapDTO
 {
     [Required]
     public string Title { get; set; } = "";
-    
+
     public string? Description { get; set; }
 
     public RoadmapSourceType SourceType { get; set; } = RoadmapSourceType.ManualSelection;

@@ -14,7 +14,7 @@ public class CourseTagConfigurations : IEntityTypeConfiguration<CourseTag>
         builder.HasOne(ct => ct.Course)
             .WithMany(c => c.CourseTags)
             .HasForeignKey(ct => ct.CourseId)
-            .OnDelete(DeleteBehavior.Cascade); 
+            .OnDelete(DeleteBehavior.Cascade);
 
         builder.HasOne(ct => ct.Tag)
             .WithMany(t => t.CourseTags)

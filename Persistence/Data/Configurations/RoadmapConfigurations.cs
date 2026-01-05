@@ -18,7 +18,7 @@ public class RoadmapConfigurations : IEntityTypeConfiguration<Roadmap>
             .HasMaxLength(1000); // Increased for LLM summaries
 
         builder.Property(r => r.SourceType)
-            .HasConversion<string>(); 
+            .HasConversion<string>();
 
         builder.Property(r => r.TargetJobRole)
             .HasMaxLength(200);
@@ -27,6 +27,6 @@ public class RoadmapConfigurations : IEntityTypeConfiguration<Roadmap>
         builder.HasOne(r => r.Customer)
             .WithMany(c => c.RoadMaps)
             .HasForeignKey(r => r.CustomerId)
-            .OnDelete(DeleteBehavior.Cascade); 
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
