@@ -11,12 +11,22 @@ public class RoadmapConfigurations : IEntityTypeConfiguration<Roadmap>
         builder.HasKey(r => r.Id);
 
         builder.Property(r => r.Title)
-            .HasMaxLength(200);
+            .HasMaxLength(200)
+            .IsRequired();
 
         builder.Property(r => r.Description)
-            .HasMaxLength(500);
+            .HasMaxLength(1000); // Increased for LLM summaries
 
-        //Relations
+        builder.Property(r => r.SourceType)
+            .HasConversion<string>(); 
 
+        builder.Property(r => r.TargetJobRole)
+            .HasMaxLength(200);
+
+        // Relations
+        builder.HasOne(r => r.Customer)
+            .WithMany(c => c.RoadMaps)
+            .HasForeignKey(r => r.CustomerId)
+            .OnDelete(DeleteBehavior.Cascade); 
     }
 }
