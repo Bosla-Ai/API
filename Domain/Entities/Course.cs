@@ -7,6 +7,7 @@ public sealed class Course
     public int Id { get; set; }
     // Core Info
     public string Title { get; set; } = "";
+    public string? Description { get; set; }
     public string Url { get; set; } = ""; // Unique Index recommended here
     public string? Instructor { get; set; }
     public Platforms Platform { get; set; }  // e.g. Coursera, edX, Udemy

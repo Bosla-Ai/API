@@ -18,6 +18,9 @@ public class CourseConfigurations : IEntityTypeConfiguration<Course>
             .HasMaxLength(500)
             .IsRequired();
 
+        builder.Property(c => c.Description)
+            .HasMaxLength(1000);
+
         builder.Property(c => c.Instructor)
             .HasMaxLength(200); 
 
