@@ -10,29 +10,44 @@ public class CourseConfigurations : IEntityTypeConfiguration<Course>
     {
         builder.HasKey(c => c.Id);
 
+        // Unique Constraints
+        builder.HasIndex(c => c.Url).IsUnique();
+        
+        // Properties
         builder.Property(c => c.Title)
             .HasMaxLength(500)
             .IsRequired();
 
         builder.Property(c => c.Instructor)
-            .HasMaxLength(100);
+            .HasMaxLength(200); 
 
+        builder.Property(c => c.ImageUrl)
+            .HasMaxLength(1000); 
+            
+        builder.Property(c => c.Duration)
+            .HasMaxLength(50);   
+
+        builder.Property(c => c.Rating)
+            .HasDefaultValue(0.0);
+
+        // Enums
         builder.Property(c => c.Platform)
-            .HasConversion<string>();
+            .HasConversion<string>(); // Store as "Udemy", "Coursera"
+
+        builder.Property(c => c.Difficulty)
+            .HasConversion<string>(); // Store as "Beginner", etc.
 
         builder.Property(c => c.CourseBudget)
             .HasConversion<string>();
 
         builder.Property(c => c.Url)
-            .IsRequired();
+            .IsRequired()
+            .HasMaxLength(1000);
 
-        //Relations
+        // Relations
         builder.HasMany(c => c.RoadmapCourses)
             .WithOne(rc => rc.Course)
-            .HasForeignKey(fk => fk.CourseId);
-
-        builder.HasMany(c => c.CourseTags)
-            .WithOne(ct => ct.Course)
-            .HasForeignKey(fk => fk.CourseId);
+            .HasForeignKey(rc => rc.CourseId)
+            .OnDelete(DeleteBehavior.Restrict); // Safety: Don't delete history if a course changes
     }
 }

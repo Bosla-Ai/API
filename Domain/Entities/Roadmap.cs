@@ -1,3 +1,5 @@
+using Shared.Enums;
+
 namespace Domain.Entities;
 
 public sealed class Roadmap
@@ -6,11 +8,14 @@ public sealed class Roadmap
     public string Title { get; set; } = "";
     public string? Description { get; set; }
 
-    public string UserId { get; set; }
-    public ICollection<Customer> Customers { get; set; } = new List<Customer>();
+    public RoadmapSourceType SourceType { get; set; } 
+    public string? TargetJobRole { get; set; }
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-    // Navigation: roadmap has many courses via join
+    // relationships
+    public string CustomerId { get; set; } 
+    public Customer? Customer { get; set; }
     public ICollection<RoadmapCourse> RoadmapCourses { get; set; } = new List<RoadmapCourse>();
+    
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public bool IsArchived { get; set; } = false;
 }
