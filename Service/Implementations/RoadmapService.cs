@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Domain.Contracts;
 using Domain.Entities;
+using Domain.Exceptions;
 using Domain.ModelsSpecifications;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
@@ -55,12 +56,12 @@ public class RoadmapService : IRoadmapService
         var response = await httpClient.PostAsJsonAsync(_pythonApiUrl, requestPayload);
 
         if (!response.IsSuccessStatusCode)
-            throw new Exception($"Python Scraper failed: {response.ReasonPhrase}");
+            throw new InternalServerErrorException($"Python Scraper failed: {response.ReasonPhrase}");
 
         var roadmapData = await response.Content.ReadFromJsonAsync<RoadmapGenerationDTO>();
 
         if (roadmapData == null)
-            throw new Exception("Received empty data from Python Microservice.");
+            throw new InternalServerErrorException("Received empty data from Python Microservice.");
 
         var cacheOptions = new DistributedCacheEntryOptions
         {
