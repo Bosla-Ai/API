@@ -21,22 +21,7 @@ namespace Persistence.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
-            
-            modelBuilder.Entity("CustomerRoadmap", b =>
-                {
-                    b.Property<string>("CustomersApplicationUserId")
-                        .HasColumnType("nvarchar(450)");
 
-                    b.Property<int>("RoadMapsId")
-                        .HasColumnType("int");
-
-                    b.HasKey("CustomersApplicationUserId", "RoadMapsId");
-
-                    b.HasIndex("RoadMapsId");
-
-                    b.ToTable("CustomerRoadmap");
-                });
-            
             modelBuilder.Entity("Domain.Entities.ApplicationUser", b =>
                 {
                     b.Property<string>("Id")
@@ -135,7 +120,7 @@ namespace Persistence.Migrations
 
                     b.Property<string>("CourseBudget")
                         .HasColumnType("nvarchar(max)");
-                    
+
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -174,7 +159,7 @@ namespace Persistence.Migrations
 
                     b.Property<int>("ReviewCount")
                         .HasColumnType("int");
-                    
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -189,7 +174,7 @@ namespace Persistence.Migrations
 
                     b.HasIndex("Url")
                         .IsUnique();
-                    
+
                     b.ToTable("Courses");
                 });
 
@@ -285,7 +270,7 @@ namespace Persistence.Migrations
 
                     b.ToTable("Domains");
                 });
-            
+
             modelBuilder.Entity("Domain.Entities.RefreshToken", b =>
                 {
                     b.Property<Guid>("DeviceId")
@@ -298,7 +283,6 @@ namespace Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("datetime2")
                         .HasDefaultValueSql("GETDATE()");
-
 
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("datetime2");
@@ -400,7 +384,7 @@ namespace Persistence.Migrations
                     b.Property<string>("SectionName")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
-                    
+
                     b.HasKey("RoadmapId", "CourseId");
 
                     b.HasIndex("CourseId");
@@ -527,7 +511,7 @@ namespace Persistence.Migrations
 
                     b.ToTable("TrackSection");
                 });
-            
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
                 {
                     b.Property<string>("Id")
@@ -660,7 +644,7 @@ namespace Persistence.Migrations
 
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
-            
+
             modelBuilder.Entity("Domain.Entities.CourseTag", b =>
                 {
                     b.HasOne("Domain.Entities.Course", "Course")
@@ -701,7 +685,18 @@ namespace Persistence.Migrations
 
                     b.Navigation("User");
                 });
-            
+
+            modelBuilder.Entity("Domain.Entities.Roadmap", b =>
+                {
+                    b.HasOne("Domain.Entities.Customer", "Customer")
+                        .WithMany("RoadMaps")
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Customer");
+                });
+
             modelBuilder.Entity("Domain.Entities.RoadmapCourse", b =>
                 {
                     b.HasOne("Domain.Entities.Course", "Course")
@@ -753,7 +748,7 @@ namespace Persistence.Migrations
 
                     b.Navigation("Track");
                 });
-            
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
@@ -818,7 +813,7 @@ namespace Persistence.Migrations
 
                     b.Navigation("RoadmapCourses");
                 });
-            
+
             modelBuilder.Entity("Domain.Entities.Customer", b =>
                 {
                     b.Navigation("RoadMaps");
@@ -828,7 +823,7 @@ namespace Persistence.Migrations
                 {
                     b.Navigation("Tracks");
                 });
-            
+
             modelBuilder.Entity("Domain.Entities.Roadmap", b =>
                 {
                     b.Navigation("RoadmapCourses");

@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Persistence.Migrations
 {
     /// <inheritdoc />
-    public partial class DatabaseUpdated : Migration
+    public partial class InitialCreate : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -63,6 +63,7 @@ namespace Persistence.Migrations
                     Id = table.Column<int>(type: "int", nullable: false)
                         .Annotation("SqlServer:Identity", "1, 1"),
                     Title = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: false),
+                    Description = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
                     Url = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: false),
                     Instructor = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
                     Platform = table.Column<string>(type: "nvarchar(max)", nullable: false),
@@ -78,6 +79,22 @@ namespace Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Courses", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "Domains",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    Title = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    Description = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    IconUrl = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    IsActive = table.Column<bool>(type: "bit", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Domains", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -258,6 +275,30 @@ namespace Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "Track",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    Title = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    Description = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    IconUrl = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    IsActive = table.Column<bool>(type: "bit", nullable: false),
+                    FixedTagsPayload = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    DomainId = table.Column<int>(type: "int", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Track", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_Track_Domains_DomainId",
+                        column: x => x.DomainId,
+                        principalTable: "Domains",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "CourseTag",
                 columns: table => new
                 {
@@ -307,6 +348,28 @@ namespace Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "TrackSection",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    Title = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    IsMultiSelect = table.Column<bool>(type: "bit", nullable: false),
+                    OrderIndex = table.Column<int>(type: "int", nullable: false),
+                    TrackId = table.Column<int>(type: "int", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_TrackSection", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_TrackSection_Track_TrackId",
+                        column: x => x.TrackId,
+                        principalTable: "Track",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "RoadmapCourse",
                 columns: table => new
                 {
@@ -330,6 +393,28 @@ namespace Persistence.Migrations
                         name: "FK_RoadmapCourse_Roadmap_RoadmapId",
                         column: x => x.RoadmapId,
                         principalTable: "Roadmap",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "TrackChoice",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    Label = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    TagsPayload = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    IsDefault = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    SectionId = table.Column<int>(type: "int", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_TrackChoice", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_TrackChoice_TrackSection_SectionId",
+                        column: x => x.SectionId,
+                        principalTable: "TrackSection",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
@@ -404,6 +489,21 @@ namespace Persistence.Migrations
                 table: "Tag",
                 column: "Name",
                 unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Track_DomainId",
+                table: "Track",
+                column: "DomainId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_TrackChoice_SectionId",
+                table: "TrackChoice",
+                column: "SectionId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_TrackSection_TrackId",
+                table: "TrackSection",
+                column: "TrackId");
         }
 
         /// <inheritdoc />
@@ -434,6 +534,9 @@ namespace Persistence.Migrations
                 name: "RoadmapCourse");
 
             migrationBuilder.DropTable(
+                name: "TrackChoice");
+
+            migrationBuilder.DropTable(
                 name: "AspNetRoles");
 
             migrationBuilder.DropTable(
@@ -446,10 +549,19 @@ namespace Persistence.Migrations
                 name: "Roadmap");
 
             migrationBuilder.DropTable(
+                name: "TrackSection");
+
+            migrationBuilder.DropTable(
                 name: "Customers");
 
             migrationBuilder.DropTable(
+                name: "Track");
+
+            migrationBuilder.DropTable(
                 name: "AspNetUsers");
+
+            migrationBuilder.DropTable(
+                name: "Domains");
         }
     }
 }
