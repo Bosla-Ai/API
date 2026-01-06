@@ -5,7 +5,7 @@ namespace Service.Abstraction;
 
 public interface IRefreshTokenService
 {
-    Task<IEnumerable<RefreshToken>> 
+    Task<IEnumerable<RefreshToken>>
         GetAllForUserDeviceNotRevokedAsync(RefreshTokenParameters refreshTokenParameters);
 
     Task UpdateAsync(RefreshToken refreshToken);

@@ -9,7 +9,7 @@ public class CourseConfigurations : IEntityTypeConfiguration<Course>
     public void Configure(EntityTypeBuilder<Course> builder)
     {
         builder.HasKey(c => c.Id);
-        
+
         builder.Property(c => c.Title)
             .HasMaxLength(500)
             .IsRequired();
@@ -25,7 +25,7 @@ public class CourseConfigurations : IEntityTypeConfiguration<Course>
 
         builder.Property(c => c.Url)
             .IsRequired();
-        
+
         //Relations
         builder.HasMany(c => c.RoadmapCourses)
             .WithOne(rc => rc.Course)

@@ -3,10 +3,10 @@ using Service.Abstraction;
 
 namespace Service.Implementations;
 
-public class ServiceManager :  IServiceManager
+public class ServiceManager : IServiceManager
 {
     private readonly IUnitOfWork _unitOfWork;
-    
+
     public IAuthenticationService Authentication { get; private set; }
     public ICustomerService Customer { get; private set; }
     public IRefreshTokenService RefreshToken { get; }
@@ -25,6 +25,6 @@ public class ServiceManager :  IServiceManager
     }
     public async Task SaveChangesAsync()
     {
-         await _unitOfWork.SaveChangesAsync();
+        await _unitOfWork.SaveChangesAsync();
     }
 }

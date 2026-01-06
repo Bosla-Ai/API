@@ -12,7 +12,7 @@ public sealed class ApplicationUserService : IApplicationUserService
     {
         _unitOfWork = unitOfWork;
     }
-    
+
     public async Task<IEnumerable<ApplicationUser>> GetAllAsync()
     {
         return await _unitOfWork.GetRepo<ApplicationUser, string>()
@@ -21,7 +21,7 @@ public sealed class ApplicationUserService : IApplicationUserService
 
     public async Task<ApplicationUser> GetByIdAsync(string applicationUserId)
     {
-        return await _unitOfWork.GetRepo<ApplicationUser,string>()
+        return await _unitOfWork.GetRepo<ApplicationUser, string>()
             .GetIdAsync(applicationUserId);
     }
 

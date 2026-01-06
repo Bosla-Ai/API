@@ -1,26 +1,400 @@
-# VS Code
-.vscode/
+# Build results
+secrets.json
+appsettings.Local.json
+appsettings.Production.json
+appsettings.Development.json
+# Secrets and sensitive configuration
 
-# Rider IDE
+.DS_Store
+# macOS
+
+*.DotSettings.user
+*.sln.docstates
+*.userosscache
+*.user
+*.suo
+*.rsuser
+# User-specific files
+
+!.env.example
+.env.*
+.env
+# Environment files - IMPORTANT: These contain secrets!
+
 .idea/
 *.sln.iml
+# JetBrains Rider
 
-# Build
-bin/
-obj/
+*.msp
+*.msm
+*.msix
+*.msi
+*.cab
+# Windows Installer files from build outputs
 
-# Configs with secrets
-appsettings.*.json
-!appsettings.json
-secrets.json
+.history/
+# Local History for Visual Studio Code
 
-# dotnet user secrets
-**/secrets.json
+*.code-workspace
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
+.vscode/*
+# VS Code files for those who want to mix VS Code and JetBrains Rider
 
-# Logs
-*.log
+*.dll.config
+# Fody - autoass generated files
 
-# Others
-*.db
-*.mdf
+.ionide/
+# Ionide (cross platform F# VS Code tools) working folder
+
+MigrationBackup/
+# Backup folder for Package Reference Convert tool in Visual Studio 2017
+
+healthchecksdb
+# BeatPulse healthcheck temp database
+
+.vshistory/
+# Visual Studio History (VSCH) add-in
+
+.localhistory/
+# Local History for Visual Studio
+
+.mfractor/
+# MFractors (Xamarin productivity tool) working folder
+
+*.nvuser
+# NVidia Nsight GPU Debugger configuration file
+
+*.binlog
+# MSBuild Binary and Structured Log
+
+ASALocalRun/
+# Azure Stream Analytics local run output
+
+OpenCover/
+# OpenCover UI analysis results
+
+*.xsd.cs
+*.odx.cs
+*.btm.cs
+*.btp.cs
+# BizTalk build output
+
+*.jmconfig
+# Telerik's JustMock configuration file
+
+[Cc]overage/
+# Cake - Coverage
+
+*.pyc
+__pycache__/
+# Python Tools for Visual Studio (PTVS)
+
+.cr/personal
+# CodeRush personal settings
+
+.fake/
+# FAKE - F# Make
+
+paket-files/
+.paket/paket.exe
+# Paket dependency manager
+
+_Pvt_Extensions
+**/*.Server/ModelManifest.xml
+**/*.Server/GeneratedArtifacts
+**/*.DesktopClient/ModelManifest.xml
+**/*.DesktopClient/GeneratedArtifacts
+**/*.HTMLClient/GeneratedArtifacts
+# Visual Studio LightSwitch build output
+
+*.aps
+*.ncb
+# Visual Studio 6 technical files
+
+*.dsp
+*.dsw
+# Visual Studio 6 workspace and project file (working project files containing files to include in project)
+
+*.vbp
+# Visual Studio 6 auto-generated project file (contains which files were open etc.)
+
+*.vbw
+# Visual Studio 6 auto-generated workspace file (contains which files were open etc.)
+
+*.opt
+# Visual Studio 6 workspace options file
+
+*.plg
+# Visual Studio 6 build log
+
+node_modules/
+.ntvs_analysis.dat
+# Node.js Tools for Visual Studio
+
+*.GhostDoc.xml
+# GhostDoc plugin setting file
+
+FakesAssemblies/
+# Microsoft Fakes
+
+*- [Bb]ackup ([0-9][0-9]).rdl
+*- [Bb]ackup ([0-9]).rdl
+*- [Bb]ackup.rdl
+*.rptproj.rsuser
+*.bim_*.settings
+*.bim.layout
+*.rdl.data
+# Business Intelligence projects
+
+*.ndf
 *.ldf
+*.mdf
+# SQL Server files
+
+*.rptproj.bak
+ServiceFabricBackup/
+UpgradeLog*.htm
+UpgradeLog*.XML
+Backup*/
+_UpgradeReport_Files/
+# because we have git ;-)
+# to a newer Visual Studio version. Backup files are not needed,
+# Backup & report files from converting an old project file
+
+Generated_Code/
+# RIA/Silverlight projects
+
+#bower_components/
+# (https://github.com/github/gitignore/pull/1529#issuecomment-104372622)
+# Since there are multiple workflows, uncomment next line to ignore bower_components
+
+#*.snk
+# (https://github.com/github/gitignore/pull/2483#issue-259490424)
+# Including strong name files can present a security risk
+
+orleans.codegen.cs
+*.publishsettings
+*.pfx
+*.jfm
+*.dbproj.schemaview
+*.dbmdl
+*~
+~$*
+ClientBin/
+# Others
+
+!?*.[Cc]ache/
+# but keep track of directories ending in .cache
+*.[Cc]ache
+# files ending in .cache can be ignored
+# Visual Studio cache files
+
+*.appxupload
+*.appxbundle
+*.appx
+_pkginfo.txt
+Package.StoreAssociation.xml
+BundleArtifacts/
+AppPackages/
+# Windows Store app package directories and files
+
+rcf/
+ecf/
+# Microsoft Azure Emulator
+
+*.build.csdef
+csx/
+# Microsoft Azure Build Output
+
+*.nuget.targets
+*.nuget.props
+# NuGet v3's project.json files produces more ignorable files
+#!**/[Pp]ackages/repositories.config
+# Uncomment if necessary however generally it will be regenerated when needed
+!**/[Pp]ackages/build/
+# except build/, which is used as an MSBuild target.
+**/[Pp]ackages/*
+# The packages folder can be ignored because of Package Restore
+*.snupkg
+# NuGet Symbol Packages
+*.nupkg
+# NuGet Packages
+
+PublishScripts/
+# in these scripts will be unencrypted
+# checkin your Azure Web App publish settings, but sensitive information contained
+# Microsoft Azure Web App publish settings. Comment the next line if you want to
+
+*.publishproj
+*.pubxml
+# but database connection strings (with potential passwords) will be unencrypted
+# Note: Comment the next line if you want to checkin your web deploy settings,
+*.azurePubxml
+*.[Pp]ublish.xml
+# Publish Web Output
+
+publish/
+# Click-Once directory
+
+DocProject/Help/html
+DocProject/Help/Html2
+DocProject/Help/*.hhp
+DocProject/Help/*.hhk
+DocProject/Help/*.hhc
+DocProject/Help/*.HxC
+DocProject/Help/*.HxT
+DocProject/buildhelp/
+# DocProject is a documentation generator add-in
+
+[Ee]xpress/
+# Installshield output folder
+
+.sass-cache/
+# Web workbench (Sass)
+
+AutoTest.Net/
+*.mm.*
+# MightyMoose
+
+nCrunchTemp_*
+.*crunch*.local.xml
+_NCrunch_*
+# NCrunch
+
+*.coveragexml
+*.coverage
+# Visual Studio code coverage results
+
+coverage*.info
+coverage*.xml
+coverage*.json
+# Coverlet is a free, cross platform Code Coverage Tool
+
+!.axoCover/settings.json
+.axoCover/*
+# AxoCover is a Code Coverage Tool
+
+*.dotCover
+# DotCover is a Code Coverage Tool
+
+_TeamCity*
+# TeamCity is a build add-in
+
+*.DotSettings.user
+*.[Rr]e[Ss]harper
+_ReSharper*/
+# ReSharper is a .NET coding add-in
+
+*.gpState
+# Guidance Automation Toolkit
+
+$tf/
+# TFS 2012 Local Workspace
+
+*.e2e
+# Visual Studio Trace Files
+
+*.sap
+*.vspx
+*.vsp
+*.psess
+# Visual Studio profiler
+
+*.VC.VC.opendb
+*.VC.db
+*.cachefile
+*.sdf
+*.opensdf
+*.opendb
+*.ncb
+*.aps
+ipch/
+# Visual C++ cache files
+
+_Chutzpah*
+# Chutzpah Test files
+
+*.scc
+*.svclog
+*.pidb
+.builds
+*.vssscc
+*.vspscc
+*.tlog
+*.log
+*_wpftmp.csproj
+*.tmp_proj
+*.tmp
+*.tlh
+*.tli
+*.tlb
+*.sbr
+*.rsp
+*.pgd
+*.pgc
+*.ipdb
+*.pdb
+*.pch
+*.iobj
+*.obj
+*.meta
+*.ilk
+*_h.h
+*_p.c
+*_i.c
+# Files built by Visual Studio
+
+StyleCopReport.xml
+# StyleCop
+
+ScaffoldingReadMe.txt
+# ASP.NET Scaffolding
+
+.tye/
+# Tye
+
+artifacts/
+project.fragment.lock.json
+project.lock.json
+# .NET Core
+
+BenchmarkDotNet.Artifacts/
+# Benchmark Results
+
+[Rr]eleasePublic/
+[Dd]ebugPublic/
+# Build Results of an ATL Project
+
+nunit-*.xml
+TestResult.xml
+*.VisualState.xml
+# NUnit
+
+[Bb]uild[Ll]og.*
+[Tt]est[Rr]esult*/
+# MSTest test Results
+
+Generated\ Files/
+# Visual Studio 2017 auto generated files
+
+#wwwroot/
+# Uncomment if you have tasks that create the project's static files in wwwroot
+.vs/
+# Visual Studio 2015/2017 cache/options directory
+
+[Ll]ogs/
+[Ll]og/
+[Oo]bj/
+[Bb]in/
+bld/
+[Aa][Rr][Mm]64/
+[Aa][Rr][Mm]/
+[Ww][Ii][Nn]32/
+x86/
+x64/
+[Rr]elease/
+[Dd]ebug/
+

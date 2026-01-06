@@ -19,7 +19,7 @@ public class AuthenticationController(
     IConfiguration configuration)
     : ApiController(configuration)
 {
-    
+
     [EnableRateLimiting("AuthPolicy")]
     [HttpPost("RegisterCustomer")]
     public async Task<ActionResult<APIResponse>> RegisterCustomer([FromBody] CustomerRegisterDTO customerDTO)
@@ -33,9 +33,9 @@ public class AuthenticationController(
     [HttpPost("Login")]
     public async Task<ActionResult<LoginClientResponse>> Login([FromBody] LoginDTO loginDto)
     {
-        var (response,loginServerResponse) = await serviceManager
+        var (response, loginServerResponse) = await serviceManager
             .Authentication.LoginAsync(loginDto);
-        
+
         if (response != null)
         {
             ClearAuthCookies();
@@ -55,10 +55,10 @@ public class AuthenticationController(
         {
             DeviceId = Guid.TryParse(deviceId, out var parsedDeviceId) ? parsedDeviceId : Guid.Empty
         };
-        
+
         var response = await serviceManager.Authentication
             .LogoutThisDeviceAsync(logoutRequest);
-        
+
         if (response != null)
         {
             ClearAuthCookies();
@@ -77,7 +77,7 @@ public class AuthenticationController(
         {
             DeviceId = Guid.TryParse(deviceId, out var parsedDeviceId) ? parsedDeviceId : Guid.Empty
         };
-        
+
         var response = await serviceManager.Authentication
             .LogoutAllDevicesAsync(logoutRequest);
         if (response != null)
@@ -100,8 +100,8 @@ public class AuthenticationController(
             RefreshToken = refreshToken,
             DeviceId = Guid.TryParse(deviceId, out var parsedDeviceId) ? parsedDeviceId : Guid.Empty
         };
-        
-        var (response,loginServerResponse) = await serviceManager.Authentication
+
+        var (response, loginServerResponse) = await serviceManager.Authentication
             .RefreshAsync(refreshRequest);
 
         if (loginServerResponse != null)

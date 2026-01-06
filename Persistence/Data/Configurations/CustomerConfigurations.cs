@@ -10,7 +10,7 @@ public class CustomerConfigurations : IEntityTypeConfiguration<Customer> // app 
     public void Configure(EntityTypeBuilder<Customer> builder)
     {
         builder.HasKey(pk => pk.ApplicationUserId);
-        
+
         builder.HasOne(p => p.ApplicationUser)
             .WithOne(c => c.CustomerProfile)
             .HasForeignKey<Customer>(c => c.ApplicationUserId);

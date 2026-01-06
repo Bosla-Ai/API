@@ -11,12 +11,12 @@ public class CustomerHelper(
     , HttpClient httpClient
     , IConfiguration configuration)
 {
-    private readonly string _apiKey = configuration["Gemini:ApiKey"] 
+    private readonly string _apiKey = configuration["Gemini:ApiKey"]
                                       ?? throw new InternalServerErrorException("Gemini API key is not configured");
 
-    private readonly string _geminiApiUrl = configuration["Gemini:ApiUrl"] 
+    private readonly string _geminiApiUrl = configuration["Gemini:ApiUrl"]
                                             ?? "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
-    
+
     public async Task<string> SendRequestToGemini(string prompt)
     {
         var requestBody = new

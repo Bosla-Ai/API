@@ -16,7 +16,7 @@ public class APIResponse
 public sealed class APIResponse<T> : APIResponse
 {
     public T Data { get; set; } = default!;
-    
+
     public APIResponse() { }
 
     public APIResponse(HttpStatusCode statusCode, T data = default, List<string>? errors = null)

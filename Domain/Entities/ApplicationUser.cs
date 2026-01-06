@@ -10,7 +10,7 @@ public sealed class ApplicationUser : IdentityUser
     public string Role { get; set; }
     public DateTime DateJoined { get; set; } = DateTime.UtcNow;
     public bool IsActive { get; set; } = true;
-    
+
     // Navigation Properties
     public Customer? CustomerProfile { get; set; }
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();

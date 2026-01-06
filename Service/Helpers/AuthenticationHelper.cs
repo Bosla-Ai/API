@@ -39,13 +39,13 @@ public class AuthenticationHelper(
             var storedHashBytes = Convert.FromBase64String(storedHash);
 
             return CryptographicOperations
-                .FixedTimeEquals(computed, storedHashBytes); 
+                .FixedTimeEquals(computed, storedHashBytes);
         }
         catch
         {
             return false;
         }
-    } 
+    }
 
     public string GeneratePlainRefreshToken()
     {
@@ -90,7 +90,7 @@ public class AuthenticationHelper(
     {
         return result.Errors.Select(e => e.Description).ToList();
     }
-    
+
     public async Task<LoginServerResponse>
         GenerateAndStoreTokensAsync(
             ApplicationUser user,
