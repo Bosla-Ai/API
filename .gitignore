@@ -16,9 +16,9 @@ appsettings.Development.json
 *.rsuser
 # User-specific files
 
-!.env.example
 .env.*
 .env
+!.env.example
 # Environment files - IMPORTANT: These contain secrets!
 
 .idea/
