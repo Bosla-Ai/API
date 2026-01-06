@@ -8,6 +8,7 @@ public class CourseTagConfigurations : IEntityTypeConfiguration<CourseTag>
 {
     public void Configure(EntityTypeBuilder<CourseTag> builder)
     {
+
         builder.HasKey(ct => new { ct.CourseId, ct.TagId });
 
         // Relationships
@@ -15,7 +16,7 @@ public class CourseTagConfigurations : IEntityTypeConfiguration<CourseTag>
             .WithMany(c => c.CourseTags)
             .HasForeignKey(ct => ct.CourseId)
             .OnDelete(DeleteBehavior.Cascade);
-
+        
         builder.HasOne(ct => ct.Tag)
             .WithMany(t => t.CourseTags)
             .HasForeignKey(ct => ct.TagId)

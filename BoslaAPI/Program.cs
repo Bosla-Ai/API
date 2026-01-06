@@ -2,6 +2,7 @@ using System.Security.Claims;
 using BoslaAPI;
 using BoslaAPI.Extensions;
 using BoslaAPI.Middlewares;
+using DotNetEnv;
 using Domain.Contracts;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -17,7 +18,13 @@ using Service.Extensions;
 using Service.Implementations;
 using Service.MappingProfiles;
 
+// Load environment variables from .env file
+Env.Load("../.env");
+
 var builder = WebApplication.CreateBuilder(args);
+
+// Add environment variables to configuration
+builder.Configuration.AddEnvironmentVariables();
 
 builder.Services.AddHttpClient();
 
