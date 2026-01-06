@@ -6,7 +6,7 @@ namespace Domain.ModelsSpecifications;
 
 public class CustomerDetailsSpecification : Specifications<Customer>
 {
-    public CustomerDetailsSpecification(string customerId) 
+    public CustomerDetailsSpecification(string customerId)
         : base(c => customerId == c.ApplicationUserId)
     {
         AddInclude(c => c.ApplicationUser);

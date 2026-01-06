@@ -44,10 +44,10 @@ public class CustomerService(
             throw new BadRequestException("Customer Id cannot be null or empty");
 
         var customer = await GetALlCustomerDetailsAsync(customerId);
-            
+
         if (customer == null)
             throw new NotFoundException("Customer not found");
-               
+
         return new APIResponse<CustomerDTO>()
         {
             StatusCode = HttpStatusCode.OK,
@@ -84,7 +84,7 @@ public class CustomerService(
     {
         var customer = await unitOfWork.GetRepo<Customer, string>()
             .GetAsync(new CustomerDetailsSpecification(id));
-        
+
         return mapper.Map<CustomerDTO>(customer);
     }
 }

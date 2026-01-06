@@ -15,8 +15,8 @@ public class RoadmapConfigurations : IEntityTypeConfiguration<Roadmap>
 
         builder.Property(r => r.Description)
             .HasMaxLength(500);
-        
+
         //Relations
-        
+
     }
 }

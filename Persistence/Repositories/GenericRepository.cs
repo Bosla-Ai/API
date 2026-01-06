@@ -5,7 +5,7 @@ using Persistence.Data.Contexts;
 
 namespace Persistence.Repositories;
 
-public class GenericRepository<TEntity,TKey> : IGenericRepository<TEntity,TKey> where TEntity:class
+public class GenericRepository<TEntity, TKey> : IGenericRepository<TEntity, TKey> where TEntity : class
 {
     private readonly ApplicationDbContext _context;
     private readonly DbSet<TEntity> _dbSet;

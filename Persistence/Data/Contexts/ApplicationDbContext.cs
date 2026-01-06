@@ -13,16 +13,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 {
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> context) : base(context)
     {
-        
+
     }
-    
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
         base.OnModelCreating(modelBuilder);
     }
-    
-    
+
+
     public DbSet<ApplicationUser> ApplicationUsers { get; set; }
     public DbSet<Customer> Customers { get; set; } // public DbSet<ResourceTag> ResourceTags { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }

@@ -8,7 +8,7 @@ public sealed class RefreshToken
     public Guid DeviceId { get; set; } //also the same SessionId
 
     public string TokenHash { get; set; } = null!;
-    public string TokenSalt { get; set; } = null!; 
+    public string TokenSalt { get; set; } = null!;
 
     public DateTime Created { get; set; }
     public DateTime ExpiresAt { get; set; }
