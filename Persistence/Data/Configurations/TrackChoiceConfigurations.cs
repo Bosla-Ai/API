@@ -9,12 +9,12 @@ public class TrackChoiceConfigurations : IEntityTypeConfiguration<TrackChoice>
     public void Configure(EntityTypeBuilder<TrackChoice> builder)
     {
         builder.HasKey(c => c.Id);
-        
+
         // Properties
         builder.Property(c => c.Label)
             .HasMaxLength(100)
             .IsRequired();
-        
+
         builder.Property(c => c.IsDefault)
             .HasDefaultValue(false);
     }

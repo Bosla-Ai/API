@@ -9,7 +9,7 @@ public class TrackSectionConfigurations : IEntityTypeConfiguration<TrackSection>
     public void Configure(EntityTypeBuilder<TrackSection> builder)
     {
         builder.HasKey(s => s.Id);
-        
+
         // Properties
         builder.Property(s => s.Title)
             .HasMaxLength(100)

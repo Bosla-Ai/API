@@ -9,12 +9,12 @@ public class DomainConfigurations : IEntityTypeConfiguration<Domains>
     public void Configure(EntityTypeBuilder<Domains> builder)
     {
         builder.HasKey(d => d.Id);
-        
+
         // Properties
         builder.Property(d => d.Title)
             .HasMaxLength(100)
             .IsRequired();
-        
+
         // Relationships
         builder.HasMany(d => d.Tracks)
             .WithOne(t => t.Domains)
