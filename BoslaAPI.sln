@@ -1,5 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+# 
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BoslaAPI", "BoslaAPI\BoslaAPI.csproj", "{99A3BDA2-5B8C-40A6-BEFE-A5B94B750971}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Core", "Core", "{8C2C0D92-0097-4682-B339-52263A7B425C}"
@@ -17,6 +18,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence", "Persistence\Persistence.csproj", "{72F7F9C5-A34C-430D-BF3D-4D151CDBBECD}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Shared", "Shared\Shared.csproj", "{B85F0FBC-5CB5-445D-820D-D8EB48989FFC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BoslaAPI.Tests", "BoslaAPI.Tests\BoslaAPI.Tests.csproj", "{2C6F3FA6-BF0F-4DEA-B181-56876F0F2052}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -52,6 +55,10 @@ Global
 		{B85F0FBC-5CB5-445D-820D-D8EB48989FFC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B85F0FBC-5CB5-445D-820D-D8EB48989FFC}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B85F0FBC-5CB5-445D-820D-D8EB48989FFC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2C6F3FA6-BF0F-4DEA-B181-56876F0F2052}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2C6F3FA6-BF0F-4DEA-B181-56876F0F2052}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2C6F3FA6-BF0F-4DEA-B181-56876F0F2052}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2C6F3FA6-BF0F-4DEA-B181-56876F0F2052}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{75CF4954-952D-4517-BCE7-B8302DBCCBD0} = {8C2C0D92-0097-4682-B339-52263A7B425C}
