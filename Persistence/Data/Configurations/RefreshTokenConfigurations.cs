@@ -11,7 +11,7 @@ public class RefreshTokenConfigurations : IEntityTypeConfiguration<RefreshToken>
         builder.HasKey(r => new { r.DeviceId, r.UserId });
 
         builder.Property(r => r.Created)
-            .HasDefaultValueSql("getdate()");
+            .HasDefaultValueSql("GETDATE()");
 
         builder.HasOne(r => r.User)
             .WithMany(a => a.RefreshTokens)

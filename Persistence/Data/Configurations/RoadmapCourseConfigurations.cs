@@ -8,19 +8,28 @@ public class RoadmapCourseConfigurations : IEntityTypeConfiguration<RoadmapCours
 {
     public void Configure(EntityTypeBuilder<RoadmapCourse> builder)
     {
-        // Define composite primary key for the many-to-many join table
         builder.HasKey(rc => new { rc.RoadmapId, rc.CourseId });
 
-        // Configure relationship to Roadmap
+        // Properties
+        builder.Property(rc => rc.Order)
+            .IsRequired();
+
+        builder.Property(rc => rc.SectionName)
+            .HasMaxLength(200);
+
+        builder.Property(rc => rc.IsCompleted)
+            .HasDefaultValue(false);
+
+        builder.Property(rc => rc.CompletedAt)
+            .IsRequired(false);
+
+        // Relationships
         builder.HasOne(rc => rc.Roadmap)
             .WithMany(r => r.RoadmapCourses)
-            .HasForeignKey(rc => rc.RoadmapId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .HasForeignKey(rc => rc.RoadmapId);
 
-        // Configure relationship to Course
         builder.HasOne(rc => rc.Course)
             .WithMany(c => c.RoadmapCourses)
-            .HasForeignKey(rc => rc.CourseId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .HasForeignKey(rc => rc.CourseId);
     }
 }

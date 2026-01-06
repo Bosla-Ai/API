@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Persistence.Data.Contexts;
 
@@ -11,9 +12,11 @@ using Persistence.Data.Contexts;
 namespace Persistence.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260105150020_Description Column added to Course table")]
+    partial class DescriptionColumnaddedtoCoursetable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -21,22 +24,7 @@ namespace Persistence.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
-            
-            modelBuilder.Entity("CustomerRoadmap", b =>
-                {
-                    b.Property<string>("CustomersApplicationUserId")
-                        .HasColumnType("nvarchar(450)");
 
-                    b.Property<int>("RoadMapsId")
-                        .HasColumnType("int");
-
-                    b.HasKey("CustomersApplicationUserId", "RoadMapsId");
-
-                    b.HasIndex("RoadMapsId");
-
-                    b.ToTable("CustomerRoadmap");
-                });
-            
             modelBuilder.Entity("Domain.Entities.ApplicationUser", b =>
                 {
                     b.Property<string>("Id")
@@ -135,7 +123,7 @@ namespace Persistence.Migrations
 
                     b.Property<string>("CourseBudget")
                         .HasColumnType("nvarchar(max)");
-                    
+
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -174,7 +162,7 @@ namespace Persistence.Migrations
 
                     b.Property<int>("ReviewCount")
                         .HasColumnType("int");
-                    
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -189,7 +177,7 @@ namespace Persistence.Migrations
 
                     b.HasIndex("Url")
                         .IsUnique();
-                    
+
                     b.ToTable("Courses");
                 });
 
@@ -257,35 +245,6 @@ namespace Persistence.Migrations
                     b.ToTable("Customers");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Domains", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("IconUrl")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("Domains");
-                });
-            
             modelBuilder.Entity("Domain.Entities.RefreshToken", b =>
                 {
                     b.Property<Guid>("DeviceId")
@@ -298,7 +257,6 @@ namespace Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("datetime2")
                         .HasDefaultValueSql("GETDATE()");
-
 
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("datetime2");
@@ -400,7 +358,7 @@ namespace Persistence.Migrations
                     b.Property<string>("SectionName")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
-                    
+
                     b.HasKey("RoadmapId", "CourseId");
 
                     b.HasIndex("CourseId");
@@ -429,105 +387,6 @@ namespace Persistence.Migrations
                     b.ToTable("Tag");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Track", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("DomainId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("FixedTagsPayload")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("IconUrl")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DomainId");
-
-                    b.ToTable("Track");
-                });
-
-            modelBuilder.Entity("Domain.Entities.TrackChoice", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<bool>("IsDefault")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<string>("Label")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<int>("SectionId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("TagsPayload")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SectionId");
-
-                    b.ToTable("TrackChoice");
-                });
-
-            modelBuilder.Entity("Domain.Entities.TrackSection", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<bool>("IsMultiSelect")
-                        .HasColumnType("bit");
-
-                    b.Property<int>("OrderIndex")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<int>("TrackId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TrackId");
-
-                    b.ToTable("TrackSection");
-                });
-            
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
                 {
                     b.Property<string>("Id")
@@ -660,7 +519,7 @@ namespace Persistence.Migrations
 
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
-            
+
             modelBuilder.Entity("Domain.Entities.CourseTag", b =>
                 {
                     b.HasOne("Domain.Entities.Course", "Course")
@@ -701,7 +560,18 @@ namespace Persistence.Migrations
 
                     b.Navigation("User");
                 });
-            
+
+            modelBuilder.Entity("Domain.Entities.Roadmap", b =>
+                {
+                    b.HasOne("Domain.Entities.Customer", "Customer")
+                        .WithMany("RoadMaps")
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Customer");
+                });
+
             modelBuilder.Entity("Domain.Entities.RoadmapCourse", b =>
                 {
                     b.HasOne("Domain.Entities.Course", "Course")
@@ -721,39 +591,6 @@ namespace Persistence.Migrations
                     b.Navigation("Roadmap");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Track", b =>
-                {
-                    b.HasOne("Domain.Entities.Domains", "Domains")
-                        .WithMany("Tracks")
-                        .HasForeignKey("DomainId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Domains");
-                });
-
-            modelBuilder.Entity("Domain.Entities.TrackChoice", b =>
-                {
-                    b.HasOne("Domain.Entities.TrackSection", "Section")
-                        .WithMany("Choices")
-                        .HasForeignKey("SectionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Section");
-                });
-
-            modelBuilder.Entity("Domain.Entities.TrackSection", b =>
-                {
-                    b.HasOne("Domain.Entities.Track", "Track")
-                        .WithMany("Sections")
-                        .HasForeignKey("TrackId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Track");
-                });
-            
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
@@ -818,17 +655,12 @@ namespace Persistence.Migrations
 
                     b.Navigation("RoadmapCourses");
                 });
-            
+
             modelBuilder.Entity("Domain.Entities.Customer", b =>
                 {
                     b.Navigation("RoadMaps");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Domains", b =>
-                {
-                    b.Navigation("Tracks");
-                });
-            
             modelBuilder.Entity("Domain.Entities.Roadmap", b =>
                 {
                     b.Navigation("RoadmapCourses");
@@ -837,16 +669,6 @@ namespace Persistence.Migrations
             modelBuilder.Entity("Domain.Entities.Tag", b =>
                 {
                     b.Navigation("CourseTags");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Track", b =>
-                {
-                    b.Navigation("Sections");
-                });
-
-            modelBuilder.Entity("Domain.Entities.TrackSection", b =>
-                {
-                    b.Navigation("Choices");
                 });
 #pragma warning restore 612, 618
         }
