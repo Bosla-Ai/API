@@ -10,6 +10,7 @@ public class ServiceManager : IServiceManager
     public IAuthenticationService Authentication { get; private set; }
     public ICustomerService Customer { get; private set; }
     public IRoadmapService Roadmap { get; private set; }
+    public IAdministrationService Administration { get; private set; }
     public IRefreshTokenService RefreshToken { get; }
 
 
@@ -18,12 +19,14 @@ public class ServiceManager : IServiceManager
         IAuthenticationService authentication,
         ICustomerService customer,
         IRoadmapService roadmap,
+        IAdministrationService administration,
         IRefreshTokenService refreshToken)
     {
         _unitOfWork = unitOfWork;
         Authentication = authentication;
         Customer = customer;
         Roadmap = roadmap;
+        Administration = administration;
         RefreshToken = refreshToken;
     }
     public async Task SaveChangesAsync()

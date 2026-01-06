@@ -7,7 +7,6 @@ using Shared.DTOs.RoadmapDTOs;
 
 namespace Presintation.Controllers;
 
-[Route("api/[controller]")]
 [ApiController]
 public class RoadmapGeneratorController(
     IServiceManager serviceManager
