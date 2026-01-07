@@ -1,9 +1,11 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Shared.DTOs.AdministrationDTOs;
+namespace Shared.DTOs.AdministrationDTOs.DomainDTOs;
 
 public sealed class DomainsDTO
 {
+    public int Id { get; set; }
+
     [Required(ErrorMessage = "Title is required.")]
     public string Title { get; set; }
 

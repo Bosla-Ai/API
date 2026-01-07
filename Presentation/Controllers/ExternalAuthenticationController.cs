@@ -13,7 +13,7 @@ using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
 using Shared;
 
-namespace Presintation.Controllers;
+namespace Presentation.Controllers;
 
 public class ExternalAuthenticationController(
     IServiceManager serviceManager,

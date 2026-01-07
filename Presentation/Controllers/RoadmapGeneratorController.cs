@@ -5,7 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
 using Shared.DTOs.RoadmapDTOs;
 
-namespace Presintation.Controllers;
+namespace Presentation.Controllers;
 
 [ApiController]
 public class RoadmapGeneratorController(
