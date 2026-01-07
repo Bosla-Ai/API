@@ -1,8 +1,9 @@
 using AutoMapper;
 using Domain.Entities;
-using Shared.DTOs.AdministrationDTOs;
+using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
 using Shared.DTOs.AdministrationDTOs.DomainDTOs;
 using Shared.DTOs.AdministrationDTOs.TrackDTOs;
+using Shared.DTOs.AdministrationDTOs.TrackChoiceDTOs;
 
 namespace Service.MappingProfiles;
 
@@ -19,7 +20,11 @@ public class AdministrationMapping : Profile
         CreateMap<TrackUpdateDTO, Track>().ReverseMap();
 
         CreateMap<TrackSectionDTO, TrackSection>().ReverseMap();
+        CreateMap<TrackSectionCreateDTO, TrackSection>().ReverseMap();
+        CreateMap<TrackSectionUpdateDTO, TrackSection>().ReverseMap();
 
         CreateMap<TrackChoiceDTO, TrackChoice>().ReverseMap();
+        CreateMap<TrackChoiceCreateDTO, TrackChoice>().ReverseMap();
+        CreateMap<TrackChoiceUpdateDTO, TrackChoice>().ReverseMap();
     }
 }

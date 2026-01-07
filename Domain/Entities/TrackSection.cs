@@ -13,5 +13,5 @@ public sealed class TrackSection
     public Track Track { get; set; } = null!;
 
     // Navigation: One Section -> Many Choices
-    public ICollection<TrackChoice> Choices { get; set; } = new List<TrackChoice>();
+    public ICollection<TrackChoice>? Choices { get; set; } = new List<TrackChoice>();
 }
