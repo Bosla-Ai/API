@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
-using Shared.DTOs.AdministrationDTOs;
+using Shared;
 using Shared.DTOs.AdministrationDTOs.DomainDTOs;
 using Shared.DTOs.AdministrationDTOs.TrackChoiceDTOs;
 using Shared.DTOs.AdministrationDTOs.TrackDTOs;
@@ -11,7 +11,7 @@ using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
 
 namespace Presentation.Controllers;
 
-// [Authorize(Roles = StaticData.AdminRoleName)]
+[Authorize(Roles = StaticData.AdminRoleName)]
 public class AdministrationController(
     IConfiguration configuration
     , IServiceManager serviceManager) : ApiController(configuration)
