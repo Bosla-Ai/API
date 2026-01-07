@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Shared;
 
-namespace Presintation.Controllers;
+namespace Presentation.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]

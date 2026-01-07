@@ -12,7 +12,7 @@ using Shared.DTOs.ApplicationUserDTOs;
 using Shared.DTOs.LoginDTOs;
 using Shared.DTOs.RegisterDTOs;
 
-namespace Presintation.Controllers;
+namespace Presentation.Controllers;
 
 public class AuthenticationController(
     IServiceManager serviceManager,

@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 using Service.Abstraction;
 using Shared;
 
-namespace Presintation.Controllers;
+namespace Presentation.Controllers;
 
 public class UserController(
     ILogger<UserController> logger,
