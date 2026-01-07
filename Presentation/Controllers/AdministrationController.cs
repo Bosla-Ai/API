@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
+using Shared.DTOs.AdministrationDTOs;
 
 namespace Presintation.Controllers;
 
@@ -17,5 +18,13 @@ public class AdministrationController(
         var domains = await serviceManager
             .Administration.GetDomainsAsync(isActive);
         return domains;
+    }
+
+    [HttpPost("/AddDomain")]
+    public async Task<ActionResult<APIResponse>> AddDomain([FromBody] DomainsDTO domainsDto)
+    {
+        var response = await serviceManager
+            .Administration.AddDomain(domainsDto);
+        return response;
     }
 }

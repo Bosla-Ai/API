@@ -1,11 +1,18 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace Shared.DTOs.AdministrationDTOs;
 
 public sealed class DomainsDTO
 {
-    public string Title { get; set; } = "";
-    public string Description { get; set; } = "";
-    public string IconUrl { get; set; } = "";
-    public bool IsActive { get; set; } = true;
+    [Required(ErrorMessage = "Title is required.")]
+    public string Title { get; set; }
 
-    public ICollection<TrackDTO> Tracks { get; set; } = new List<TrackDTO>();
+    [Required(ErrorMessage = "Description is required.")]
+    public string Description { get; set; }
+
+    [Required(ErrorMessage = "Icon URL is required.")]
+    [Url(ErrorMessage = "IconUrl must be a valid URL format (e.g., https://example.com/icon.png).")]
+    public string IconUrl { get; set; }
+
+    public bool IsActive { get; set; } = true;
 }
