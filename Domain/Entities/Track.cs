@@ -14,5 +14,5 @@ public sealed class Track
     public int DomainId { get; set; }
     public Domains Domains { get; set; } = null!;
 
-    public ICollection<TrackSection> Sections { get; set; } = new List<TrackSection>();
+    public ICollection<TrackSection>? Sections { get; set; } = new List<TrackSection>();
 }

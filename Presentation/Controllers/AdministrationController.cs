@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
+using Shared.DTOs.AdministrationDTOs;
 using Shared.DTOs.AdministrationDTOs.DomainDTOs;
+using Shared.DTOs.AdministrationDTOs.TrackDTOs;
 
 namespace Presentation.Controllers;
 
@@ -20,7 +22,7 @@ public class AdministrationController(
         return domains;
     }
 
-    [HttpGet("GetDomain/{id}")]
+    [HttpGet("GetDomain/{id:int}")]
     public async Task<ActionResult<APIResponse>> GetDomain(int id)
     {
         var response = await serviceManager
@@ -44,11 +46,51 @@ public class AdministrationController(
         return response;
     }
 
-    [HttpDelete("DeleteDomain/{id}")]
+    [HttpDelete("DeleteDomain/{id:int}")]
     public async Task<ActionResult<APIResponse>> DeleteDomain(int id)
     {
         var response = await serviceManager
             .Administration.DeleteDomain(id);
+        return response;
+    }
+
+    [HttpGet("GetTracks/{domainId:int}")]
+    public async Task<ActionResult<APIResponse>> GetTracks(int domainId)
+    {
+        var response = await serviceManager
+            .Administration.GetTracks(domainId);
+        return response;
+    }
+
+    [HttpGet("GetTrack/{id:int}")]
+    public async Task<ActionResult<APIResponse>> GetTrack(int id)
+    {
+        var response = await serviceManager
+            .Administration.GetTrack(id);
+        return response;
+    }
+
+    [HttpPost("AddTrack")]
+    public async Task<ActionResult<APIResponse>> AddTrack([FromBody] TrackCreateDTO trackCreateDto)
+    {
+        var response = await serviceManager
+            .Administration.AddTrack(trackCreateDto);
+        return response;
+    }
+
+    [HttpPut("UpdateTrack")]
+    public async Task<ActionResult<APIResponse>> UpdateTrack([FromBody] TrackUpdateDTO trackUpdateDto)
+    {
+        var response = await serviceManager
+            .Administration.UpdateTrack(trackUpdateDto);
+        return response;
+    }
+
+    [HttpDelete("DeleteTrack/{id:int}")]
+    public async Task<ActionResult<APIResponse>> DeleteTrack(int id)
+    {
+        var response = await serviceManager
+            .Administration.DeleteTrack(id);
         return response;
     }
 }
