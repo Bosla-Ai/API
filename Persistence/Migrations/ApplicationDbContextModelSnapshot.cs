@@ -175,7 +175,7 @@ namespace Persistence.Migrations
                     b.HasIndex("Url")
                         .IsUnique();
 
-                    b.ToTable("Courses");
+                    b.ToTable("Courses", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.CourseTag", b =>
@@ -190,7 +190,7 @@ namespace Persistence.Migrations
 
                     b.HasIndex("TagId");
 
-                    b.ToTable("CourseTag");
+                    b.ToTable("CourseTag", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Customer", b =>
@@ -239,7 +239,7 @@ namespace Persistence.Migrations
 
                     b.HasKey("ApplicationUserId");
 
-                    b.ToTable("Customers");
+                    b.ToTable("Customers", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Domains", b =>
@@ -268,7 +268,7 @@ namespace Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Domains");
+                    b.ToTable("Domains", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.RefreshToken", b =>
@@ -317,7 +317,7 @@ namespace Persistence.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("RefreshTokens");
+                    b.ToTable("RefreshTokens", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Roadmap", b =>
@@ -359,7 +359,7 @@ namespace Persistence.Migrations
 
                     b.HasIndex("CustomerId");
 
-                    b.ToTable("Roadmap");
+                    b.ToTable("Roadmap", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.RoadmapCourse", b =>
@@ -389,7 +389,7 @@ namespace Persistence.Migrations
 
                     b.HasIndex("CourseId");
 
-                    b.ToTable("RoadmapCourse");
+                    b.ToTable("RoadmapCourse", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Tag", b =>
@@ -410,7 +410,7 @@ namespace Persistence.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Tag");
+                    b.ToTable("Tag", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Track", b =>
@@ -448,7 +448,7 @@ namespace Persistence.Migrations
 
                     b.HasIndex("DomainId");
 
-                    b.ToTable("Track");
+                    b.ToTable("Track", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.TrackChoice", b =>
@@ -480,7 +480,7 @@ namespace Persistence.Migrations
 
                     b.HasIndex("SectionId");
 
-                    b.ToTable("TrackChoice");
+                    b.ToTable("TrackChoice", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.TrackSection", b =>
@@ -509,7 +509,7 @@ namespace Persistence.Migrations
 
                     b.HasIndex("TrackId");
 
-                    b.ToTable("TrackSection");
+                    b.ToTable("TrackSection", (string)null);
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>

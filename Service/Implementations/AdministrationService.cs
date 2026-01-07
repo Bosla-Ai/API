@@ -2,11 +2,13 @@ using System.Net;
 using AutoMapper;
 using Domain.Contracts;
 using Domain.Exceptions;
-using Domain.ModelsSpecifications.Administration;
+using Domain.ModelsSpecifications.Administration.DomainSpecifications;
+using Domain.ModelsSpecifications.Administration.TrackSpecifications;
 using Domain.Responses;
 using Domain.Entities;
 using Service.Abstraction;
 using Shared.DTOs.AdministrationDTOs.DomainDTOs;
+using Shared.DTOs.AdministrationDTOs.TrackDTOs;
 
 namespace Service.Implementations;
 
@@ -89,6 +91,86 @@ public class AdministrationService(
             throw new NotFoundException("This No Domain Match This Id !!");
 
         await unitOfWork.GetRepo<Domains, int>().DeleteAsync(domain);
+        await unitOfWork.SaveChangesAsync();
+        return new APIResponse()
+        {
+            StatusCode = HttpStatusCode.OK,
+        };
+    }
+
+    public async Task<APIResponse<IEnumerable<TrackDTO>>> GetTracks(int domainId)
+    {
+        var spec = new TracksByDomainIdSpecification(domainId);
+        var tracks = await unitOfWork.GetRepo<Track, int>().GetAllAsync(spec);
+        if (tracks == null)
+            throw new NotFoundException("No Tracks Exit Right Now");
+
+        return new APIResponse<IEnumerable<TrackDTO>>()
+        {
+            StatusCode = HttpStatusCode.OK,
+            Data = mapper.Map<IEnumerable<TrackDTO>>(tracks)
+        };
+    }
+
+    public async Task<APIResponse<TrackDTO>> GetTrack(int id)
+    {
+        if (id == 0 || id == null)
+            throw new BadRequestException("invalid track id");
+
+        var spec = new TrackByIdSpecification(id);
+        var track = await unitOfWork.GetRepo<Track, int>().GetAsync(spec);
+        if (track == null)
+            throw new NotFoundException("This No Track Match This Id !!");
+
+        return new APIResponse<TrackDTO>()
+        {
+            StatusCode = HttpStatusCode.OK,
+            Data = mapper.Map<TrackDTO>(track)
+        };
+    }
+
+    public async Task<APIResponse> AddTrack(TrackCreateDTO trackDto)
+    {
+        if (trackDto == null)
+            throw new BadRequestException("invalid track details");
+
+        var track = mapper.Map<Track>(trackDto);
+        await unitOfWork.GetRepo<Track, int>().CreateAsync(track);
+        await unitOfWork.SaveChangesAsync();
+        return new APIResponse()
+        {
+            StatusCode = HttpStatusCode.OK,
+        };
+    }
+
+    public async Task<APIResponse> UpdateTrack(TrackUpdateDTO trackDto)
+    {
+        if (trackDto == null)
+            throw new BadRequestException("invalid track details");
+
+        var track = mapper.Map<Track>(trackDto);
+        if (track == null)
+            throw new InternalServerErrorException("Internal Server Error While Mapping");
+
+        await unitOfWork.GetRepo<Track, int>().UpdateAsync(track);
+        await unitOfWork.SaveChangesAsync();
+        return new APIResponse()
+        {
+            StatusCode = HttpStatusCode.OK,
+        };
+    }
+
+    public async Task<APIResponse> DeleteTrack(int id)
+    {
+        if (id == 0 || id == null)
+            throw new BadRequestException("invalid track id");
+
+        var spec = new TrackByIdSpecification(id);
+        var track = await unitOfWork.GetRepo<Track, int>().GetAsync(spec);
+        if (track == null)
+            throw new NotFoundException("This No Track Match This Id !!");
+
+        await unitOfWork.GetRepo<Track, int>().DeleteAsync(track);
         await unitOfWork.SaveChangesAsync();
         return new APIResponse()
         {

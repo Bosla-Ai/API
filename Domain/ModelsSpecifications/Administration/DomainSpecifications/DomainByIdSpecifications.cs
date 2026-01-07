@@ -1,8 +1,7 @@
-using System.Linq.Expressions;
 using Domain.Contracts;
 using Domain.Entities;
 
-namespace Domain.ModelsSpecifications.Administration;
+namespace Domain.ModelsSpecifications.Administration.DomainSpecifications;
 
 public class DomainByIdSpecifications : Specifications<Domains>
 {
