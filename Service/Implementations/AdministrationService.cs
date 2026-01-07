@@ -27,4 +27,17 @@ public class AdministrationService(
             Data = mapper.Map<IEnumerable<DomainsDTO>>(domains)
         };
     }
+
+    public async Task<APIResponse> AddDomain(DomainsDTO domainsDto)
+    {
+        if (domainsDto == null)
+            throw new BadRequestException("invalid domain details");
+        var domain = mapper.Map<Domains>(domainsDto);
+        await unitOfWork.GetRepo<Domains, int>().CreateAsync(domain);
+        await unitOfWork.SaveChangesAsync();
+        return new APIResponse()
+        {
+            StatusCode = HttpStatusCode.OK,
+        };
+    }
 }

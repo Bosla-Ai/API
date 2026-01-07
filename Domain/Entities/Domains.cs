@@ -9,5 +9,5 @@ public sealed class Domains
     public bool IsActive { get; set; } = true;
 
     // One Domain has Many Tracks
-    public ICollection<Track> Tracks { get; set; } = new List<Track>();
+    public ICollection<Track>? Tracks { get; set; } = new List<Track>();
 }

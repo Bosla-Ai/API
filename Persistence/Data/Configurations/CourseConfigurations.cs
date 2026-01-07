@@ -9,7 +9,7 @@ public class CourseConfigurations : IEntityTypeConfiguration<Course>
     public void Configure(EntityTypeBuilder<Course> builder)
     {
         builder.HasKey(c => c.Id);
-        
+
         // Unique Constraints
         builder.HasIndex(c => c.Url).IsUnique();
 

@@ -8,6 +8,7 @@ using Service.Abstraction;
 using Shared;
 
 namespace Presintation.Controllers;
+
 public class UserController(
     ILogger<UserController> logger,
     IServiceManager serviceManager,

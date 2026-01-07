@@ -10,7 +10,7 @@ public class CustomerConfigurations : IEntityTypeConfiguration<Customer> // app 
     public void Configure(EntityTypeBuilder<Customer> builder)
     {
         builder.HasKey(pk => pk.ApplicationUserId);
-        
+
         // Properties
         builder.Property(c => c.AnalyzedSkillsJson).HasColumnType("nvarchar(max)");
         builder.Property(c => c.RecommendedTracksJson).HasColumnType("nvarchar(max)");
