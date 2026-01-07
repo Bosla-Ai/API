@@ -1,6 +1,9 @@
+using Domain.Entities;
 using Domain.Responses;
 using Shared.DTOs.AdministrationDTOs.TrackDTOs;
 using Shared.DTOs.AdministrationDTOs.DomainDTOs;
+using Shared.DTOs.AdministrationDTOs.TrackChoiceDTOs;
+using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
 
 namespace Service.Abstraction;
 
@@ -17,4 +20,16 @@ public interface IAdministrationService
     Task<APIResponse> AddTrack(TrackCreateDTO trackDto);
     Task<APIResponse> UpdateTrack(TrackUpdateDTO trackDto);
     Task<APIResponse> DeleteTrack(int id);
+
+    Task<APIResponse<IEnumerable<TrackSectionDTO>>> GetTrackSections(int trackId);
+    Task<APIResponse<TrackSectionDTO>> GetTrackSection(int id);
+    Task<APIResponse> AddTrackSection(TrackSectionCreateDTO trackSectionDto);
+    Task<APIResponse> UpdateTrackSection(TrackSectionUpdateDTO trackSectionDto);
+    Task<APIResponse> DeleteTrackSection(int id);
+
+    Task<APIResponse<IEnumerable<TrackChoiceDTO>>> GetTrackChoices(int trackId);
+    Task<APIResponse<TrackChoiceDTO>> GetTrackChoice(int id);
+    Task<APIResponse> AddTrackChoice(TrackChoiceCreateDTO trackChoiceDto);
+    Task<APIResponse> UpdateTrackChoice(TrackChoiceUpdateDTO trackChoiceDto);
+    Task<APIResponse> DeleteTrackChoice(int id);
 }
