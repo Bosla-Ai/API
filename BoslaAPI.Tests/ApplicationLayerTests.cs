@@ -26,13 +26,13 @@ public class ApplicationLayerTests
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
         _mockUnitOfWork = new Mock<IUnitOfWork>();
         _mockConfiguration = new Mock<IConfiguration>();
-        
+
         _mockConfiguration.Setup(c => c["PipelineApi:BaseUrl"]).Returns("http://test-api/generate-roadmap");
 
         _roadmapService = new RoadmapService(
             _mockCache.Object,
-            _mockHttpClientFactory.Object, 
-            _mockUnitOfWork.Object, 
+            _mockHttpClientFactory.Object,
+            _mockUnitOfWork.Object,
             _mockConfiguration.Object
         );
     }
@@ -46,7 +46,7 @@ public class ApplicationLayerTests
         var language = "en";
         var preferPaid = false;
         var cacheKey = "roadmap-csharp-dotnet-beginner-en-False";
-        
+
         var cachedDto = new RoadmapGenerationDTO { Status = "Cached" };
         var cachedJson = JsonSerializer.Serialize(cachedDto);
 
@@ -68,7 +68,7 @@ public class ApplicationLayerTests
         // Arrange
         var tags = new[] { "python" };
         var level = "advanced";
-        
+
         _mockCache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((byte[])null!);
 
