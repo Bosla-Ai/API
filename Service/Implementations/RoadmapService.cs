@@ -31,10 +31,10 @@ public class RoadmapService : IRoadmapService
         _pythonApiUrl = configuration["PipelineApi:BaseUrl"] ?? "http://localhost:8000/generate-roadmap";
     }
 
-    public async Task<RoadmapGenerationDTO> GenerateRoadmapAsync(string[] tags, string level, string language, bool preferPaid)
+    public async Task<RoadmapGenerationDTO> GenerateRoadmapAsync(string[] tags, string language, bool preferPaid)
     {
         var sortedTags = tags.OrderBy(t => t).ToArray();
-        string cacheKey = $"roadmap-{string.Join("-", sortedTags)}-{level}-{language}-{preferPaid}";
+        string cacheKey = $"roadmap-{string.Join("-", sortedTags)}-{language}-{preferPaid}";
 
         string? cachedJson = await _cache.GetStringAsync(cacheKey);
         if (!string.IsNullOrEmpty(cachedJson))
@@ -42,26 +42,60 @@ public class RoadmapService : IRoadmapService
             return JsonSerializer.Deserialize<RoadmapGenerationDTO>(cachedJson)!;
         }
 
-        var requestPayload = new
+        var courses = await _unitOfWork.GetRepo<Course, int>()
+                    .GetAllAsync(new CoursesByTagsAndLanguageSpecification(tags, language));
+
+
+        var missingTagsSet = new HashSet<string>(tags);
+
+        foreach (var course in courses)
         {
-            tags = tags,
-            level = level,
-            language = language,
-            prefer_paid = preferPaid
-        };
+            if (missingTagsSet.Count == 0)
+                break;
 
-        var httpClient = _httpClientFactory.CreateClient();
+            foreach (var ct in course.CourseTags)
+            {
+                if (ct.Tag?.Name != null)
+                {
+                    missingTagsSet.Remove(ct.Tag.Name);
+                }
+            }
+        }
 
-        // Call the Python Microservice
-        var response = await httpClient.PostAsJsonAsync(_pythonApiUrl, requestPayload);
+        var missingTags = missingTagsSet.ToArray();
 
-        if (!response.IsSuccessStatusCode)
-            throw new InternalServerErrorException($"Python Scraper failed: {response.ReasonPhrase}");
+        RoadmapGenerationDTO roadmapData;
 
-        var roadmapData = await response.Content.ReadFromJsonAsync<RoadmapGenerationDTO>();
+        if (missingTags.Any())
+        {
+            var requestPayload = new
+            {
+                tags = missingTags,
+                language = language,
+                prefer_paid = preferPaid
+            };
 
-        if (roadmapData == null)
-            throw new InternalServerErrorException("Received empty data from Python Microservice.");
+            var httpClient = _httpClientFactory.CreateClient();
+
+            // Call the Python Microservice
+            var response = await httpClient.PostAsJsonAsync(_pythonApiUrl, requestPayload);
+
+            if (!response.IsSuccessStatusCode)
+                throw new InternalServerErrorException($"Python Scraper failed: {response.ReasonPhrase}");
+
+            roadmapData = await response.Content.ReadFromJsonAsync<RoadmapGenerationDTO>();
+
+            if (roadmapData == null)
+                throw new InternalServerErrorException("Received empty data from Python Microservice.");
+        }
+        else
+        {
+            roadmapData = new RoadmapGenerationDTO
+            {
+                Status = "success",
+                Data = new RoadmapSourcesDTO()
+            };
+        }
 
         var cacheOptions = new DistributedCacheEntryOptions
         {
@@ -130,7 +164,6 @@ public class RoadmapService : IRoadmapService
                     Rating = dto.Score > 5 ? 5.0 : dto.Score,
                     Platform = platformEnum,
                     Language = "en", // Default
-                    Difficulty = LevelType.Beginner, // Default
                     RetrievedAt = DateTime.UtcNow
                 };
 

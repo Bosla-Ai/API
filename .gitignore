@@ -398,3 +398,5 @@ x64/
 [Rr]elease/
 [Dd]ebug/
 
+# global.json
+global.json
