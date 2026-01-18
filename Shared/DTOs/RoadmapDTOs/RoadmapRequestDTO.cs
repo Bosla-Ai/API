@@ -7,9 +7,6 @@ public class RoadmapRequestDTO
     [JsonPropertyName("tags")]
     public string[] Tags { get; set; } = Array.Empty<string>();
 
-    [JsonPropertyName("level")]
-    public string Level { get; set; } = "beginner";
-
     [JsonPropertyName("prefer_paid")]
     public bool PreferPaid { get; set; } = false;
 

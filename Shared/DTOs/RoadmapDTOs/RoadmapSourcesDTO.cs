@@ -11,5 +11,5 @@ public class RoadmapSourcesDTO
     public Dictionary<string, RoadmapItemDTO?> Coursera { get; set; } = new();
 
     [JsonPropertyName("udemy")]
-    public List<RoadmapItemDTO> Udemy { get; set; } = new();
+    public Dictionary<string, RoadmapItemDTO?> Udemy { get; set; } = new();
 }
