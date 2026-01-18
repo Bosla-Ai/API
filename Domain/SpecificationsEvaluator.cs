@@ -24,6 +24,14 @@ public static class SpecificationsEvaluator
             }
         }
 
+        if (specifications.IncludeStrings.Any())
+        {
+            foreach (var include in specifications.IncludeStrings)
+            {
+                query = query.Include(include);
+            }
+        }
+
         return query;
     }
 }

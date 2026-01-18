@@ -76,17 +76,31 @@ public class RoadmapService : IRoadmapService
             };
 
             var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromMinutes(10);
 
-            // Call the Python Microservice
-            var response = await httpClient.PostAsJsonAsync(_pythonApiUrl, requestPayload);
+            try
+            {
+                // Call the Python Microservice
+                var response = await httpClient.PostAsJsonAsync(_pythonApiUrl, requestPayload);
 
-            if (!response.IsSuccessStatusCode)
-                throw new InternalServerErrorException($"Python Scraper failed: {response.ReasonPhrase}");
+                if (!response.IsSuccessStatusCode)
+                    throw new InternalServerErrorException($"Python Scraper failed with status {response.StatusCode}: {response.ReasonPhrase}");
 
-            roadmapData = await response.Content.ReadFromJsonAsync<RoadmapGenerationDTO>();
+                roadmapData = await response.Content.ReadFromJsonAsync<RoadmapGenerationDTO>();
 
-            if (roadmapData == null)
-                throw new InternalServerErrorException("Received empty data from Python Microservice.");
+                if (roadmapData == null)
+                    throw new InternalServerErrorException("Received empty data from Python Microservice.");
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new InternalServerErrorException($"Failed to connect to Python Microservice at {_pythonApiUrl}. Is it running? Error: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                throw new InternalServerErrorException($"An unexpected error occurred while calling the Python Microservice: {ex.Message}");
+            }
+
+
         }
         else
         {
@@ -95,6 +109,50 @@ public class RoadmapService : IRoadmapService
                 Status = "success",
                 Data = new RoadmapSourcesDTO()
             };
+        }
+
+        // Merge DB found courses into roadmapData
+        foreach (var course in courses)
+        {
+            var dto = new RoadmapItemDTO
+            {
+                Title = course.Title,
+                Url = course.Url,
+                Description = course.Description,
+                ImageUrl = course.ImageUrl,
+                Price = course.CourseBudget.ToString(), // Assuming simple string conversion
+                Duration = course.Duration,
+                Score = course.Rating,
+                Platform = course.Platform.ToString()
+            };
+
+            // Generate a unique key for the dictionary
+            string key = $"db_{course.Id}";
+
+            switch (course.Platform)
+            {
+                case Platforms.Udemy:
+                    if (!roadmapData.Data.Udemy.ContainsKey(key))
+                    {
+                        roadmapData.Data.Udemy[key] = dto;
+                    }
+                    break;
+                case Platforms.Coursera:
+                    if (!roadmapData.Data.Coursera.ContainsKey(key))
+                    {
+                        roadmapData.Data.Coursera[key] = dto;
+                    }
+                    break;
+                case Platforms.Youtube:
+                    if (!roadmapData.Data.Youtube.ContainsKey(key))
+                    {
+                        roadmapData.Data.Youtube[key] = dto;
+                    }
+                    break;
+                default:
+                    // Handle other platforms or ignore
+                    break;
+            }
         }
 
         var cacheOptions = new DistributedCacheEntryOptions
@@ -127,7 +185,9 @@ public class RoadmapService : IRoadmapService
         var allItems = new List<(RoadmapItemDTO Item, string Platform)>();
 
         if (request.RoadmapData.Data.Udemy != null)
-            allItems.AddRange(request.RoadmapData.Data.Udemy.Select(x => (x, "Udemy")));
+            allItems.AddRange(request.RoadmapData.Data.Udemy.Values
+                .Where(x => x != null)
+                .Select(x => (x!, "Udemy")));
 
         if (request.RoadmapData.Data.Coursera != null)
             allItems.AddRange(request.RoadmapData.Data.Coursera.Values
@@ -141,33 +201,40 @@ public class RoadmapService : IRoadmapService
 
         int orderCounter = 1;
 
+        var processedCourses = new Dictionary<string, Course>();
+
         foreach (var (dto, platformName) in allItems)
         {
-            var spec = new CourseByUrlSpecification(dto.Url);
-            var existingCourse = await _unitOfWork.GetRepo<Course, int>().GetAsync(spec);
-            Course courseToLink;
-            if (existingCourse != null)
+            if (!processedCourses.TryGetValue(dto.Url, out var courseToLink))
             {
-                courseToLink = existingCourse;
-            }
-            else
-            {
-                Enum.TryParse<Platforms>(platformName, true, out var platformEnum);
+                var spec = new CourseByUrlSpecification(dto.Url);
+                var existingCourse = await _unitOfWork.GetRepo<Course, int>().GetAsync(spec);
 
-                courseToLink = new Course
+                if (existingCourse != null)
                 {
-                    Title = dto.Title,
-                    Url = dto.Url,
-                    Description = dto.Description,
-                    ImageUrl = dto.ImageUrl,
-                    Duration = dto.Duration,
-                    Rating = dto.Score > 5 ? 5.0 : dto.Score,
-                    Platform = platformEnum,
-                    Language = "en", // Default
-                    RetrievedAt = DateTime.UtcNow
-                };
+                    courseToLink = existingCourse;
+                }
+                else
+                {
+                    Enum.TryParse<Platforms>(platformName, true, out var platformEnum);
 
-                await _unitOfWork.GetRepo<Course, int>().CreateAsync(courseToLink);
+                    courseToLink = new Course
+                    {
+                        Title = dto.Title,
+                        Url = dto.Url,
+                        Description = dto.Description,
+                        ImageUrl = dto.ImageUrl,
+                        Duration = dto.Duration,
+                        Rating = dto.Score > 5 ? 5.0 : dto.Score,
+                        Platform = platformEnum,
+                        Language = "en", // Default
+                        RetrievedAt = DateTime.UtcNow
+                    };
+
+                    await _unitOfWork.GetRepo<Course, int>().CreateAsync(courseToLink);
+                }
+
+                processedCourses[dto.Url] = courseToLink;
             }
 
             var roadmapCourse = new RoadmapCourse

@@ -13,8 +13,15 @@ public abstract class Specifications<TEntity>
         Includes = new List<Expression<Func<TEntity, object>>>();
     }
 
+    public List<string> IncludeStrings { get; } = new List<string>();
+
     public void AddInclude(Expression<Func<TEntity, object>> includeExpression)
     {
         Includes.Add(includeExpression);
+    }
+
+    public void AddInclude(string includeString)
+    {
+        IncludeStrings.Add(includeString);
     }
 }

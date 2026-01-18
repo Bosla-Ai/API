@@ -10,5 +10,6 @@ public class CoursesByTagsAndLanguageSpecification : Specifications<Course>
         : base(c => c.Language == language && c.CourseTags.Any(ct => ct.Tag != null && tags.Contains(ct.Tag.Name)))
     {
         AddInclude(c => c.CourseTags);
+        AddInclude("CourseTags.Tag");
     }
 }
