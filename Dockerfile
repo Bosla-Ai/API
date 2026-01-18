@@ -25,5 +25,9 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 EXPOSE 8080
 EXPOSE 8081
+
+# Set Production environment (ignores appsettings.Development.json)
+ENV ASPNETCORE_ENVIRONMENT=Production
+
 COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "BoslaAPI.dll"]

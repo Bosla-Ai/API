@@ -15,15 +15,24 @@ public class ApiController(IConfiguration configuration) : ControllerBase
 {
     protected CookieOptions GetCookieOptions(DateTime lifeTime)
     {
-        var domain = configuration["CookieSettings:AllowedSubDomain"] ?? ".bosla.almiraj.xyz";
-        return new CookieOptions
+        var domain = configuration["CookieSettings:AllowedSubDomain"];
+        var isSecure = bool.TryParse(configuration["CookieSettings:Secure"], out var secure) ? secure : true;
+        
+        var options = new CookieOptions
         {
             HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.None,
+            Secure = isSecure,
+            SameSite = isSecure ? SameSiteMode.None : SameSiteMode.Lax,
             Expires = lifeTime,
-            Domain = domain,
         };
+        
+        // Only set domain if explicitly configured (empty = localhost)
+        if (!string.IsNullOrEmpty(domain))
+        {
+            options.Domain = domain;
+        }
+        
+        return options;
     }
     protected void SetAuthCookies(LoginServerResponse response)
     {
@@ -36,8 +45,9 @@ public class ApiController(IConfiguration configuration) : ControllerBase
     }
     protected void ClearAuthCookies()
     {
-        Response.Cookies.Delete(StaticData.AccessToken, new CookieOptions { Domain = ".bosla.almiraj.xyz", Secure = true, SameSite = SameSiteMode.None });
-        Response.Cookies.Delete(StaticData.RefreshToken, new CookieOptions { Domain = ".bosla.almiraj.xyz", Secure = true, SameSite = SameSiteMode.None });
-        Response.Cookies.Delete(StaticData.DeviceId, new CookieOptions { Domain = ".bosla.almiraj.xyz", Secure = true, SameSite = SameSiteMode.None });
+        var options = GetCookieOptions(DateTime.UtcNow.AddDays(-1));
+        Response.Cookies.Delete(StaticData.AccessToken, options);
+        Response.Cookies.Delete(StaticData.RefreshToken, options);
+        Response.Cookies.Delete(StaticData.DeviceId, options);
     }
 }
