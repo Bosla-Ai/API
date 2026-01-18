@@ -19,6 +19,4 @@ public sealed class CustomerRegisterDTO
     public string PasswordConfirm { get; set; }
     [Phone]
     public string PhoneNumber { get; set; }
-
-    [JsonIgnore] public string Role { get; set; } = StaticData.CustomerRoleName;
 }

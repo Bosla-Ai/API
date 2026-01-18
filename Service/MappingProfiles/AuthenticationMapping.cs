@@ -9,7 +9,9 @@ public sealed class AuthenticationMapping : Profile
 {
     public AuthenticationMapping()
     {
-        CreateMap<ApplicationUserDTO, ApplicationUser>().ReverseMap();
+        CreateMap<ApplicationUser, ApplicationUserDTO>()
+            .ForMember(dest => dest.Role, opt => opt.Ignore());
+        CreateMap<ApplicationUserDTO, ApplicationUser>();
         CreateMap<LoginServerResponse, LoginClientResponse>().ReverseMap();
     }
 }

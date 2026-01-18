@@ -171,10 +171,15 @@ public class AuthenticationServiceTests
         var userId = "user-123";
         var user = new ApplicationUser { Id = userId, Email = "test@example.com" };
         var userDto = new ApplicationUserDTO { Email = "test@example.com" };
+        var roles = new List<string> { "CustomerRole" };
 
         _userManagerMock
             .Setup(m => m.FindByIdAsync(userId))
             .ReturnsAsync(user);
+        
+        _userManagerMock
+            .Setup(m => m.GetRolesAsync(user))
+            .ReturnsAsync(roles);
 
         var mapperMock = new Mock<IMapper>();
         mapperMock
@@ -190,6 +195,7 @@ public class AuthenticationServiceTests
         result.Should().NotBeNull();
         result.StatusCode.Should().Be(HttpStatusCode.OK);
         result.Data!.Email.Should().Be("test@example.com");
+        result.Data!.Role.Should().Be("CustomerRole");
     }
 
     [Fact]
