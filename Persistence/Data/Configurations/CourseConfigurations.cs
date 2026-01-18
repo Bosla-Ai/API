@@ -37,9 +37,6 @@ public class CourseConfigurations : IEntityTypeConfiguration<Course>
         builder.Property(c => c.Platform)
             .HasConversion<string>(); // Store as "Udemy", "Coursera"
 
-        builder.Property(c => c.Difficulty)
-            .HasConversion<string>(); // Store as "Beginner", etc.
-
         builder.Property(c => c.CourseBudget)
             .HasConversion<string>();
 

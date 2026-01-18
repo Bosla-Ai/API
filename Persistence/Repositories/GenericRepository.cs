@@ -34,7 +34,7 @@ public class GenericRepository<TEntity, TKey> : IGenericRepository<TEntity, TKey
         IQueryable<TEntity> query = _dbSet;
         if (specification != null)
         {
-            query = query.Where(specification.Criteria);
+            query = SpecificationsEvaluator.GetQuery(query, specification)!;
         }
         return await query.ToListAsync();
     }

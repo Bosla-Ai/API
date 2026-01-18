@@ -20,7 +20,6 @@ public class RoadmapGeneratorController(
 
         var result = await serviceManager.Roadmap.GenerateRoadmapAsync(
             request.Tags,
-            request.Level,
             request.Language,
             request.PreferPaid
         );

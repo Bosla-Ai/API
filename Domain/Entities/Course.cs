@@ -17,7 +17,6 @@ public sealed class Course
     public double Rating { get; set; }      // e.g. 4.8
     public int ReviewCount { get; set; }    // e.g. 1500
 
-    public LevelType Difficulty { get; set; }
     public string Language { get; set; } = "en"; // ar, en, es, fr, de, etc.
 
     public BudgetPreference? CourseBudget { get; set; } = BudgetPreference.Free;

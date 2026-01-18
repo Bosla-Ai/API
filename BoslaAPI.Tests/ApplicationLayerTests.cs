@@ -42,7 +42,6 @@ public class ApplicationLayerTests
     {
         // Arrange
         var tags = new[] { "csharp", "dotnet" };
-        var level = "beginner";
         var language = "en";
         var preferPaid = false;
         var cacheKey = "roadmap-csharp-dotnet-beginner-en-False";
@@ -54,7 +53,7 @@ public class ApplicationLayerTests
             .ReturnsAsync(System.Text.Encoding.UTF8.GetBytes(cachedJson));
 
         // Act
-        var result = await _roadmapService.GenerateRoadmapAsync(tags, level, language, preferPaid);
+        var result = await _roadmapService.GenerateRoadmapAsync(tags, language, preferPaid);
 
         // Assert
         Assert.NotNull(result);
@@ -67,7 +66,6 @@ public class ApplicationLayerTests
     {
         // Arrange
         var tags = new[] { "python" };
-        var level = "advanced";
 
         _mockCache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((byte[])null!);
@@ -90,7 +88,7 @@ public class ApplicationLayerTests
         _mockHttpClientFactory.Setup(x => x.CreateClient(It.IsAny<string>())).Returns(httpClient);
 
         // Act
-        var result = await _roadmapService.GenerateRoadmapAsync(tags, level, "en", true);
+        var result = await _roadmapService.GenerateRoadmapAsync(tags, "en", true);
 
         // Assert
         Assert.Equal("Fresh", result.Status);
