@@ -18,6 +18,7 @@ public class ApplicationLayerTests
     private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
     private readonly Mock<IUnitOfWork> _mockUnitOfWork;
     private readonly Mock<IConfiguration> _mockConfiguration;
+    private readonly Mock<IGenericRepository<Course, int>> _mockCourseRepo;
     private readonly RoadmapService _roadmapService;
 
     public ApplicationLayerTests()
@@ -26,8 +27,14 @@ public class ApplicationLayerTests
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
         _mockUnitOfWork = new Mock<IUnitOfWork>();
         _mockConfiguration = new Mock<IConfiguration>();
+        _mockCourseRepo = new Mock<IGenericRepository<Course, int>>();
 
         _mockConfiguration.Setup(c => c["PipelineApi:BaseUrl"]).Returns("http://test-api/generate-roadmap");
+        
+        // Setup the repository mock
+        _mockUnitOfWork.Setup(u => u.GetRepo<Course, int>()).Returns(_mockCourseRepo.Object);
+        _mockCourseRepo.Setup(r => r.GetAllAsync(It.IsAny<Specifications<Course>>()))
+            .ReturnsAsync(new List<Course>());
 
         _roadmapService = new RoadmapService(
             _mockCache.Object,
@@ -44,12 +51,12 @@ public class ApplicationLayerTests
         var tags = new[] { "csharp", "dotnet" };
         var language = "en";
         var preferPaid = false;
-        var cacheKey = "roadmap-csharp-dotnet-beginner-en-False";
 
         var cachedDto = new RoadmapGenerationDTO { Status = "Cached" };
         var cachedJson = JsonSerializer.Serialize(cachedDto);
 
-        _mockCache.Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
+        // Mock GetAsync which is called by GetStringAsync extension method
+        _mockCache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(System.Text.Encoding.UTF8.GetBytes(cachedJson));
 
         // Act
