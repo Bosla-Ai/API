@@ -57,7 +57,7 @@ builder.Services
     {
         options.ClientId = builder.Configuration["Authentication:Google:ClientId"]!;
         options.ClientSecret = builder.Configuration["Authentication:Google:ClientSecret"]!;
-        options.CallbackPath = "/signin-google";
+        options.CallbackPath = "/api/ExternalAuthentication/signin-google";
         options.ClaimActions.MapJsonKey("urn:google:email_verified", "email_verified");
         options.UsePkce = true;
     })
@@ -65,29 +65,13 @@ builder.Services
     {
         options.ClientId = builder.Configuration["Authentication:Github:ClientId"]!;
         options.ClientSecret = builder.Configuration["Authentication:Github:ClientSecret"]!;
-        options.CallbackPath = "/signin-github";
+        options.CallbackPath = "/api/ExternalAuthentication/signin-github";
         options.Scope.Add("user:email"); // Request email access
         options.ClaimActions.MapJsonKey("urn:github:login", "login");
         options.ClaimActions.MapJsonKey("urn:github:url", "html_url");
         options.ClaimActions.MapJsonKey("urn:github:avatar", "avatar_url");
-    })
-    .AddLinkedIn("LinkedIn", options =>
-    {
-        options.ClientId = builder.Configuration["Authentication:LinkedIn:ClientId"]!;
-        options.ClientSecret = builder.Configuration["Authentication:LinkedIn:ClientSecret"]!;
-        options.CallbackPath = "/signin-linkedin";
-
-        // Clear any existing scopes and add current ones
-        options.Scope.Clear();
-        options.Scope.Add("profile");
-        options.Scope.Add("email");
-
-        // Configure claims mapping for current LinkedIn API
-        options.ClaimActions.MapJsonKey(ClaimTypes.NameIdentifier, "id");
-        options.ClaimActions.MapJsonKey(ClaimTypes.Name, "localizedFirstName");
-        options.ClaimActions.MapJsonKey(ClaimTypes.Email, "emailAddress");
-        options.ClaimActions.MapJsonKey("urn:linkedin:profileUrl", "publicProfileUrl");
     });
+
 
 builder.Services.AddRateLimiterConfiguration();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
