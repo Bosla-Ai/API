@@ -7,6 +7,7 @@ public interface IServiceManager
     public IRefreshTokenService RefreshToken { get; }
     public IRoadmapService Roadmap { get; }
     public IAdministrationService Administration { get; }
+    public IUserService User { get; }
 
     Task SaveChangesAsync();
 }

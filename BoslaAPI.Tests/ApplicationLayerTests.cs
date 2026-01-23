@@ -30,7 +30,7 @@ public class ApplicationLayerTests
         _mockCourseRepo = new Mock<IGenericRepository<Course, int>>();
 
         _mockConfiguration.Setup(c => c["PipelineApi:BaseUrl"]).Returns("http://test-api/generate-roadmap");
-        
+
         // Setup the repository mock
         _mockUnitOfWork.Setup(u => u.GetRepo<Course, int>()).Returns(_mockCourseRepo.Object);
         _mockCourseRepo.Setup(r => r.GetAllAsync(It.IsAny<Specifications<Course>>()))

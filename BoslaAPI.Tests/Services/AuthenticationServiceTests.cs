@@ -176,7 +176,7 @@ public class AuthenticationServiceTests
         _userManagerMock
             .Setup(m => m.FindByIdAsync(userId))
             .ReturnsAsync(user);
-        
+
         _userManagerMock
             .Setup(m => m.GetRolesAsync(user))
             .ReturnsAsync(roles);

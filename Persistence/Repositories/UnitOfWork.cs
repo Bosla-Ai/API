@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Domain.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Persistence.Data.Contexts;
+using Shared.DTOs.DashboardDTOs;
 
 namespace Persistence.Repositories;
 
@@ -26,5 +27,10 @@ public class UnitOfWork : IUnitOfWork
 
         return (IGenericRepository<TEntity, TKey>)_repositories.GetOrAdd(typeName,
             _ => new GenericRepository<TEntity, TKey>(_context));
+    }
+
+    public async Task<List<DashboardFlatResult>> GetDomainsHierarchyAsync(bool? isActive = null)
+    {
+        return await _context.GetDomainsHierarchyAsync(isActive);
     }
 }

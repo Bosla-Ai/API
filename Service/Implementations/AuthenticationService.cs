@@ -350,11 +350,11 @@ public class AuthenticationService(
         var user = await GetUserByIdAsync(userId);
         if (user == null)
             throw new NotFoundException("User not found");
-        
+
         var roles = await userManager.GetRolesAsync(user);
         var userDto = mapper.Map<ApplicationUserDTO>(user);
         userDto.Role = roles.FirstOrDefault() ?? "";
-        
+
         return new APIResponse<ApplicationUserDTO>()
         {
             StatusCode = HttpStatusCode.OK,
