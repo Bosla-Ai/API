@@ -11,10 +11,10 @@ using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
 
 namespace Presentation.Controllers;
 
-[Authorize(Roles = StaticData.AdminRoleName)]
+[Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
 public class AdministrationController(
-    IConfiguration configuration
-    , IServiceManager serviceManager) : ApiController(configuration)
+    IConfiguration configuration,
+    IServiceManager serviceManager) : ApiController(configuration)
 {
     [HttpGet("GetDomains")]
     public async Task<ActionResult<APIResponse>> GetDomains([FromQuery] bool isActive = true)
