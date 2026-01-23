@@ -18,7 +18,7 @@ public class ExternalAuthenticationController(
 {
     [EnableRateLimiting("AuthPolicy")]
     [HttpGet("GitHubSignIn")]
-    public IActionResult GitHubSignIn(string returnUrl = "/")
+    public IActionResult GitHubSignIn(string returnUrl = "https://front.bosla.almiraj.xyz/")
     {
         try
         {
@@ -26,7 +26,7 @@ public class ExternalAuthenticationController(
             var props = new AuthenticationProperties
             {
                 RedirectUri = Url.Action("GitHubExternalCallback",
-                    "ExternalAuthentication", new { provider = "Github", returnUrl }
+                    "ExternalAuthentication", new { returnUrl }
                     , Request.Scheme),
                 Items = { ["state"] = state }
             };
@@ -40,16 +40,16 @@ public class ExternalAuthenticationController(
         }
     }
 
-    [HttpGet("signin-github")]
+    [HttpGet("github-callback")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public async Task<ActionResult<APIResponse>> GitHubExternalCallback(string provider, string returnUrl = "/")
+    public async Task<ActionResult<APIResponse>> GitHubExternalCallback(string returnUrl = "https://front.bosla.almiraj.xyz/")
     {
-        var result = await HttpContext.AuthenticateAsync(provider);
+        var result = await HttpContext.AuthenticateAsync("Identity.External");
         if (!result.Succeeded)
             throw new BadRequestException("GitHub authentication failed.");
 
         var response = await serviceManager.Authentication
-            .GitHubLoginAsync(result.Principal, provider, returnUrl);
+            .GitHubLoginAsync(result.Principal, "Github", returnUrl);
 
         if (response != null)
         {
@@ -77,7 +77,7 @@ public class ExternalAuthenticationController(
             var props = new AuthenticationProperties
             {
                 RedirectUri = Url.Action("GoogleExternalCallback",
-                    "ExternalAuthentication", new { provider = "Google", returnUrl }
+                    "ExternalAuthentication", new { returnUrl }
                     , Request.Scheme),
                 Items = { ["state"] = state }
             };
@@ -91,16 +91,16 @@ public class ExternalAuthenticationController(
         }
     }
 
-    [HttpGet("signin-google")]
+    [HttpGet("google-callback")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public async Task<ActionResult<APIResponse>> GoogleExternalCallback(string provider, string returnUrl = "https://front.bosla.almiraj.xyz/")
+    public async Task<ActionResult<APIResponse>> GoogleExternalCallback(string returnUrl = "https://front.bosla.almiraj.xyz/")
     {
-        var result = await HttpContext.AuthenticateAsync(provider);
+        var result = await HttpContext.AuthenticateAsync("Identity.External");
         if (!result.Succeeded)
             throw new BadRequestException("External authentication failed.");
 
         var response = await serviceManager.Authentication
-            .GoogleLoginAsync(result.Principal, provider, returnUrl);
+            .GoogleLoginAsync(result.Principal, "Google", returnUrl);
 
         if (response != null)
         {
