@@ -51,7 +51,7 @@ public class AdministrationService(
         };
     }
 
-    public async Task<APIResponse> AddDomain(DomainCreateDTO domainsDto)
+    public async Task<APIResponse<int>> AddDomain(DomainCreateDTO domainsDto)
     {
         if (domainsDto == null)
             throw new BadRequestException("invalid domain details");
@@ -60,9 +60,10 @@ public class AdministrationService(
         await unitOfWork.GetRepo<Domains, int>().CreateAsync(domain);
         await unitOfWork.SaveChangesAsync();
 
-        return new APIResponse()
+        return new APIResponse<int>()
         {
             StatusCode = HttpStatusCode.OK,
+            Data = domain.Id,
         };
     }
 
@@ -133,7 +134,7 @@ public class AdministrationService(
         };
     }
 
-    public async Task<APIResponse> AddTrack(TrackCreateDTO trackDto)
+    public async Task<APIResponse<int>> AddTrack(TrackCreateDTO trackDto)
     {
         if (trackDto == null)
             throw new BadRequestException("invalid track details");
@@ -141,9 +142,10 @@ public class AdministrationService(
         var track = mapper.Map<Track>(trackDto);
         await unitOfWork.GetRepo<Track, int>().CreateAsync(track);
         await unitOfWork.SaveChangesAsync();
-        return new APIResponse()
+        return new APIResponse<int>()
         {
             StatusCode = HttpStatusCode.OK,
+            Data = track.Id,
         };
     }
 
@@ -213,7 +215,7 @@ public class AdministrationService(
         };
     }
 
-    public async Task<APIResponse> AddTrackSection(TrackSectionCreateDTO trackSectionDto)
+    public async Task<APIResponse<int>> AddTrackSection(TrackSectionCreateDTO trackSectionDto)
     {
         if (trackSectionDto == null)
             throw new BadRequestException("invalid track section details");
@@ -222,9 +224,10 @@ public class AdministrationService(
         await unitOfWork.GetRepo<TrackSection, int>().CreateAsync(trackSection);
         await unitOfWork.SaveChangesAsync();
 
-        return new APIResponse()
+        return new APIResponse<int>()
         {
             StatusCode = HttpStatusCode.OK,
+            Data = trackSection.Id,
         };
     }
 
@@ -293,7 +296,7 @@ public class AdministrationService(
         };
     }
 
-    public async Task<APIResponse> AddTrackChoice(TrackChoiceCreateDTO trackChoiceDto)
+    public async Task<APIResponse<int>> AddTrackChoice(TrackChoiceCreateDTO trackChoiceDto)
     {
         if (trackChoiceDto == null)
             throw new BadRequestException("invalid track choice details");
@@ -302,9 +305,10 @@ public class AdministrationService(
         await unitOfWork.GetRepo<TrackChoice, int>().CreateAsync(trackChoice);
         await unitOfWork.SaveChangesAsync();
 
-        return new APIResponse()
+        return new APIResponse<int>()
         {
             StatusCode = HttpStatusCode.OK,
+            Data = trackChoice.Id,
         };
     }
 
