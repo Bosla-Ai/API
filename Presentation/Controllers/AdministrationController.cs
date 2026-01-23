@@ -11,7 +11,7 @@ using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
 
 namespace Presentation.Controllers;
 
-// [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
+[Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
 public class AdministrationController(
     IConfiguration configuration,
     IServiceManager serviceManager) : ApiController(configuration)
