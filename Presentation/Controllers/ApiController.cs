@@ -17,7 +17,7 @@ public class ApiController(IConfiguration configuration) : ControllerBase
     {
         var domain = configuration["CookieSettings:AllowedSubDomain"];
         var isSecure = bool.TryParse(configuration["CookieSettings:Secure"], out var secure) ? secure : true;
-        
+
         var options = new CookieOptions
         {
             HttpOnly = true,
@@ -25,13 +25,13 @@ public class ApiController(IConfiguration configuration) : ControllerBase
             SameSite = isSecure ? SameSiteMode.None : SameSiteMode.Lax,
             Expires = lifeTime,
         };
-        
+
         // Only set domain if explicitly configured (empty = localhost)
         if (!string.IsNullOrEmpty(domain))
         {
             options.Domain = domain;
         }
-        
+
         return options;
     }
     protected void SetAuthCookies(LoginServerResponse response)

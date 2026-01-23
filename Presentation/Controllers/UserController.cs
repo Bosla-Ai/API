@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Service.Abstraction;
 using Shared;
+using Shared.DTOs.DashboardDTOs;
 
 namespace Presentation.Controllers;
 
@@ -29,6 +30,15 @@ public class UserController(
     {
         var response = await serviceManager.Customer
             .GetCustomerProfileAsync(customerId);
+        return Ok(response);
+    }
+
+    [HttpGet("dashboard/domains")]
+    public async Task<ActionResult<APIResponse<IEnumerable<DashboardDomainDTO>>>> GetAllDomainsWithHierarchy(
+        [FromQuery] bool? isActive = null)
+    {
+        var response = await serviceManager.User
+            .GetAllDomainsWithHierarchyAsync(isActive);
         return Ok(response);
     }
 }
