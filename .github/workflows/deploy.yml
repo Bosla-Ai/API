@@ -64,6 +64,7 @@ jobs:
             docker compose down api || true
             docker compose pull api
             docker compose up -d api
+            sudo systemctl restart nginx
 
 
 
