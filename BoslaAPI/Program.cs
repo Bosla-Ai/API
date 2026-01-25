@@ -53,16 +53,9 @@ builder.Services
         cookie.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         cookie.Cookie.HttpOnly = true;
     })
-    .AddCookie("Identity.External", options =>
-    {
-        options.Cookie.Name = ".AspNetCore.Identity.External";
-        options.Cookie.SameSite = SameSiteMode.None;
-        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-        options.ExpireTimeSpan = TimeSpan.FromMinutes(5);
-    })
     .AddGoogle("Google", options =>
     {
-        options.SignInScheme = "Identity.External";
+        options.SignInScheme = IdentityConstants.ExternalScheme;
         options.ClientId = builder.Configuration["Authentication:Google:ClientId"]!;
         options.ClientSecret = builder.Configuration["Authentication:Google:ClientSecret"]!;
         options.CallbackPath = "/api/ExternalAuthentication/signin-google";
@@ -71,7 +64,7 @@ builder.Services
     })
     .AddGitHub("Github", options =>
     {
-        options.SignInScheme = "Identity.External";
+        options.SignInScheme = IdentityConstants.ExternalScheme;
         options.ClientId = builder.Configuration["Authentication:Github:ClientId"]!;
         options.ClientSecret = builder.Configuration["Authentication:Github:ClientSecret"]!;
         options.CallbackPath = "/api/ExternalAuthentication/signin-github";
@@ -111,12 +104,8 @@ var app = builder.Build();
 await app.DbSeedingAsync();
 
 // IMPORTANT: ForwardedHeaders MUST be first - before any middleware that needs the correct host/scheme
-app.UseForwardedHeaders(new ForwardedHeadersOptions
-{
-    ForwardedHeaders = ForwardedHeaders.XForwardedFor |
-                       ForwardedHeaders.XForwardedProto |
-                       ForwardedHeaders.XForwardedHost
-});
+// Uses the pre-configured ForwardedHeadersOptions which clears KnownNetworks/KnownProxies for Docker compatibility
+app.UseForwardedHeaders();
 
 // if (app.Environment.IsDevelopment())
 // {
