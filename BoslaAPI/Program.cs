@@ -53,8 +53,16 @@ builder.Services
         cookie.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         cookie.Cookie.HttpOnly = true;
     })
+    .AddCookie("Identity.External", options =>
+    {
+        options.Cookie.Name = ".AspNetCore.Identity.External";
+        options.Cookie.SameSite = SameSiteMode.None;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.ExpireTimeSpan = TimeSpan.FromMinutes(5);
+    })
     .AddGoogle("Google", options =>
     {
+        options.SignInScheme = "Identity.External";
         options.ClientId = builder.Configuration["Authentication:Google:ClientId"]!;
         options.ClientSecret = builder.Configuration["Authentication:Google:ClientSecret"]!;
         options.CallbackPath = "/api/ExternalAuthentication/signin-google";
@@ -63,6 +71,7 @@ builder.Services
     })
     .AddGitHub("Github", options =>
     {
+        options.SignInScheme = "Identity.External";
         options.ClientId = builder.Configuration["Authentication:Github:ClientId"]!;
         options.ClientSecret = builder.Configuration["Authentication:Github:ClientSecret"]!;
         options.CallbackPath = "/api/ExternalAuthentication/signin-github";
@@ -77,7 +86,9 @@ builder.Services.AddRateLimiterConfiguration();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders =
-        ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
 });
 
 builder.Services.AddAuthorization();
@@ -92,12 +103,20 @@ builder.Services.AddCors(options =>
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials()
-                .WithOrigins("http://localhost:5173", "https://front.bosla.almiraj.xyz");
+                .WithOrigins("http://localhost:5173", "https://front.bosla.almiraj.xyz", "https://bosla.me");
         });
 });
 
 var app = builder.Build();
 await app.DbSeedingAsync();
+
+// IMPORTANT: ForwardedHeaders MUST be first - before any middleware that needs the correct host/scheme
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor |
+                       ForwardedHeaders.XForwardedProto |
+                       ForwardedHeaders.XForwardedHost
+});
 
 // if (app.Environment.IsDevelopment())
 // {
@@ -106,14 +125,6 @@ app.UseSwaggerUI();
 // }
 
 app.UseMiddleware<ApiResponseMiddleware>();
-app.UseForwardedHeaders(new ForwardedHeadersOptions
-{
-    ForwardedHeaders = ForwardedHeaders.XForwardedFor |
-                       ForwardedHeaders.XForwardedProto |
-                       ForwardedHeaders.XForwardedHost
-});
-
-app.UseForwardedHeaders();
 app.UseCors("CorsPolicy");
 app.UseRateLimiter();
 app.UseAuthentication();

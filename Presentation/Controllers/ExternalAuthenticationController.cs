@@ -18,7 +18,7 @@ public class ExternalAuthenticationController(
 {
     [EnableRateLimiting("AuthPolicy")]
     [HttpGet("GitHubSignIn")]
-    public IActionResult GitHubSignIn(string returnUrl = "https://front.bosla.almiraj.xyz/")
+    public IActionResult GitHubSignIn(string returnUrl = "https://bosla.me/")
     {
         try
         {
@@ -42,7 +42,7 @@ public class ExternalAuthenticationController(
 
     [HttpGet("github-callback")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public async Task<ActionResult<APIResponse>> GitHubExternalCallback(string returnUrl = "https://front.bosla.almiraj.xyz/")
+    public async Task<ActionResult<APIResponse>> GitHubExternalCallback(string returnUrl = "https://bosla.me/")
     {
         var result = await HttpContext.AuthenticateAsync("Identity.External");
         if (!result.Succeeded)
@@ -69,7 +69,7 @@ public class ExternalAuthenticationController(
 
     [EnableRateLimiting("AuthPolicy")]
     [HttpGet("GoogleSignIn")]
-    public IActionResult GoogleSignIn(string returnUrl = "https://front.bosla.almiraj.xyz/")
+    public IActionResult GoogleSignIn(string returnUrl = "https://bosla.me/")
     {
         try
         {
@@ -93,7 +93,7 @@ public class ExternalAuthenticationController(
 
     [HttpGet("google-callback")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public async Task<ActionResult<APIResponse>> GoogleExternalCallback(string returnUrl = "https://front.bosla.almiraj.xyz/")
+    public async Task<ActionResult<APIResponse>> GoogleExternalCallback(string returnUrl = "https://bosla.me/")
     {
         var result = await HttpContext.AuthenticateAsync("Identity.External");
         if (!result.Succeeded)
