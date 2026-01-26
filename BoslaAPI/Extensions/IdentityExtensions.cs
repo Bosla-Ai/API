@@ -10,11 +10,18 @@ public static class IdentityExtensions
     {
         services.AddIdentity<ApplicationUser, IdentityRole>(options =>
             {
+                // Password requirements
                 options.Password.RequireDigit = true;
                 options.Password.RequireLowercase = true;
                 options.Password.RequireUppercase = true;
                 options.Password.RequireNonAlphanumeric = true;
                 options.Password.RequiredLength = 8;
+
+                // Account lockout settings to prevent brute force attacks
+                // After 5 failed attempts, the account is locked for 15 minutes
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.AllowedForNewUsers = true;
             })
             .AddEntityFrameworkStores<ApplicationDbContext>()
             .AddDefaultTokenProviders();

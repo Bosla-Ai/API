@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -12,14 +13,28 @@ public class RoadmapGeneratorController(
     IServiceManager serviceManager
     , IConfiguration configuration) : ApiController(configuration)
 {
+    // Regex to allow only alphanumeric, spaces, hyphens, and common characters
+    private static readonly Regex SafeTagPattern = new(@"^[\w\s\-\.\#\+]+$", RegexOptions.Compiled);
+
     [HttpPost("generate")]
     public async Task<IActionResult> Generate([FromBody] RoadmapRequestDTO request)
     {
         if (request.Tags == null || request.Tags.Length == 0)
             return BadRequest("At least one tag is required.");
 
+        // Validate and sanitize each tag
+        var sanitizedTags = request.Tags
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t.Trim())
+            .Where(t => t.Length <= 50 && SafeTagPattern.IsMatch(t))
+            .Take(10) // Extra safety: limit to 10 tags
+            .ToArray();
+
+        if (sanitizedTags.Length == 0)
+            return BadRequest("No valid tags provided. Tags must be alphanumeric and up to 50 characters.");
+
         var result = await serviceManager.Roadmap.GenerateRoadmapAsync(
-            request.Tags,
+            sanitizedTags,
             request.Language,
             request.PreferPaid
         );

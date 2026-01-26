@@ -80,7 +80,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders =
         ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
-    options.KnownNetworks.Clear();
+    // Clear proxy whitelist to trust all proxies (required for Docker behind reverse proxy)
+    options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
 });
 

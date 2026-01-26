@@ -31,7 +31,12 @@ public static class JwtExtensions
                     ValidAudience = jwtOptions.Audience,
                     IssuerSigningKey = new SymmetricSecurityKey(
                         Encoding.UTF8.GetBytes(jwtOptions.Key)
-                    )
+                    ),
+                    // ClockSkew: Allows for minor clock differences between servers.
+                    // Default is 5 minutes, reduced to 1 minute for tighter security.
+                    // This means a token is still valid up to 1 minute after expiration
+                    // to account for network delays and server time differences.
+                    ClockSkew = TimeSpan.FromMinutes(1)
                 };
                 options.Events = new JwtBearerEvents
                 {
