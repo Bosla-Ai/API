@@ -16,22 +16,29 @@ public class ExternalAuthenticationController(
     IServiceManager serviceManager,
     IConfiguration configuration) : ApiController(configuration)
 {
-    // Read OAuth settings from configuration
+    // Read OAuth settings from configuration - support multiple domains
     private readonly string _defaultReturnUrl = configuration["OAuthSettings:DefaultReturnUrl"] ?? "https://bosla.me/";
-    private readonly string _allowedDomain = configuration["OAuthSettings:AllowedDomain"] ?? "https://bosla.me";
+    private readonly string[] _allowedDomains = new[]
+    {
+        configuration["OAuthSettings:AllowedDomain"] ?? "https://bosla.me",
+        configuration["OAuthSettings:AlternateDomain"] ?? ""
+    }.Where(d => !string.IsNullOrEmpty(d)).ToArray();
 
     /// <summary>
     /// Validates the returnUrl to prevent Open Redirect attacks.
-    /// Only allows URLs that start with the trusted domain configured in appsettings.
+    /// Only allows URLs that start with the trusted domains configured in appsettings.
     /// </summary>
     private string ValidateReturnUrl(string? returnUrl)
     {
         if (string.IsNullOrWhiteSpace(returnUrl))
             return _defaultReturnUrl;
 
-        // Prevent open redirect attacks by validating the return URL
-        if (returnUrl.StartsWith(_allowedDomain, StringComparison.OrdinalIgnoreCase))
-            return returnUrl;
+        // Prevent open redirect attacks by validating the return URL against all allowed domains
+        foreach (var allowedDomain in _allowedDomains)
+        {
+            if (returnUrl.StartsWith(allowedDomain, StringComparison.OrdinalIgnoreCase))
+                return returnUrl;
+        }
 
         return _defaultReturnUrl;
     }
@@ -98,7 +105,6 @@ public class ExternalAuthenticationController(
     {
         try
         {
-            // Validate returnUrl to prevent open redirect attacks
             var safeReturnUrl = ValidateReturnUrl(returnUrl);
             var state = Guid.NewGuid().ToString();
             var props = new AuthenticationProperties

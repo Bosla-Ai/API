@@ -98,7 +98,11 @@ builder.Services.AddCors(options =>
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials()
-                .WithOrigins("http://localhost:5173", "https://bosla.me");
+                .WithOrigins(
+                    "http://localhost:5173",
+                    "https://bosla.me",
+                    "https://front.bosla.almiraj.xyz"
+                );
         });
 });
 
