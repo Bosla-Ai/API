@@ -1,19 +1,23 @@
 using System.ComponentModel.DataAnnotations;
+using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
 
 namespace Shared.DTOs.AdministrationDTOs.TrackDTOs;
 
-public class TrackDTO
+public sealed class TrackCreateFullDTO
 {
-    public int Id { get; set; }
     [Required(ErrorMessage = "Title is required")]
     public string Title { get; set; } = "";
+
     [Required(ErrorMessage = "Description is required")]
     public string Description { get; set; } = "";
-    [Required(ErrorMessage = "Icon URL is required")]
-    [Url(ErrorMessage = "IconUrl must be a valid URL format (e.g., https://example.com/icon.png).")]
-    public string IconUrl { get; set; } = "";
-    public bool IsActive { get; set; } = true;
 
-    [Required(ErrorMessage = "Fixed Tags Payload is required")]
+    [Required(ErrorMessage = "IconUrl is required")]
+    public string IconUrl { get; set; } = "";
+
+    [Required(ErrorMessage = "DomainId is required")]
+    public int DomainId { get; set; }
+
     public string FixedTagsPayload { get; set; } = "";
+
+    public ICollection<TrackSectionCreateFullDTO> Sections { get; set; } = new List<TrackSectionCreateFullDTO>();
 }

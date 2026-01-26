@@ -16,20 +16,8 @@ public interface IAdministrationService
     Task<APIResponse> DeleteDomain(int id);
 
     Task<APIResponse<IEnumerable<TrackDTO>>> GetTracks(int domainId);
-    Task<APIResponse<TrackDTO>> GetTrack(int id);
-    Task<APIResponse<int>> AddTrack(TrackCreateDTO trackDto);
-    Task<APIResponse> UpdateTrack(TrackUpdateDTO trackDto);
+    Task<APIResponse<TrackFullDTO>> GetFullTrack(int id);
+    Task<APIResponse<int>> AddTrackFull(TrackCreateFullDTO trackDto);
+    Task<APIResponse> UpdateFullTrack(TrackUpdateFullDTO trackDto);
     Task<APIResponse> DeleteTrack(int id);
-
-    Task<APIResponse<IEnumerable<TrackSectionDTO>>> GetTrackSections(int trackId);
-    Task<APIResponse<TrackSectionDTO>> GetTrackSection(int id);
-    Task<APIResponse<int>> AddTrackSection(TrackSectionCreateDTO trackSectionDto);
-    Task<APIResponse> UpdateTrackSection(TrackSectionUpdateDTO trackSectionDto);
-    Task<APIResponse> DeleteTrackSection(int id);
-
-    Task<APIResponse<IEnumerable<TrackChoiceDTO>>> GetTrackChoices(int trackId);
-    Task<APIResponse<TrackChoiceDTO>> GetTrackChoice(int id);
-    Task<APIResponse<int>> AddTrackChoice(TrackChoiceCreateDTO trackChoiceDto);
-    Task<APIResponse> UpdateTrackChoice(TrackChoiceUpdateDTO trackChoiceDto);
-    Task<APIResponse> DeleteTrackChoice(int id);
 }

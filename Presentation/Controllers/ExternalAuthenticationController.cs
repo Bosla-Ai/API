@@ -75,7 +75,7 @@ public class ExternalAuthenticationController(
     {
         // Validate returnUrl early to get a safe URL
         var safeReturnUrl = ValidateReturnUrl(returnUrl);
-        
+
         var result = await HttpContext.AuthenticateAsync("Identity.External");
         if (!result.Succeeded)
             throw new BadRequestException("GitHub authentication failed.");
@@ -130,7 +130,7 @@ public class ExternalAuthenticationController(
     {
         // Validate returnUrl early to get a safe URL
         var safeReturnUrl = ValidateReturnUrl(returnUrl);
-        
+
         var result = await HttpContext.AuthenticateAsync("Identity.External");
         if (!result.Succeeded)
             throw new BadRequestException("External authentication failed.");
