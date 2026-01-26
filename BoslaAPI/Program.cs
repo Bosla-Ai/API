@@ -49,6 +49,7 @@ builder.Services
     .AddJwtConfiguration(builder.Configuration)
     .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, cookie =>
     {
+        // cookie.Cookie.Domain = "bosla.me";
         cookie.Cookie.SameSite = SameSiteMode.None;
         cookie.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         cookie.Cookie.HttpOnly = true;
@@ -97,7 +98,7 @@ builder.Services.AddCors(options =>
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials()
-                .WithOrigins("http://localhost:5173", "https://front.bosla.almiraj.xyz", "https://bosla.me");
+                .WithOrigins("http://localhost:5173", "https://bosla.me");
         });
 });
 
@@ -107,6 +108,15 @@ await app.DbSeedingAsync();
 // IMPORTANT: ForwardedHeaders MUST be first - before any middleware that needs the correct host/scheme
 // Uses the pre-configured ForwardedHeadersOptions which clears KnownNetworks/KnownProxies for Docker compatibility
 app.UseForwardedHeaders();
+
+if (app.Environment.IsProduction())
+{
+    app.Use((context, next) =>
+    {
+        context.Request.Scheme = "https";
+        return next();
+    });
+}
 
 // if (app.Environment.IsDevelopment())
 // {
