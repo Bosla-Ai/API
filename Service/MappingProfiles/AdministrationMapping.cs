@@ -23,8 +23,29 @@ public class AdministrationMapping : Profile
         CreateMap<TrackSectionCreateDTO, TrackSection>().ReverseMap();
         CreateMap<TrackSectionUpdateDTO, TrackSection>().ReverseMap();
 
-        CreateMap<TrackChoiceDTO, TrackChoice>().ReverseMap();
-        CreateMap<TrackChoiceCreateDTO, TrackChoice>().ReverseMap();
-        CreateMap<TrackChoiceUpdateDTO, TrackChoice>().ReverseMap();
+        CreateMap<TrackChoiceDTO, TrackChoice>()
+            .ForMember(dest => dest.Label, opt => opt.MapFrom(src => src.Title))
+            .ReverseMap()
+            .ForMember(dest => dest.Title, opt => opt.MapFrom(src => src.Label));
+        CreateMap<TrackChoiceCreateDTO, TrackChoice>()
+            .ForMember(dest => dest.Label, opt => opt.MapFrom(src => src.Title));
+        CreateMap<TrackChoiceUpdateDTO, TrackChoice>()
+            .ForMember(dest => dest.Label, opt => opt.MapFrom(src => src.Title));
+
+        CreateMap<TrackSectionCreateFullDTO, TrackSection>()
+            .ForMember(dest => dest.Choices, opt => opt.MapFrom(src => src.Choices));
+        CreateMap<TrackCreateFullDTO, Track>()
+            .ForMember(dest => dest.Sections, opt => opt.MapFrom(src => src.Sections));
+
+        CreateMap<TrackSectionUpdateFullDTO, TrackSection>()
+            .ForMember(dest => dest.Choices, opt => opt.MapFrom(src => src.Choices));
+        CreateMap<TrackUpdateFullDTO, Track>()
+            .ForMember(dest => dest.Sections, opt => opt.MapFrom(src => src.Sections));
+
+        // Response DTOs (Entity -> DTO)
+        CreateMap<TrackSection, TrackSectionFullDTO>()
+            .ForMember(dest => dest.Choices, opt => opt.MapFrom(src => src.Choices));
+        CreateMap<Track, TrackFullDTO>()
+            .ForMember(dest => dest.Sections, opt => opt.MapFrom(src => src.Sections));
     }
 }

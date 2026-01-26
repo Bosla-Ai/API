@@ -68,23 +68,23 @@ public class AdministrationController(
     public async Task<ActionResult<APIResponse>> GetTrack(int id)
     {
         var response = await serviceManager
-            .Administration.GetTrack(id);
+            .Administration.GetFullTrack(id);
         return response;
     }
 
     [HttpPost("AddTrack")]
-    public async Task<ActionResult<APIResponse>> AddTrack([FromBody] TrackCreateDTO trackCreateDto)
+    public async Task<ActionResult<APIResponse>> AddTrack([FromBody] TrackCreateFullDTO trackCreateDto)
     {
         var response = await serviceManager
-            .Administration.AddTrack(trackCreateDto);
+            .Administration.AddTrackFull(trackCreateDto);
         return response;
     }
 
     [HttpPut("UpdateTrack")]
-    public async Task<ActionResult<APIResponse>> UpdateTrack([FromBody] TrackUpdateDTO trackUpdateDto)
+    public async Task<ActionResult<APIResponse>> UpdateTrack([FromBody] TrackUpdateFullDTO trackUpdateDto)
     {
         var response = await serviceManager
-            .Administration.UpdateTrack(trackUpdateDto);
+            .Administration.UpdateFullTrack(trackUpdateDto);
         return response;
     }
 
@@ -93,87 +93,6 @@ public class AdministrationController(
     {
         var response = await serviceManager
             .Administration.DeleteTrack(id);
-        return response;
-    }
-
-    [HttpGet("GetTrackSections{trackId:int}")]
-    public async Task<ActionResult<APIResponse>> GetTrackSections(int trackId)
-    {
-        var response = await serviceManager
-            .Administration.GetTrackSections(trackId);
-        return response;
-    }
-
-    [HttpGet("GetTrackSection/{id:int}")]
-    public async Task<ActionResult<APIResponse>> GetTrackSection(int id)
-    {
-        var response = await serviceManager
-            .Administration.GetTrackSection(id);
-        return response;
-    }
-
-    [HttpPost("AddTrackSection")]
-    public async Task<ActionResult<APIResponse>> AddTrackSection([FromBody] TrackSectionCreateDTO trackSectionDto)
-    {
-        var response = await serviceManager
-            .Administration.AddTrackSection(trackSectionDto);
-        return response;
-    }
-
-    [HttpPut("UpdateTrackSection")]
-    public async Task<ActionResult<APIResponse>> UpdateTrackSection(
-        [FromBody] TrackSectionUpdateDTO trackSectionUpdateDto)
-    {
-        var response = await serviceManager
-            .Administration.UpdateTrackSection(trackSectionUpdateDto);
-        return response;
-    }
-
-    [HttpDelete("DeleteTrackSection/{id:int}")]
-    public async Task<ActionResult<APIResponse>> DeleteTrackSection(int id)
-    {
-        var response = await serviceManager
-            .Administration.DeleteTrackSection(id);
-        return response;
-    }
-
-    [HttpGet("GetTrackChoices{trackSectionId:int}")]
-    public async Task<ActionResult<APIResponse>> GetTrackChoices(int trackSectionId)
-    {
-        var response = await serviceManager
-            .Administration.GetTrackChoices(trackSectionId);
-        return response;
-    }
-
-    [HttpGet("GetTrackChoice/{id:int}")]
-    public async Task<ActionResult<APIResponse>> GetTrackChoice(int id)
-    {
-        var response = await serviceManager
-            .Administration.GetTrackChoice(id);
-        return response;
-    }
-
-    [HttpPost("AddTrackChoice")]
-    public async Task<ActionResult<APIResponse>> AddTrackChoice([FromBody] TrackChoiceCreateDTO trackChoiceDto)
-    {
-        var response = await serviceManager
-            .Administration.AddTrackChoice(trackChoiceDto);
-        return response;
-    }
-
-    [HttpPut("UpdateTrackChoice")]
-    public async Task<ActionResult<APIResponse>> UpdateTrackChoice([FromBody] TrackChoiceUpdateDTO trackChoiceUpdateDto)
-    {
-        var response = await serviceManager
-            .Administration.UpdateTrackChoice(trackChoiceUpdateDto);
-        return response;
-    }
-
-    [HttpDelete("DeleteTrackChoice/{id:int}")]
-    public async Task<ActionResult<APIResponse>> DeleteTrackChoice(int id)
-    {
-        var response = await serviceManager
-            .Administration.DeleteTrackChoice(id);
         return response;
     }
 }
