@@ -5,7 +5,10 @@ namespace Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
 
 public sealed class TrackSectionUpdateFullDTO
 {
-    public int? Id { get; set; } // Nullable for new sections
+    public int? Id { get; set; }
+
+    [Required(ErrorMessage = "TrackId is required")]
+    public int TrackId { get; set; }
 
     [Required(ErrorMessage = "Title is required")]
     public string Title { get; set; } = "";

@@ -8,8 +8,7 @@ public sealed class TrackUpdateFullDTO
     [Required]
     public int Id { get; set; }
 
-    [Required(ErrorMessage = "DomainId is required")]
-    public int DomainId { get; set; }
+    public int? DomainId { get; set; }
 
     [Required(ErrorMessage = "Title is required")]
     public string Title { get; set; } = "";
@@ -26,5 +25,5 @@ public sealed class TrackUpdateFullDTO
     [Required(AllowEmptyStrings = true)]
     public string FixedTagsPayload { get; set; } = "";
 
-    public ICollection<TrackSectionUpdateFullDTO> Sections { get; set; } = new List<TrackSectionUpdateFullDTO>();
+    public ICollection<TrackSectionUpdateFullDTO>? Sections { get; set; }
 }
