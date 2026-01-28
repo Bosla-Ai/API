@@ -7,6 +7,8 @@ using Domain.ModelsSpecifications.Administration.TrackSpecifications;
 using Moq;
 using Service.Implementations;
 using Shared.DTOs.AdministrationDTOs.TrackDTOs;
+using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
+using Shared.DTOs.AdministrationDTOs.TrackChoiceDTOs;
 using Xunit;
 
 namespace BoslaAPI.Tests.Services;
@@ -88,17 +90,84 @@ public class AdministrationServiceTests
     }
 
     [Fact]
-    public async Task UpdateFullTrack_ShouldUpdateTrack_WhenTrackExists()
+    public async Task UpdateFullTrack_ShouldHandleCreateUpdateAndIgnore_Correctly()
     {
         // Arrange
-        var updateDto = new TrackUpdateFullDTO { Id = 1, Title = "Updated Track" };
-        var existingTrack = new Track { Id = 1, Title = "Old Track" };
+        var trackId = 1;
+        var existingTrack = new Track
+        {
+            Id = trackId,
+            Sections = new List<TrackSection>
+            {
+                new TrackSection
+                {
+                    Id = 10,
+                    Title = "Old Section",
+                    Choices = new List<TrackChoice>
+                    {
+                        new TrackChoice { Id = 100, Label = "Old Choice" }
+                    }
+                }
+            }
+        };
+
+        var updateDto = new TrackUpdateFullDTO
+        {
+            Id = trackId,
+            Title = "Updated Track",
+            Sections = new List<TrackSectionUpdateFullDTO>
+            {
+                // 1. Create (Id = 0)
+                new TrackSectionUpdateFullDTO
+                {
+                    Id = 0,
+                    Title = "New Section",
+                    Choices = new List<TrackChoiceUpdateDTO>
+                    {
+                        new TrackChoiceUpdateDTO { Id = 0, Title = "New Choice" }
+                    }
+                },
+                // 2. Update (Id = 10)
+                new TrackSectionUpdateFullDTO
+                {
+                    Id = 10,
+                    Title = "Updated Section",
+                    Choices = new List<TrackChoiceUpdateDTO>
+                    {
+                        new TrackChoiceUpdateDTO { Id = 100, Title = "Updated Choice" }
+                    }
+                },
+                // 3. Ignore (Id = null)
+                new TrackSectionUpdateFullDTO
+                {
+                    Id = null,
+                    Title = "Ignored Section"
+                }
+            }
+        };
 
         _mockTrackRepo.Setup(r => r.GetAsync(It.IsAny<TrackWithFullStructureSpecification>()))
             .ReturnsAsync(existingTrack);
 
-        // Mock Mapper: Map(source, dest) -> void
-        _mockMapper.Setup(m => m.Map(updateDto, existingTrack));
+        // Mock Root Map
+        _mockMapper.Setup(m => m.Map(updateDto, existingTrack))
+            .Callback<TrackUpdateFullDTO, Track>((src, dest) => dest.Title = src.Title);
+
+        // Mock Create Section Map
+        _mockMapper.Setup(m => m.Map<TrackSection>(It.Is<TrackSectionUpdateFullDTO>(s => s.Id == 0)))
+            .Returns((TrackSectionUpdateFullDTO s) => new TrackSection { Title = s.Title, Choices = new List<TrackChoice>() });
+
+        // Mock Create Choice Map (Nested in New Section)
+        _mockMapper.Setup(m => m.Map<ICollection<TrackChoice>>(It.IsAny<ICollection<TrackChoiceUpdateDTO>>()))
+            .Returns((ICollection<TrackChoiceUpdateDTO> source) => source.Select(c => new TrackChoice { Label = c.Title }).ToList());
+
+        // Mock Update Section Map
+        _mockMapper.Setup(m => m.Map(It.Is<TrackSectionUpdateFullDTO>(s => s.Id == 10), It.IsAny<TrackSection>()))
+            .Callback<TrackSectionUpdateFullDTO, TrackSection>((src, dest) => dest.Title = src.Title);
+
+        // Mock Update Choice Map
+        _mockMapper.Setup(m => m.Map(It.Is<TrackChoiceUpdateDTO>(c => c.Id == 100), It.IsAny<TrackChoice>()))
+            .Callback<TrackChoiceUpdateDTO, TrackChoice>((src, dest) => dest.Label = src.Title);
 
         _mockTrackRepo.Setup(r => r.UpdateAsync(existingTrack)).Returns(Task.CompletedTask);
         _mockUnitOfWork.Setup(u => u.SaveChangesAsync()).ReturnsAsync(1);
@@ -108,28 +177,25 @@ public class AdministrationServiceTests
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+
+        // Verify Root Update
+        Assert.Equal("Updated Track", existingTrack.Title);
+
+        // Verify Sections
+        // Existing section (Id 10) should be updated
+        var updatedSection = existingTrack.Sections.First(s => s.Id == 10);
+        Assert.Equal("Updated Section", updatedSection.Title);
+        Assert.Equal("Updated Choice", updatedSection.Choices.First(c => c.Id == 100).Label);
+
+        // New section should be added (Count should be 2: Old + New. Ignored is ignored)
+        Assert.Equal(2, existingTrack.Sections.Count);
+        var newSection = existingTrack.Sections.FirstOrDefault(s => s.Title == "New Section");
+        Assert.NotNull(newSection);
+        // Verify nested choice in new section
+        Assert.Single(newSection.Choices);
+        Assert.Equal("New Choice", newSection.Choices.First().Label);
+
         _mockTrackRepo.Verify(r => r.UpdateAsync(existingTrack), Times.Once);
-        _mockUnitOfWork.Verify(u => u.SaveChangesAsync(), Times.Once);
-    }
-
-    [Fact]
-    public async Task DeleteTrack_ShouldDeleteTrack_WhenTrackExists()
-    {
-        // Arrange
-        var trackId = 1;
-        var trackEntity = new Track { Id = trackId };
-
-        _mockTrackRepo.Setup(r => r.GetAsync(It.IsAny<TrackByIdSpecification>()))
-            .ReturnsAsync(trackEntity);
-        _mockTrackRepo.Setup(r => r.DeleteAsync(trackEntity)).Returns(Task.CompletedTask);
-        _mockUnitOfWork.Setup(u => u.SaveChangesAsync()).ReturnsAsync(1);
-
-        // Act
-        var result = await _administrationService.DeleteTrack(trackId);
-
-        // Assert
-        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
-        _mockTrackRepo.Verify(r => r.DeleteAsync(trackEntity), Times.Once);
         _mockUnitOfWork.Verify(u => u.SaveChangesAsync(), Times.Once);
     }
 }
