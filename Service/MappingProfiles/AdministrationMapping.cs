@@ -30,7 +30,9 @@ public class AdministrationMapping : Profile
         CreateMap<TrackChoiceCreateDTO, TrackChoice>()
             .ForMember(dest => dest.Label, opt => opt.MapFrom(src => src.Title));
         CreateMap<TrackChoiceUpdateDTO, TrackChoice>()
-            .ForMember(dest => dest.Label, opt => opt.MapFrom(src => src.Title));
+            .ForMember(dest => dest.Label, opt => opt.MapFrom(src => src.Title))
+            .ForMember(dest => dest.Id, opt => opt.Ignore())
+            .ForMember(dest => dest.SectionId, opt => opt.Ignore());
 
         CreateMap<TrackSectionCreateFullDTO, TrackSection>()
             .ForMember(dest => dest.Choices, opt => opt.MapFrom(src => src.Choices));
@@ -38,9 +40,13 @@ public class AdministrationMapping : Profile
             .ForMember(dest => dest.Sections, opt => opt.MapFrom(src => src.Sections));
 
         CreateMap<TrackSectionUpdateFullDTO, TrackSection>()
-            .ForMember(dest => dest.Choices, opt => opt.MapFrom(src => src.Choices));
+            .ForMember(dest => dest.Choices, opt => opt.Ignore())
+            .ForMember(dest => dest.Id, opt => opt.Ignore())
+            .ForMember(dest => dest.TrackId, opt => opt.Ignore());
         CreateMap<TrackUpdateFullDTO, Track>()
-            .ForMember(dest => dest.Sections, opt => opt.MapFrom(src => src.Sections));
+            .ForMember(dest => dest.Sections, opt => opt.Ignore())
+            .ForMember(dest => dest.Id, opt => opt.Ignore())
+            .ForMember(dest => dest.DomainId, opt => opt.Condition(src => src.DomainId != null));
 
         // Response DTOs (Entity -> DTO)
         CreateMap<TrackSection, TrackSectionFullDTO>()

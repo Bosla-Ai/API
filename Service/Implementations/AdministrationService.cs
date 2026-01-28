@@ -168,6 +168,57 @@ public class AdministrationService(
 
         mapper.Map(trackDto, existingTrack);
 
+        if (trackDto.Sections != null)
+        {
+            foreach (var sectionDto in trackDto.Sections)
+            {
+                if (sectionDto.Id == 0)
+                {
+                    var newSection = mapper.Map<TrackSection>(sectionDto);
+                    if (sectionDto.Choices != null)
+                    {
+                        newSection.Choices = mapper.Map<ICollection<TrackChoice>>(sectionDto.Choices);
+                    }
+
+                    if (existingTrack.Sections == null)
+                        existingTrack.Sections = new List<TrackSection>();
+
+                    existingTrack.Sections.Add(newSection);
+                }
+                else if (sectionDto.Id > 0)
+                {
+                    var existingSection = existingTrack.Sections?.FirstOrDefault(s => s.Id == sectionDto.Id);
+                    if (existingSection != null)
+                    {
+                        mapper.Map(sectionDto, existingSection);
+
+                        if (sectionDto.Choices != null)
+                        {
+                            foreach (var choiceDto in sectionDto.Choices)
+                            {
+                                if (choiceDto.Id == 0)
+                                {
+                                    var newChoice = mapper.Map<TrackChoice>(choiceDto);
+                                    if (existingSection.Choices == null) existingSection.Choices = new List<TrackChoice>();
+                                    existingSection.Choices.Add(newChoice);
+                                }
+                                else if (choiceDto.Id > 0)
+                                {
+                                    var existingChoice = existingSection.Choices?.FirstOrDefault(c => c.Id == choiceDto.Id);
+                                    if (existingChoice != null)
+                                    {
+                                        mapper.Map(choiceDto, existingChoice);
+                                        // Just for ensuring the section id is correct
+                                        existingChoice.SectionId = existingSection.Id;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         await unitOfWork.GetRepo<Track, int>().UpdateAsync(existingTrack);
         await unitOfWork.SaveChangesAsync();
 
@@ -176,8 +227,6 @@ public class AdministrationService(
             StatusCode = HttpStatusCode.OK,
         };
     }
-
-
 
     public async Task<APIResponse> DeleteTrack(int id)
     {
