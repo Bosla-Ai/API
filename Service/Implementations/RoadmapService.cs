@@ -28,7 +28,7 @@ public class RoadmapService : IRoadmapService
         _cache = cache;
         _httpClientFactory = httpClientFactory;
         _unitOfWork = unitOfWork;
-        _pythonApiUrl = configuration["PipelineApi:BaseUrl"] ?? "http://localhost:8000/generate-roadmap";
+        _pythonApiUrl = configuration["PipelineApi:BaseUrl"]!;
     }
 
     public async Task<RoadmapGenerationDTO> GenerateRoadmapAsync(string[] tags, string language, bool preferPaid)
