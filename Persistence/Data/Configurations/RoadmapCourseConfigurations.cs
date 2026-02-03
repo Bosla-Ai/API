@@ -26,10 +26,12 @@ public class RoadmapCourseConfigurations : IEntityTypeConfiguration<RoadmapCours
         // Relationships
         builder.HasOne(rc => rc.Roadmap)
             .WithMany(r => r.RoadmapCourses)
-            .HasForeignKey(rc => rc.RoadmapId);
+            .HasForeignKey(rc => rc.RoadmapId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         builder.HasOne(rc => rc.Course)
             .WithMany(c => c.RoadmapCourses)
-            .HasForeignKey(rc => rc.CourseId);
+            .HasForeignKey(rc => rc.CourseId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

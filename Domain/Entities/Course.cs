@@ -17,7 +17,7 @@ public sealed class Course
     public double Rating { get; set; }      // e.g. 4.8
     public int ReviewCount { get; set; }    // e.g. 1500
 
-    public string Language { get; set; } = "en"; // ar, en, es, fr, de, etc.
+    public ResourceLanguage Language { get; set; } = ResourceLanguage.en;
 
     public BudgetPreference? CourseBudget { get; set; } = BudgetPreference.Free;
     public DateTime RetrievedAt { get; set; } = DateTime.UtcNow;

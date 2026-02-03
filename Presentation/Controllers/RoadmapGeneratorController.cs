@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
@@ -5,6 +6,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
 using Shared.DTOs.RoadmapDTOs;
+using Domain.Exceptions;
+using Domain.Responses;
 
 namespace Presentation.Controllers;
 
@@ -55,5 +58,17 @@ public class RoadmapGeneratorController(
         var success = await serviceManager.Roadmap.SaveRoadmapAsync(userId, request);
 
         return Ok(success);
+    }
+
+    [HttpDelete("delete/{id:int}")]
+    [Authorize]
+    public async Task<ActionResult<APIResponse>> DeleteRoadmap(int id)
+    {
+        var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
+                     ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        var response = await serviceManager.Roadmap.DeleteRoadmapAsync(id, userId);
+
+        return Ok(response);
     }
 }

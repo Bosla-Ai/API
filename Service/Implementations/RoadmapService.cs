@@ -1,9 +1,11 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Domain.Contracts;
 using Domain.Entities;
 using Domain.Exceptions;
 using Domain.ModelsSpecifications;
+using Domain.Responses;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
@@ -31,7 +33,7 @@ public class RoadmapService : IRoadmapService
         _pythonApiUrl = configuration["PipelineApi:BaseUrl"]!;
     }
 
-    public async Task<RoadmapGenerationDTO> GenerateRoadmapAsync(string[] tags, string language, bool preferPaid)
+    public async Task<APIResponse<RoadmapGenerationDTO>> GenerateRoadmapAsync(string[] tags, string language, bool preferPaid)
     {
         var sortedTags = tags.OrderBy(t => t).ToArray();
         string cacheKey = $"roadmap-{string.Join("-", sortedTags)}-{language}-{preferPaid}";
@@ -39,11 +41,20 @@ public class RoadmapService : IRoadmapService
         string? cachedJson = await _cache.GetStringAsync(cacheKey);
         if (!string.IsNullOrEmpty(cachedJson))
         {
-            return JsonSerializer.Deserialize<RoadmapGenerationDTO>(cachedJson)!;
+            return new APIResponse<RoadmapGenerationDTO>
+            {
+                StatusCode = HttpStatusCode.OK,
+                Data = JsonSerializer.Deserialize<RoadmapGenerationDTO>(cachedJson)!
+            };
+        }
+
+        if (!Enum.TryParse<ResourceLanguage>(language, true, out var languageEnum))
+        {
+            languageEnum = ResourceLanguage.en; // Default fallback
         }
 
         var courses = await _unitOfWork.GetRepo<Course, int>()
-                    .GetAllAsync(new CoursesByTagsAndLanguageSpecification(tags, language));
+                    .GetAllAsync(new CoursesByTagsAndLanguageSpecification(tags, languageEnum));
 
 
         var missingTagsSet = new HashSet<string>(tags);
@@ -163,10 +174,14 @@ public class RoadmapService : IRoadmapService
         string jsonToCache = JsonSerializer.Serialize(roadmapData);
         await _cache.SetStringAsync(cacheKey, jsonToCache, cacheOptions);
 
-        return roadmapData;
+        return new APIResponse<RoadmapGenerationDTO>
+        {
+            StatusCode = HttpStatusCode.OK,
+            Data = roadmapData
+        };
     }
 
-    public async Task<bool> SaveRoadmapAsync(string customerId, RoadmapDTO request)
+    public async Task<APIResponse> SaveRoadmapAsync(string customerId, RoadmapDTO request)
     {
         var roadmap = new Roadmap
         {
@@ -227,7 +242,7 @@ public class RoadmapService : IRoadmapService
                         Duration = dto.Duration,
                         Rating = dto.Score > 5 ? 5.0 : dto.Score,
                         Platform = platformEnum,
-                        Language = "en", // Default
+                        Language = ResourceLanguage.en, // Default
                         RetrievedAt = DateTime.UtcNow
                     };
 
@@ -248,8 +263,30 @@ public class RoadmapService : IRoadmapService
             roadmap.RoadmapCourses.Add(roadmapCourse);
         }
 
-        var result = await _unitOfWork.SaveChangesAsync();
+        await _unitOfWork.SaveChangesAsync();
 
-        return result > 0;
+        return new APIResponse
+        {
+            StatusCode = HttpStatusCode.OK,
+        };
+    }
+
+    public async Task<APIResponse> DeleteRoadmapAsync(int roadmapId, string userId)
+    {
+        var repo = _unitOfWork.GetRepo<Roadmap, int>();
+        var roadmap = await repo.GetIdAsync(roadmapId);
+
+        if (roadmap == null)
+            throw new NotFoundException("Roadmap not found.");
+
+        if (roadmap.CustomerId != userId)
+            throw new UnauthorizedException("User is not authorized to delete this roadmap.");
+
+        await repo.DeleteAsync(roadmap);
+        await _unitOfWork.SaveChangesAsync();
+        return new APIResponse
+        {
+            StatusCode = HttpStatusCode.OK,
+        };
     }
 }
