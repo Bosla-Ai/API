@@ -11,6 +11,7 @@ public class ServiceManager : IServiceManager
     public ICustomerService Customer { get; private set; }
     public IRoadmapService Roadmap { get; private set; }
     public IAdministrationService Administration { get; private set; }
+    public IDashboardService Dashboard { get; private set; }
     public IRefreshTokenService RefreshToken { get; }
     public IUserService User { get; private set; }
 
@@ -21,6 +22,7 @@ public class ServiceManager : IServiceManager
         ICustomerService customer,
         IRoadmapService roadmap,
         IAdministrationService administration,
+        IDashboardService dashboard,
         IRefreshTokenService refreshToken,
         IUserService user)
     {
@@ -29,6 +31,7 @@ public class ServiceManager : IServiceManager
         Customer = customer;
         Roadmap = roadmap;
         Administration = administration;
+        Dashboard = dashboard;
         RefreshToken = refreshToken;
         User = user;
     }

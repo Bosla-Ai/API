@@ -11,4 +11,7 @@ public interface IGenericRepository<TEntity, Tkey>
     public Task UpdateAsync(TEntity entity);
     public Task DeleteAsync(TEntity entity);
 
+    public Task<int> CountAsync(Specifications<TEntity> specification = null);
+    public Task<int> CountDistinctAsync<TProperty>(Specifications<TEntity> specification, Expression<Func<TEntity, TProperty>> selector);
+
 }
