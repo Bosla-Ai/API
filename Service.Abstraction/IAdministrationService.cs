@@ -20,4 +20,6 @@ public interface IAdministrationService
     Task<APIResponse<int>> AddTrackFull(TrackCreateFullDTO trackDto);
     Task<APIResponse> UpdateFullTrack(TrackUpdateFullDTO trackDto);
     Task<APIResponse> DeleteTrack(int id);
+    Task<APIResponse> DeleteSection(int id);
+    Task<APIResponse> DeleteChoice(int id);
 }

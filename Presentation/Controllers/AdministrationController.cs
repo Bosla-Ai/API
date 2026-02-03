@@ -95,4 +95,20 @@ public class AdministrationController(
             .Administration.DeleteTrack(id);
         return response;
     }
+
+    [HttpDelete("DeleteSection/{id:int}")]
+    public async Task<ActionResult<APIResponse>> DeleteSection(int id)
+    {
+        var response = await serviceManager
+            .Administration.DeleteSection(id);
+        return response;
+    }
+
+    [HttpDelete("DeleteChoice/{id:int}")]
+    public async Task<ActionResult<APIResponse>> DeleteChoice(int id)
+    {
+        var response = await serviceManager
+            .Administration.DeleteChoice(id);
+        return response;
+    }
 }
