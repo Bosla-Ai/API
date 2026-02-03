@@ -17,6 +17,8 @@ using Service.Abstraction;
 using Service.Extensions;
 using Service.Implementations;
 using Service.MappingProfiles;
+using System.Net;
+using Domain.Responses;
 
 // Load environment variables from .env file
 Env.Load("../.env");
@@ -134,4 +136,8 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapGet("/api/health", () => Results
+    .Ok(new APIResponse { StatusCode = HttpStatusCode.OK }))
+    .WithTags("Health");
+
 app.Run();
