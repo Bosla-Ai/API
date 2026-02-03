@@ -64,7 +64,9 @@ public class ApplicationLayerTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("Cached", result.Status);
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.NotNull(result.Data);
+        Assert.Equal("Cached", result.Data.Status);
         _mockHttpClientFactory.Verify(x => x.CreateClient(It.IsAny<string>()), Times.Never);
     }
 
@@ -98,7 +100,10 @@ public class ApplicationLayerTests
         var result = await _roadmapService.GenerateRoadmapAsync(tags, "en", true);
 
         // Assert
-        Assert.Equal("Fresh", result.Status);
+        Assert.NotNull(result);
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.NotNull(result.Data);
+        Assert.Equal("Fresh", result.Data.Status);
         _mockCache.Verify(c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 }
