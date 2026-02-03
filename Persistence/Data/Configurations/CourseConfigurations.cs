@@ -40,6 +40,9 @@ public class CourseConfigurations : IEntityTypeConfiguration<Course>
         builder.Property(c => c.CourseBudget)
             .HasConversion<string>();
 
+        builder.Property(c => c.Language)
+            .HasConversion<string>();
+
         builder.Property(c => c.Url)
             .IsRequired()
             .HasMaxLength(1000);
