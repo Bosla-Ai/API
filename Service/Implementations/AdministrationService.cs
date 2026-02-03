@@ -246,5 +246,45 @@ public class AdministrationService(
         };
     }
 
+    public async Task<APIResponse> DeleteSection(int id)
+    {
+        if (id == 0 || id == null)
+            throw new BadRequestException("id is 0 or null");
 
+        var section = new TrackSectionByIdSpecification(id);
+        var existingSection = await unitOfWork
+            .GetRepo<TrackSection, int>().GetAsync(section);
+
+        if (existingSection == null)
+            throw new NotFoundException("Section not found");
+
+        await unitOfWork.GetRepo<TrackSection, int>().DeleteAsync(existingSection);
+        await unitOfWork.SaveChangesAsync();
+
+        return new APIResponse()
+        {
+            StatusCode = HttpStatusCode.OK,
+        };
+    }
+
+    public async Task<APIResponse> DeleteChoice(int id)
+    {
+        if (id == 0 || id == null)
+            throw new BadRequestException("id is 0 or null");
+
+        var choice = new TrackChoiceByIdSpecification(id);
+        var existingChoice = await unitOfWork
+            .GetRepo<TrackChoice, int>().GetAsync(choice);
+
+        if (existingChoice == null)
+            throw new NotFoundException("Choice not found");
+
+        await unitOfWork.GetRepo<TrackChoice, int>().DeleteAsync(existingChoice);
+        await unitOfWork.SaveChangesAsync();
+
+        return new APIResponse()
+        {
+            StatusCode = HttpStatusCode.OK,
+        };
+    }
 }
