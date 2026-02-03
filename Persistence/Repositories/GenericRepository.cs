@@ -1,6 +1,7 @@
 using Domain;
 using Domain.Contracts;
 using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
 using Persistence.Data.Contexts;
 
 namespace Persistence.Repositories;
@@ -54,5 +55,27 @@ public class GenericRepository<TEntity, TKey> : IGenericRepository<TEntity, TKey
     {
         _dbSet.Remove(entity);
         return Task.CompletedTask;
+    }
+    public async Task<int> CountAsync(Specifications<TEntity> specification = null)
+    {
+        IQueryable<TEntity> query = _dbSet;
+        if (specification is not null)
+        {
+            query = SpecificationsEvaluator.GetQuery(query, specification)!;
+        }
+        return await query.CountAsync();
+    }
+
+    public async Task<int> CountDistinctAsync<TProperty>(
+        Specifications<TEntity> specification
+        , Expression<Func<TEntity, TProperty>> selector)
+    {
+        IQueryable<TEntity> query = _dbSet;
+        if (specification != null)
+        {
+            query = SpecificationsEvaluator.GetQuery(query, specification)!;
+        }
+
+        return await query.Select(selector).Distinct().CountAsync();
     }
 }
