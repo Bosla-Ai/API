@@ -79,4 +79,35 @@ public class DashboardServiceTests
         Assert.Equal(domainCount, result.Data.DomainsCount);
         Assert.Equal(onlineUserCount, result.Data.OnlineUsersCount);
     }
+
+    [Fact]
+    public async Task GetDashboardDataAsync_ReturnsZeroCounts_WhenNoData()
+    {
+        // Arrange
+        _mockRoadmapRepo.Setup(r => r.CountAsync(null)).ReturnsAsync(0);
+        _mockCustomerRepo.Setup(r => r.CountAsync(null)).ReturnsAsync(0);
+        _mockCourseRepo.Setup(r => r.CountAsync(null)).ReturnsAsync(0);
+        _mockDomainsRepo.Setup(r => r.CountAsync(null)).ReturnsAsync(0);
+        _mockRefreshTokenRepo.Setup(r => r.CountDistinctAsync(It.IsAny<ActiveRefreshTokensSpecification>(), It.IsAny<Expression<Func<RefreshToken, string>>>()))
+            .ReturnsAsync(0);
+
+        // Act
+        var result = await _service.GetDashboardDataAsync();
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(0, result.Data.RoadmapsGenerartedCount);
+        Assert.Equal(0, result.Data.AllCustomersCount);
+        Assert.Equal(0, result.Data.OnlineUsersCount);
+    }
+
+    [Fact]
+    public async Task GetDashboardDataAsync_PropagatesRepositoryException()
+    {
+        // Arrange
+        _mockRoadmapRepo.Setup(r => r.CountAsync(null)).ThrowsAsync(new Exception("DB connection failed"));
+
+        // Act & Assert
+        await Assert.ThrowsAsync<Exception>(() => _service.GetDashboardDataAsync());
+    }
 }

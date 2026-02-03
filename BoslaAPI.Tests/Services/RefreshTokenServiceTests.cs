@@ -136,5 +136,39 @@ public class RefreshTokenServiceTests
         result.DeviceId.Should().Be(deviceId);
     }
 
+    [Fact]
+    public async Task GetWithDeviceIdNotRevokedAsync_ReturnsNull_WhenNotFound()
+    {
+        // Arrange
+        var parameters = new RefreshTokenParameters { DeviceId = Guid.NewGuid() };
+
+        _refreshTokenRepoMock
+            .Setup(r => r.GetAsync(It.IsAny<RefreshTokenSpecification>()))
+            .ReturnsAsync((RefreshToken)null!);
+
+        // Act
+        var result = await _refreshTokenService.GetWithDeviceIdNotRevokedAsync(parameters);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetAllForUserDeviceNotRevokedAsync_ReturnsEmpty_WhenNoTokens()
+    {
+        // Arrange
+        var parameters = new RefreshTokenParameters { UserId = "nonexistent" };
+
+        _refreshTokenRepoMock
+            .Setup(r => r.GetAllAsync(It.IsAny<RefreshTokenSpecification>()))
+            .ReturnsAsync(new List<RefreshToken>());
+
+        // Act
+        var result = await _refreshTokenService.GetAllForUserDeviceNotRevokedAsync(parameters);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
     #endregion
 }
