@@ -120,8 +120,7 @@ If intent is NOT ChatWithAI, set response to null. If it IS ChatWithAI, provide 
 
         try
         {
-            var llmResponse = await customerHelper.SendRequestToGemini(combinedPrompt);
-            var responseText = customerHelper.ExtractTextFromResponse(llmResponse);
+            var responseText = await customerHelper.SendRequestToGemini(combinedPrompt);
 
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
