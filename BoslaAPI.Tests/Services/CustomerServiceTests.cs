@@ -162,10 +162,10 @@ public class CustomerServiceTests
 
     #endregion
 
-    // Helper to create service - CustomerHelper has constructor dependencies
-    // so we skip testing methods that require it
+    // Helper to create service - CustomerHelper and ConversationContextManager have constructor dependencies
+    // so we skip testing methods that require them
     private CustomerService CreateServiceWithMockedDependencies(IMapper mapper)
     {
-        return new CustomerService(_unitOfWorkMock.Object, mapper, null!);
+        return new CustomerService(_unitOfWorkMock.Object, mapper, null!, null!);
     }
 }

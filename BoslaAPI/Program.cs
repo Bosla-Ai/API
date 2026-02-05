@@ -46,7 +46,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<IDbInitializer, DbInitializer>();
-builder.Services.AddServices();
+builder.Services.AddServices(builder.Configuration);
 builder.Services
     .AddJwtConfiguration(builder.Configuration)
     .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, cookie =>
