@@ -10,96 +10,87 @@ public class CustomerHelper
 {
     private readonly ILogger<CustomerHelper> _logger;
     private readonly HttpClient _httpClient;
-    private readonly List<string> _apiKeys;
-    private readonly string _geminiApiUrl;
-
-    private static volatile int _currentKeyIndex = 0;
+    private readonly string _apiKey;
+    private readonly string _apiUrl;
+    private readonly string _model;
+    private readonly string _provider;
 
     public CustomerHelper(ILogger<CustomerHelper> logger, HttpClient httpClient, IConfiguration configuration)
     {
         _logger = logger;
         _httpClient = httpClient;
 
-        var keysString = configuration["Gemini:ApiKey"];
-        if (string.IsNullOrEmpty(keysString))
-            throw new InternalServerErrorException("Gemini API key is not configured");
+        _provider = configuration["LLM:Provider"]?.ToLower() ?? "openrouter";
+        _apiKey = configuration["LLM:ApiKey"] 
+            ?? throw new InternalServerErrorException("LLM:ApiKey is not configured");
+        _apiUrl = configuration["LLM:ApiUrl"] 
+            ?? "https://openrouter.ai/api/v1/chat/completions";
+        _model = configuration["LLM:Model"] 
+            ?? "qwen/qwen3-coder:free";
 
-        _apiKeys = keysString.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-
-        if (!_apiKeys.Any())
-            throw new InternalServerErrorException("No valid Gemini API keys found");
-
-        _geminiApiUrl = configuration["Gemini:ApiUrl"]
-                        ?? "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+        if (string.IsNullOrWhiteSpace(_apiKey))
+            throw new InternalServerErrorException("LLM:ApiKey cannot be empty");
     }
 
-    public async Task<string> SendRequestToGemini(string prompt)
+    public async Task<string> SendRequestToLLM(string prompt)
     {
         var requestBody = new
         {
-            contents = new[]
+            model = _model,
+            messages = new[]
             {
-                new { parts = new[] { new { text = prompt } } }
+                new { role = "user", content = prompt }
             }
         };
 
         var requestJson = JsonConvert.SerializeObject(requestBody);
         var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
-        Exception? lastException = null;
+        using var request = new HttpRequestMessage(HttpMethod.Post, _apiUrl);
+        request.Content = requestContent;
+        request.Headers.Add("Authorization", $"Bearer {_apiKey}");
+        request.Headers.Add("HTTP-Referer", "https://bosla.me");
+        request.Headers.Add("X-Title", "Bosla AI");
 
-        // Try usage of keys in a loop
-        for (int i = 0; i < _apiKeys.Count; i++)
+        _logger.LogInformation("Sending request to {Provider} API with model {Model}", _provider, _model);
+
+        var response = await _httpClient.SendAsync(request);
+        var responseContent = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
         {
-            // Simple round-robin for the current attempt sequence
-            var keyIndex = (_currentKeyIndex + i) % _apiKeys.Count;
-            var currentKey = _apiKeys[keyIndex];
-
-            string requestUrl = $"{_geminiApiUrl}?key={currentKey}";
-
-            _logger.LogInformation($"Sending request to Gemini API (Key {keyIndex + 1}/{_apiKeys.Count})");
-
-            var response = await _httpClient.PostAsync(requestUrl, requestContent);
-
-            if (response.IsSuccessStatusCode)
-            {
-                // If successful, update the main index preference to this working key
-                _currentKeyIndex = keyIndex;
-                return await response.Content.ReadAsStringAsync();
-            }
-
-            var errorContent = await response.Content.ReadAsStringAsync();
-
-            // Only retry on 429 (Too Many Requests)
+            _logger.LogError("LLM API error: {StatusCode}, {Content}", response.StatusCode, responseContent);
+            
             if ((int)response.StatusCode == 429)
             {
-                _logger.LogWarning($"Gemini API Key {keyIndex + 1} Rate Limited (429). Switching to next key...");
-                lastException = new Exception($"Gemini API 429: {errorContent}");
-                continue; // Try next key
+                throw new Exception($"LLM API rate limited (429): {responseContent}");
             }
-
-            // For other errors, fail immediately
-            _logger.LogError($"Gemini API error: {response.StatusCode} ({(int)response.StatusCode}), {errorContent}");
-            throw new Exception($"Gemini API returned status code {response.StatusCode}");
+            
+            throw new Exception($"LLM API returned status code {response.StatusCode}: {responseContent}");
         }
 
-        throw new Exception("All Gemini API keys exhausted (Rate Limited)", lastException);
+        return responseContent;
     }
 
-    public string ExtractTextFromResponse(string geminiResponse)
+    // Backward compatibility - rename later
+    public Task<string> SendRequestToGemini(string prompt) => SendRequestToLLM(prompt);
+
+    public string ExtractTextFromResponse(string llmResponse)
     {
         try
         {
-            // Parse the Gemini response to extract the generated text
-            var responseObject = JsonConvert.DeserializeObject<dynamic>(geminiResponse);
-            var text = responseObject!.candidates[0].content.parts[0].text.ToString();
-
+            var responseObject = JsonConvert.DeserializeObject<dynamic>(llmResponse);
+            
+            // OpenRouter/OpenAI format: choices[0].message.content
+            var text = responseObject!.choices[0].message.content.ToString();
+            
             return text;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error extracting text from Gemini response");
-            throw new Exception("Failed to parse Gemini AI response", ex);
+            _logger.LogError(ex, "Error extracting text from LLM response: {Response}", 
+                llmResponse?.Substring(0, Math.Min(500, llmResponse?.Length ?? 0)));
+            throw new Exception("Failed to parse LLM response", ex);
         }
     }
 
@@ -112,7 +103,7 @@ Conversation:
 
 Provide a clear, factual summary:";
 
-        var response = await SendRequestToGemini(prompt);
+        var response = await SendRequestToLLM(prompt);
         return ExtractTextFromResponse(response);
     }
 }
