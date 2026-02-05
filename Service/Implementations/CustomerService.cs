@@ -67,7 +67,7 @@ public class CustomerService(
                 InteractionType = interactionType,
                 Confidence = confidence,
                 Success = true,
-                Answer = interactionType == LLMInteractionType.ChatWithAI ? aiResponse : null
+                Answer = !string.IsNullOrEmpty(aiResponse) ? aiResponse : null
             };
 
             if (!string.IsNullOrEmpty(response.Answer))
@@ -116,7 +116,14 @@ Respond in this EXACT JSON format:
 {{""intent"": ""<category>"", ""confidence"": <0-100>, ""response"": ""<your helpful response if ChatWithAI, otherwise null>""}}
 
 confidence = how confident you are (0-100%) in this intent classification.
-If intent is NOT ChatWithAI, set response to null. If it IS ChatWithAI, provide a helpful response.";
+
+IMPORTANT INSTRUCTIONS for 'response':
+- ALWAYS provide a helpful 'response' message for the user, even if the intent is NOT ChatWithAI.
+- If CVAnalysis: Respond enthusiastically like ""Great! Please upload your CV and I will analyze it for you.""
+- If ChooseMethod: Respond like ""I understand you might be feeling stuck. I'm Bosla AI assistant, and here are the options I can help with:""
+- If RoadmapGeneration: Respond like ""I can help you create a personalized learning roadmap. What query or topic do you have in mind?""
+- If ChooseTrack: Respond like ""I can help you choose the right track. Tell me about your interests or goals.""
+- If ChatWithAI: Provide the natural conversational answer to their query.";
 
         try
         {
