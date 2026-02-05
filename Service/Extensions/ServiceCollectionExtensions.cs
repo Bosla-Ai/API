@@ -14,21 +14,30 @@ public static class ServiceCollectionExtensions
     {
         services.AddMemoryCache();
 
-        // Register Cosmos DB client as singleton
-        services.AddSingleton<CosmosClient>(sp =>
+        // Register Cosmos DB client as singleton (lazy initialization - only if configured)
+        var cosmosEndpoint = configuration["CosmosDb:Endpoint"];
+        var cosmosKey = configuration["CosmosDb:Key"];
+        var isCosmosConfigured = !string.IsNullOrWhiteSpace(cosmosEndpoint) && !string.IsNullOrWhiteSpace(cosmosKey);
+
+        if (isCosmosConfigured)
         {
-            var endpoint = configuration["CosmosDb:Endpoint"] ?? throw new InvalidOperationException("CosmosDb:Endpoint is not configured");
-            var key = configuration["CosmosDb:Key"] ?? throw new InvalidOperationException("CosmosDb:Key is not configured");
-
-            return new CosmosClient(endpoint, key, new CosmosClientOptions
+            services.AddSingleton<CosmosClient>(sp =>
             {
-                ApplicationName = "BoslaAPI",
-                ConnectionMode = ConnectionMode.Gateway
+                return new CosmosClient(cosmosEndpoint, cosmosKey, new CosmosClientOptions
+                {
+                    ApplicationName = "BoslaAPI",
+                    ConnectionMode = ConnectionMode.Gateway
+                });
             });
-        });
 
-        // Register repositories
-        services.AddScoped<IChatRepository, CosmosChatRepository>();
+            // Register repositories
+            services.AddScoped<IChatRepository, CosmosChatRepository>();
+        }
+        else
+        {
+            // Register null/no-op repository when CosmosDB is not configured
+            services.AddScoped<IChatRepository, NullChatRepository>();
+        }
 
         // Register services
         services.AddScoped<IAuthenticationService, AuthenticationService>();

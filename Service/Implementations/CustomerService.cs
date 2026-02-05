@@ -120,8 +120,8 @@ If intent is NOT ChatWithAI, set response to null. If it IS ChatWithAI, provide 
 
         try
         {
-            var geminiResponse = await customerHelper.SendRequestToGemini(combinedPrompt);
-            var responseText = customerHelper.ExtractTextFromResponse(geminiResponse);
+            var llmResponse = await customerHelper.SendRequestToGemini(combinedPrompt);
+            var responseText = customerHelper.ExtractTextFromResponse(llmResponse);
 
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
@@ -133,7 +133,8 @@ If intent is NOT ChatWithAI, set response to null. If it IS ChatWithAI, provide 
         }
         catch (Exception ex)
         {
-            return (LLMInteractionType.ChatWithAI, 0, null);
+            // Bubble up the error so we can see what's happening
+            throw new Exception($"LLM Error: {ex.Message}", ex);
         }
     }
 
