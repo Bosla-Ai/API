@@ -4,7 +4,7 @@ public enum LLMInteractionType
 {
     RoadmapGeneration,
     CVAnalysis,
-    ContentFormatting,
-    SkillAssessment,
-    ResourceRecommendation
+    ChatWithAI,
+    ChooseTrack,
+    ChooseMethod,
 }
