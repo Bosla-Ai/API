@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Claims;
 using Domain.Responses;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Service.Abstraction;
 using Shared;
+using Shared.DTOs;
 using Shared.DTOs.DashboardDTOs;
 
 namespace Presentation.Controllers;
@@ -16,12 +18,29 @@ public class UserController(
     IConfiguration configuration)
     : ApiController(configuration)
 {
-    /// Send a text query to the AI and get a response
+    private string GetUserId()
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                     ?? User.FindFirst("sub")?.Value;
+
+        return userId ?? $"guest_{Guid.NewGuid():N}";
+    }
+
     [HttpPost("ask-ai")]
     public async Task<ActionResult<APIResponse<string>>> AskAI([FromBody] AiQueryRequest request)
     {
+        var userId = GetUserId();
         var response = await serviceManager.Customer
-            .ProcessUserQueryAsync(request.Query!);
+            .ProcessUserQueryAsync(userId, request.Query!, request.SessionId);
+        return Ok(response);
+    }
+
+    [HttpPost("ask-ai-with-intent")]
+    public async Task<ActionResult<APIResponse<AiIntentDetectionResponse>>> AskAIWithIntent([FromBody] AiQueryRequest request)
+    {
+        var userId = GetUserId();
+        var response = await serviceManager.Customer
+            .ProcessUserQueryWithIntentDetectionAsync(userId, request.Query!, request.SessionId);
         return Ok(response);
     }
 
