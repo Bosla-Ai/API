@@ -19,4 +19,7 @@ public class RoadmapRequestDTO
     [JsonPropertyName("language")]
     [MaxLength(10, ErrorMessage = "Language code must be 10 characters or less.")]
     public string Language { get; set; } = "en";
+
+    [JsonPropertyName("sources")]
+    public string[]? Sources { get; set; }
 }

@@ -6,10 +6,12 @@ using Domain.Entities;
 using Domain.Exceptions;
 using Domain.ModelsSpecifications;
 using Domain.Responses;
+using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
 using Service.Helpers;
 using Shared.DTOs;
 using Shared.DTOs.CustomerDTOs;
+using Shared.DTOs.RoadmapDTOs;
 using Shared.Enums;
 
 namespace Service.Implementations;
@@ -18,7 +20,9 @@ public class CustomerService(
     IUnitOfWork unitOfWork
     , IMapper mapper
     , CustomerHelper customerHelper
-    , ConversationContextManager conversationContextManager) : ICustomerService
+    , ConversationContextManager conversationContextManager
+    , IConfiguration configuration
+    , IHttpClientFactory httpClientFactory) : ICustomerService
 {
     public async Task<APIResponse<string>> ProcessUserQueryAsync(string userId, string query, string? sessionId = null)
     {
@@ -60,7 +64,14 @@ public class CustomerService(
             await Task.WhenAll(contextTask, addMessageTask);
             var conversationContext = await contextTask;
 
-            var (interactionType, confidence, aiResponse) = await DetectIntentAndGenerateResponseAsync(query, conversationContext);
+            var (interactionType, confidence, aiResponse, toolArguments) = await DetectIntentAndGenerateResponseAsync(query, conversationContext);
+
+            // Execute Tool if needed (RoadmapGeneration or CVAnalysis with skill gaps)
+            if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
+            {
+                var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments);
+                aiResponse += $"\n\n[SYSTEM]: Roadmap generated successfully.\nDetails: {apiResponse}";
+            }
 
             var response = new AiIntentDetectionResponse
             {
@@ -96,35 +107,105 @@ public class CustomerService(
         }
     }
 
-    private async Task<(LLMInteractionType intent, float confidence, string? response)> DetectIntentAndGenerateResponseAsync(string query, string conversationContext)
+    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments)> DetectIntentAndGenerateResponseAsync(string query, string conversationContext)
     {
-        string combinedPrompt = $@"You are Bosla AI assistant. Analyze the user's CURRENT query and conversation context to determine their intent.
+        string combinedPrompt = $@"You are Bosla AI, an intelligent educational assistant.
+Your task is to analyze the user's input and determine their intent for frontend UI rendering.
 
-Categories:
-- CVAnalysis: User wants to analyze/upload their CV NOW, or wants career guidance based on their CV
-- RoadmapGeneration: User wants to CREATE a learning roadmap, study plan, or course plan NOW
-- ChooseTrack: User wants to SELECT or get recommendations for a learning track NOW
-- ChatWithAI: General conversation, questions, follow-ups, or anything else
-- ChooseMethod: User is frustrated and doesn't know what to do or what method to use
+AVAILABLE INTENTS (Frontend will render UI based on this):
+- CVAnalysis: User WANTS to upload/analyze their CV (triggers CV upload component)
+- ChooseTrack: User wants to SELECT a learning track (triggers track selection component)
+- RoadmapGeneration: User wants a study roadmap with specific topics
+- ChooseMethod: User is confused about what to do
+- ChatWithAI: General conversation/questions
 
-IMPORTANT: If the user MENTIONS a category topic but is asking a general question, that's ChatWithAI.
-Example: ""I have a CV in tech, can you explain what closures are?"" → ChatWithAI (asking about closures, not CV analysis)
+IMPORTANT: The intent you return controls which UI component the frontend displays!
 
-{(!string.IsNullOrEmpty(conversationContext) ? $"Conversation History:\n{conversationContext}\n\n" : "")}Current User Query: ""{query}""
+ANALYSIS RULES:
+
+1. **CVAnalysis Intent (Two Scenarios):**
+   a) User WANTS to upload CV (e.g., 'let me upload my CV', 'analyze my resume', 'I want CV analysis'):
+      - Intent = 'CVAnalysis'
+      - tool_arguments = null (frontend will show upload component)
+   
+   b) User SENDS CV JSON data (contains 'profile', 'verifiedSkills', 'capabilities'):
+      - Intent = 'CVAnalysis'
+      - Extract 'profile.primaryRole' as TARGET ROLE
+      - Compare skills against LABOR MARKET requirements for that role
+      - Identify SKILL GAPS and put them as 'tags' in tool_arguments
+      - Example: primaryRole 'Backend Developer' with [.NET, SQL] but market needs Docker, K8s → tags = [""docker"", ""kubernetes""]
+
+2. **ChooseTrack Intent:**
+   - User WANTS to choose/select a learning track, pick a path, browse tracks
+   - Intent = 'ChooseTrack'
+   - tool_arguments = null (frontend will show track selection component)
+
+3. **RoadmapGeneration Intent (Two Scenarios):**
+   a) User asks for roadmap WITH specific topics (e.g., 'Give me a React roadmap')
+   b) Frontend sends back TagsPayload from track selection (tags array in query)
+   
+   In BOTH cases:
+   - Intent = 'RoadmapGeneration'
+   - Extract topics as 'tags'
+   - tool_arguments = {{ tags, prefer_paid, language, sources }}
+
+4. **ChooseMethod Intent:**
+   - User is confused, doesn't know what to do, asks 'what can you help with?'
+   - Intent = 'ChooseMethod'
+
+5. **ChatWithAI Intent:**
+   - General questions, follow-ups, conversation
+   - Intent = 'ChatWithAI'
+
+{(!string.IsNullOrEmpty(conversationContext) ? $"Conversation History:\n{conversationContext}\n\n" : "")}
+Current User Query: ""{query}""
 
 Respond in this EXACT JSON format:
-{{""intent"": ""<category>"", ""confidence"": <0-100>, ""response"": ""<your helpful response if ChatWithAI, otherwise null>""}}
+{{
+  ""intent"": ""RoadmapGeneration"" | ""ChatWithAI"" | ""CVAnalysis"" | ""ChooseTrack"" | ""ChooseMethod"",
+  ""confidence"": <number 0-100>,
+  ""response"": ""<Message to show the user IN THEIR LANGUAGE>"",
+  ""tool_arguments"": {{
+      ""tags"": [""topic_1"", ""topic_2"", ...],
+      ""prefer_paid"": <bool>,
+      ""language"": ""en"" | ""ar"",
+      ""sources"": [""youtube"" | ""udemy"" | ""coursera""] or null
+  }} or null
+}}
 
-confidence = how confident you are (0-100%) in this intent classification.
+IMPORTANT GUIDELINES for 'tool_arguments' (RoadmapGeneration):
+- **prefer_paid**:
+  - Set to 'true' if user wants paid courses, premium content, or explicitly mentions Udemy/Coursera.
+  - Set to 'false' if user wants free content or explicitly mentions YouTube.
+  
+- **sources** (Array of specific platforms):
+  - IF prefers paid (prefer_paid=true): Default is 'udemy'. You can include 'coursera' if mentioned.
+  - IF prefers free (prefer_paid=false): MUST be ['youtube'] (or null, which pipeline treats as youtube).
+  - Explicit platform mentions override defaults (e.g., ""free roadmap from udemy"" -> prefer_paid=true (since udemy is paid) + sources=['udemy']).
 
-IMPORTANT INSTRUCTIONS for 'response':
-- ALWAYS provide a helpful 'response' message for the user, even if the intent is NOT ChatWithAI.
-- If CVAnalysis: Respond enthusiastically like ""Great! Please upload your CV and I will analyze it for you.""
-- If ChooseMethod: Respond like ""I understand you might be feeling stuck. I'm Bosla AI assistant, and here are the options I can help with:""
-- If RoadmapGeneration: Respond like ""I can help you create a personalized learning roadmap. What query or topic do you have in mind?""
-- If ChooseTrack: Respond like ""I can help you choose the right track. Tell me about your interests or goals.""
-- If ChatWithAI: Provide the natural conversational answer to their query.";
+IMPORTANT GUIDELINES for 'response':
+- If CVAnalysis (user wants to upload): Invite them to upload.
+  - AR: ""تمام! ياريت ترفع الـ CV بتاعك عشان أقدر أحللهولك.""
+  - EN: ""Great! Please upload your CV and I will analyze it for you.""
 
+- If CVAnalysis (with CV data): Analyze and summarize.
+  - AR: ""حللت الـ CV بتاعك! بناءً على دور [role] ومتطلبات سوق العمل، محتاج تتعلم: [gaps]. هجهزلك خارطة طريق.""
+  - EN: ""I've analyzed your CV! Based on [role] and market requirements, you should learn: [gaps]. I'll generate a roadmap.""
+
+- If ChooseTrack: Invite them to select.
+  - AR: ""تمام! اختار التراك اللي يناسبك من القائمة.""
+  - EN: ""Great! Please select the track that suits you from the list.""
+  
+- If ChooseMethod: Offer help options.
+  - AR: ""أنا فاهم إنك محتار. أنا مساعد بوصلة، ودول الحاجات اللي ممكن أساعدك فيها:""
+  - EN: ""I understand you might be feeling stuck. Here are the options I can help with:""
+
+- If RoadmapGeneration: Confirm.
+  - AR: ""تمام، هبدأ أجهزلك خارطة طريق مخصصة عشانك.""
+  - EN: ""I'll generate a personalized roadmap for you.""
+
+- If ChatWithAI: Provide natural conversational answer.
+";
         try
         {
             var responseText = await customerHelper.SendRequestToGemini(combinedPrompt);
@@ -135,7 +216,7 @@ IMPORTANT INSTRUCTIONS for 'response':
                 return parsed.Value;
             }
 
-            return (LLMInteractionType.ChatWithAI, 0, responseText);
+            return (LLMInteractionType.ChatWithAI, 0, responseText, null);
         }
         catch (Exception ex)
         {
@@ -144,7 +225,7 @@ IMPORTANT INSTRUCTIONS for 'response':
         }
     }
 
-    private (LLMInteractionType intent, float confidence, string? response)? ParseCombinedResponse(string? responseText)
+    private (LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments)? ParseCombinedResponse(string? responseText)
     {
         if (string.IsNullOrWhiteSpace(responseText))
             return null;
@@ -169,9 +250,13 @@ IMPORTANT INSTRUCTIONS for 'response':
                 ? respProp.GetString()
                 : null;
 
+            var toolArguments = root.TryGetProperty("tool_arguments", out var argsProp) && argsProp.ValueKind != JsonValueKind.Null
+                ? JsonSerializer.Deserialize<RoadmapRequestDTO>(argsProp.GetRawText())
+                : null;
+
             if (!string.IsNullOrEmpty(intentStr) && Enum.TryParse<LLMInteractionType>(intentStr, true, out var intent))
             {
-                return (intent, Math.Clamp(confidence, 0, 100), response);
+                return (intent, Math.Clamp(confidence, 0, 100), response, toolArguments);
             }
         }
         catch
@@ -180,6 +265,42 @@ IMPORTANT INSTRUCTIONS for 'response':
 
         return null;
     }
+
+
+    private async Task<string> ExecuteRoadmapGenerationAsync(RoadmapRequestDTO requestData)
+    {
+        string apiUrl = configuration["PipelineApi:BaseUrl"]!;
+
+        using var client = httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromMinutes(5);
+
+        var jsonContent = JsonSerializer.Serialize(requestData);
+        var httpContent = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
+
+        try
+        {
+            var response = await client.PostAsync(apiUrl, httpContent);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var resultJson = await response.Content.ReadAsStringAsync();
+                return resultJson;
+            }
+            else
+            {
+                return $"Error: The roadmap service returned {response.StatusCode}";
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            return "Error: The roadmap service request timed out. Please try again.";
+        }
+        catch (Exception ex)
+        {
+            return $"Error calling roadmap service: {ex.Message}";
+        }
+    }
+
 
     private string GenerateSessionId(string userId)
     {
