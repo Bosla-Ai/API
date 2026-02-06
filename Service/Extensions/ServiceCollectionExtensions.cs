@@ -53,6 +53,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<CustomerHelper>();
         services.AddScoped<ConversationContextManager>();
 
+        services.AddScoped<IAuthTicketStore, AuthTicketStore>();
+
         return services;
     }
 }
