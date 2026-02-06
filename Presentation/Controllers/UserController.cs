@@ -1,7 +1,7 @@
-using System.Net;
 using System.Security.Claims;
+using Domain.Exceptions;
 using Domain.Responses;
-using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -12,24 +12,27 @@ using Shared.DTOs.DashboardDTOs;
 
 namespace Presentation.Controllers;
 
+[Authorize]
 public class UserController(
     ILogger<UserController> logger,
     IServiceManager serviceManager,
     IConfiguration configuration)
     : ApiController(configuration)
 {
-    private string GetUserId()
+    private string GetUserId(string? sessionId = null)
     {
         var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                      ?? User.FindFirst("sub")?.Value;
 
-        return userId ?? $"guest_{Guid.NewGuid():N}";
+        if (userId != null) return userId;
+
+        throw new UnauthorizedException("User ID not found in token");
     }
 
     [HttpPost("ask-ai")]
     public async Task<ActionResult<APIResponse<string>>> AskAI([FromBody] AiQueryRequest request)
     {
-        var userId = GetUserId();
+        var userId = GetUserId(request.SessionId);
         var response = await serviceManager.Customer
             .ProcessUserQueryAsync(userId, request.Query!, request.SessionId);
         return Ok(response);
@@ -38,7 +41,7 @@ public class UserController(
     [HttpPost("ask-ai-with-intent")]
     public async Task<ActionResult<APIResponse<AiIntentDetectionResponse>>> AskAIWithIntent([FromBody] AiQueryRequest request)
     {
-        var userId = GetUserId();
+        var userId = GetUserId(request.SessionId);
         var response = await serviceManager.Customer
             .ProcessUserQueryWithIntentDetectionAsync(userId, request.Query!, request.SessionId);
         return Ok(response);
