@@ -14,6 +14,7 @@ namespace Presentation.Controllers;
 
 public class ExternalAuthenticationController(
     IServiceManager serviceManager,
+    IAuthTicketStore authTicketStore,
     IConfiguration configuration) : ApiController(configuration)
 {
     // Read OAuth settings from configuration - support multiple domains
@@ -85,15 +86,9 @@ public class ExternalAuthenticationController(
 
         if (response != null)
         {
-            var accessTokenLifeTime = response.AccessTokenExpiration;
-            var refreshTokenLifeTime = response.RefreshTokenExpiration;
-
-            var accessTokenOptions = GetCookieOptions(accessTokenLifeTime);
-            var refreshTokenOptions = GetCookieOptions(refreshTokenLifeTime);
-
-            Response.Cookies.Append(StaticData.AccessToken, response.AccessToken, accessTokenOptions);
-            Response.Cookies.Append(StaticData.RefreshToken, response.RefreshToken, refreshTokenOptions);
-            Response.Cookies.Append(StaticData.DeviceId, Convert.ToString(response.DeviceId)!, refreshTokenOptions);
+            var ticket = await authTicketStore.StoreTicketAsync(response);
+            var delimiter = safeReturnUrl.Contains('?') ? "&" : "?";
+            return Redirect($"{safeReturnUrl}{delimiter}ticket={ticket}");
         }
 
         return Redirect(safeReturnUrl);
@@ -140,15 +135,9 @@ public class ExternalAuthenticationController(
 
         if (response != null)
         {
-            var accessTokenLifeTime = response.AccessTokenExpiration;
-            var refreshTokenLifeTime = response.RefreshTokenExpiration;
-
-            var accessTokenOptions = GetCookieOptions(accessTokenLifeTime);
-            var refreshTokenOptions = GetCookieOptions(refreshTokenLifeTime);
-
-            Response.Cookies.Append(StaticData.AccessToken, response.AccessToken, accessTokenOptions);
-            Response.Cookies.Append(StaticData.RefreshToken, response.RefreshToken, refreshTokenOptions);
-            Response.Cookies.Append(StaticData.DeviceId, Convert.ToString(response.DeviceId)!, refreshTokenOptions);
+            var ticket = await authTicketStore.StoreTicketAsync(response);
+            var delimiter = safeReturnUrl.Contains('?') ? "&" : "?";
+            return Redirect($"{safeReturnUrl}{delimiter}ticket={ticket}");
         }
 
         return Redirect(safeReturnUrl);

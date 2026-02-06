@@ -1,6 +1,6 @@
+using System.Net;
 using System.Security.Claims;
 using Domain.Responses;
-using Microsoft.AspNetCore.Http;
 using Domain.Requests;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -16,9 +16,33 @@ namespace Presentation.Controllers;
 
 public class AuthenticationController(
     IServiceManager serviceManager,
+    IAuthTicketStore authTicketStore,
     IConfiguration configuration)
     : ApiController(configuration)
 {
+    [HttpPost("ExchangeToken")]
+    public async Task<ActionResult<LoginClientResponse>> ExchangeToken([FromBody] TokenExchangeRequest request)
+    {
+        var response = await authTicketStore.RetrieveTicketAsync(request.Ticket);
+        if (response == null)
+        {
+            return BadRequest(new APIResponse<string>(HttpStatusCode.BadRequest, null, new List<string> { "Invalid or expired ticket." }));
+        }
+
+        ClearAuthCookies();
+        SetAuthCookies(response);
+
+        var clientResponse = new LoginClientResponse
+        {
+            FirstName = response.FirstName,
+            LastName = response.LastName,
+            UserName = response.UserName,
+            Email = response.Email,
+            Role = response.Role ?? StaticData.CustomerRoleName
+        };
+
+        return Ok(clientResponse);
+    }
 
     [EnableRateLimiting("AuthPolicy")]
     [HttpPost("RegisterCustomer")]
