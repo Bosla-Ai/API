@@ -11,7 +11,7 @@ public class ConversationContextManager
     private readonly IChatRepository _chatRepository;
     private readonly CustomerHelper _customerHelper;
     private readonly TimeSpan _hotCacheExpiration = TimeSpan.FromMinutes(5);
-    private const int SummarizationThreshold = 10;
+    private const int SummarizationThreshold = 50;
 
     public ConversationContextManager(IMemoryCache cache, IChatRepository chatRepository, CustomerHelper customerHelper)
     {
