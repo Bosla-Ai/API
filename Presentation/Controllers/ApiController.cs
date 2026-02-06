@@ -17,14 +17,21 @@ public class ApiController(IConfiguration configuration) : ControllerBase
     {
         var domain = configuration["CookieSettings:AllowedSubDomain"];
         var isSecure = bool.TryParse(configuration["CookieSettings:Secure"], out var secure) ? secure : true;
+        var sameSite = Enum.TryParse<SameSiteMode>(configuration["CookieSettings:SameSite"], out var mode) ? mode : SameSiteMode.None;
+        var isPartitioned = bool.TryParse(configuration["CookieSettings:Partitioned"], out var partitioned) ? partitioned : false;
 
         var options = new CookieOptions
         {
             HttpOnly = true,
             Secure = isSecure,
-            SameSite = isSecure ? SameSiteMode.None : SameSiteMode.Lax,
+            SameSite = sameSite,
             Expires = lifeTime,
         };
+
+        if (isPartitioned)
+        {
+            options.Extensions.Add("Partitioned");
+        }
 
         // Only set domain if explicitly configured (empty = localhost)
         if (!string.IsNullOrEmpty(domain))
