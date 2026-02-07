@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using BoslaAPI;
 using BoslaAPI.Extensions;
 using BoslaAPI.Middlewares;
 using DotNetEnv;
@@ -15,7 +14,6 @@ using Persistence.Repositories;
 using Persistence.Seeder;
 using Service.Abstraction;
 using Service.Extensions;
-using Service.Implementations;
 using Service.MappingProfiles;
 using System.Net;
 using Domain.Responses;
@@ -28,7 +26,10 @@ var builder = WebApplication.CreateBuilder(args);
 // Add environment variables to configuration
 builder.Configuration.AddEnvironmentVariables();
 
-builder.Services.AddHttpClient();
+builder.Services.AddHttpClient(string.Empty, client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(5);
+});
 
 builder.Services.AddAutoMapper(cfg => { }, typeof(CustomerMapping).Assembly);
 builder.Services.AddControllers();
@@ -42,7 +43,6 @@ builder.Services.AddDbContext<ApplicationDbContext>(option =>
     option.UseSqlServer(builder.Configuration.GetConnectionString("ServerConnection"));
     // option.UseSqlServer(builder.Configuration.GetConnectionString("CS")); // forDevelopment
 });
-builder.Services.AddHttpClient();
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<IDbInitializer, DbInitializer>();
