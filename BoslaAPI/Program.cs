@@ -144,6 +144,7 @@ app.UseMiddleware<ApiResponseMiddleware>();
 app.UseCors("CorsPolicy");
 app.UseRateLimiter();
 app.UseAuthentication();
+app.UseTokenRefresh();
 app.UseAuthorization();
 app.MapControllers();
 app.MapGet("/api/health", () => Results

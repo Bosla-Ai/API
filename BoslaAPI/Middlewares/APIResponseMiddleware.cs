@@ -49,7 +49,9 @@ public class ApiResponseMiddleware(RequestDelegate next, ILogger<ApiResponseMidd
 
             // If response is not JSON (based on content-type) => return original bytes unchanged
             var contentType = context.Response.ContentType ?? string.Empty;
-            if (!contentType.Contains("application/json", StringComparison.OrdinalIgnoreCase))
+            if (!contentType.Contains("application/json", StringComparison.OrdinalIgnoreCase) &&
+                context.Response.StatusCode != StatusCodes.Status401Unauthorized &&
+                context.Response.StatusCode != StatusCodes.Status403Forbidden)
             {
                 // write back raw original buffer
                 buffer.Seek(0, SeekOrigin.Begin);
