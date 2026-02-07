@@ -9,6 +9,8 @@ namespace Service.Abstraction;
 public interface ICustomerService
 {
     Task<APIResponse<string>> ProcessUserQueryAsync(string userId, string query, string? sessionId = null);
+    IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null);
+
     Task<APIResponse<AiIntentDetectionResponse>> ProcessUserQueryWithIntentDetectionAsync(string userId, string query, string? sessionId = null);
     Task<APIResponse> GetCustomerProfileAsync(string customerId);
     Task<IEnumerable<Customer>> GetAllAsync();

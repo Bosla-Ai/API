@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using AutoMapper;
 using Domain.Contracts;
@@ -37,8 +38,8 @@ public class CustomerService(
 
         string aiPrompt = $"Context:\n{conversationContext}\n\nCurrent User Query: {query}\n\nPlease provide a helpful response considering the conversation history if relevant.";
 
-        var geminiResponse = await customerHelper.SendRequestToGemini(aiPrompt);
-        string responseText = customerHelper.ExtractTextFromResponse(geminiResponse);
+        var (geminiResponse, _) = await customerHelper.SendRequestToGemini(aiPrompt);
+        string responseText = geminiResponse;
 
         await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, responseText, "assistant");
 
@@ -47,6 +48,83 @@ public class CustomerService(
             StatusCode = HttpStatusCode.OK,
             Data = responseText
         };
+    }
+
+    public async IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            yield break;
+
+        var actualSessionId = !string.IsNullOrEmpty(sessionId) ? sessionId : GenerateSessionId(userId);
+
+        var contextTask = conversationContextManager.GetConversationContextAsync(userId, actualSessionId);
+        var addMessageTask = conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, query, "user");
+        await Task.WhenAll(contextTask, addMessageTask);
+        var conversationContext = await contextTask;
+
+        yield return "__STATUS__:Analyzing your request...";
+
+        var (interactionType, confidence, aiResponse, toolArguments, detectionModel) = await DetectIntentAsync(query, conversationContext.ToString());
+
+        yield return $"__MODEL__:{detectionModel}";
+
+        yield return $"__INTENT__:{interactionType}";
+
+        if (interactionType == LLMInteractionType.ChatWithAI || interactionType == LLMInteractionType.ChooseMethod)
+        {
+            string chatPrompt = BuildChatPrompt(conversationContext, query);
+
+            var fullResponseBuilder = new StringBuilder();
+
+            try
+            {
+                await foreach (var chunk in customerHelper.SendStreamRequestToGemini(chatPrompt))
+                {
+                    yield return chunk;
+
+                    if (!chunk.StartsWith("__STATUS__"))
+                    {
+                        fullResponseBuilder.Append(chunk);
+                    }
+                }
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(fullResponseBuilder.ToString()))
+                {
+                    await conversationContextManager
+                        .AddMessageToContextAsync(userId, actualSessionId, fullResponseBuilder.ToString(), "assistant");
+                }
+            }
+        }
+        else
+        {
+
+            string finalResponse = "";
+
+            if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
+            {
+                yield return "__STATUS__:Running Bosla Education Pipeline...";
+                if (toolArguments?.Tags != null) yield return $"__STATUS__:Detected Interests: {string.Join(", ", toolArguments.Tags)}";
+
+                var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments!);
+                finalResponse = $"[SYSTEM]: Roadmap generated successfully.\nDetails: {apiResponse}";
+
+                yield return "__STATUS__:generation complete.";
+            }
+            else if (interactionType == LLMInteractionType.ChooseTrack)
+            {
+                finalResponse = "Please select a track from the list below.";
+            }
+            else
+            {
+                finalResponse = "I have processed your request.";
+            }
+
+            yield return finalResponse;
+
+            await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, finalResponse, "assistant");
+        }
     }
 
     public async Task<APIResponse<AiIntentDetectionResponse>> ProcessUserQueryWithIntentDetectionAsync(string userId, string query, string? sessionId = null)
@@ -64,13 +142,17 @@ public class CustomerService(
             await Task.WhenAll(contextTask, addMessageTask);
             var conversationContext = await contextTask;
 
-            var (interactionType, confidence, aiResponse, toolArguments) = await DetectIntentAndGenerateResponseAsync(query, conversationContext);
+            var (interactionType, confidence, aiResponse, toolArguments, _) = await DetectIntentAsync(query, conversationContext.ToString());
 
-            // Execute Tool if needed (RoadmapGeneration or CVAnalysis with skill gaps)
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
                 var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments);
                 aiResponse += $"\n\n[SYSTEM]: Roadmap generated successfully.\nDetails: {apiResponse}";
+            }
+
+            if (toolArguments?.Tags != null)
+            {
+                Console.WriteLine($"\n[Generated Tags]: {string.Join(", ", toolArguments.Tags)}\n");
             }
 
             var response = new AiIntentDetectionResponse
@@ -107,122 +189,131 @@ public class CustomerService(
         }
     }
 
-    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments)> DetectIntentAndGenerateResponseAsync(string query, string conversationContext)
+    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName)> DetectIntentAsync(string query, string conversationContext)
     {
-        string combinedPrompt = $@"You are Bosla AI, an intelligent educational assistant.
-Your task is to analyze the user's input and determine their intent for frontend UI rendering.
+        string detectionPrompt = $@"You are Bosla AI, an intelligent educational assistant.
+Your task is to analyze the user's input, determine their intent for the frontend UI, and if necessary, generate a professional roadmap.
 
 AVAILABLE INTENTS (Frontend will render UI based on this):
-- CVAnalysis: User WANTS to upload/analyze their CV (triggers CV upload component)
-- ChooseTrack: User wants to SELECT a learning track (triggers track selection component)
-- RoadmapGeneration: User wants a study roadmap with specific topics
-- ChooseMethod: User is confused about what to do
-- ChatWithAI: General conversation/questions
+- CVAnalysis: User WANTS to upload/analyze their CV (triggers CV upload component).
+- ChooseTrack: User wants to SELECT a learning track (triggers track selection component).
+- RoadmapGeneration: User wants a study roadmap (triggers roadmap generation pipeline).
+- ChooseMethod: User is confused about what to do.
+- ChatWithAI: General conversation/questions.
 
-IMPORTANT: The intent you return controls which UI component the frontend displays!
-
-ANALYSIS RULES:
+*** ANALYSIS RULES & LOGIC ***
 
 1. **CVAnalysis Intent (Two Scenarios):**
-   a) User WANTS to upload CV (e.g., 'let me upload my CV', 'analyze my resume', 'I want CV analysis'):
+   a) **User WANTS to upload CV** (e.g., 'analyze my resume', 'review my cv'):
       - Intent = 'CVAnalysis'
-      - tool_arguments = null (frontend will show upload component)
-   
-   b) User SENDS CV JSON data (contains 'profile', 'verifiedSkills', 'capabilities'):
+      - tool_arguments = null (frontend shows upload UI).
+      - Response: Invite them to upload (AR: ""تمام! ياريت ترفع الـ CV..."" / EN: ""Great! Please upload..."").
+
+   b) **User SENDS CV JSON data** (contains 'profile', 'verifiedSkills', etc.):
       - Intent = 'CVAnalysis'
-      - Extract 'profile.primaryRole' as TARGET ROLE
-      - Compare skills against LABOR MARKET requirements for that role
-      - Identify SKILL GAPS and put them as 'tags' in tool_arguments
-      - Example: primaryRole 'Backend Developer' with [.NET, SQL] but market needs Docker, K8s → tags = [""docker"", ""kubernetes""]
+      - **ACTION: PERFORM GAP ANALYSIS (See 'Gap Analysis Protocol' below).**
+      - Response: Summarize gaps (AR: ""بناءً على دورك، ناقصك مهارات زي..."" / EN: ""Based on your role, you are missing..."").
 
 2. **ChooseTrack Intent:**
-   - User WANTS to choose/select a learning track, pick a path, browse tracks
+   - User wants to pick a path/track.
    - Intent = 'ChooseTrack'
-   - tool_arguments = null (frontend will show track selection component)
+   - tool_arguments = null.
 
-3. **RoadmapGeneration Intent (Two Scenarios):**
-   a) User asks for roadmap WITH specific topics (e.g., 'Give me a React roadmap')
-   b) Frontend sends back TagsPayload from track selection (tags array in query)
-   
-   In BOTH cases:
-   - Intent = 'RoadmapGeneration'
-   - Extract topics as 'tags'
+3. **RoadmapGeneration Intent:**
+   - User asks for a roadmap OR Frontend sends selected tags.
+   - **ACTION: PERFORM GAP ANALYSIS (See 'Gap Analysis Protocol' below)** to ensure the roadmap is professional.
    - tool_arguments = {{ tags, prefer_paid, language, sources }}
 
 4. **ChooseMethod Intent:**
-   - User is confused, doesn't know what to do, asks 'what can you help with?'
+   - User is confused.
    - Intent = 'ChooseMethod'
 
 5. **ChatWithAI Intent:**
-   - General questions, follow-ups, conversation
+   - General conversation.
    - Intent = 'ChatWithAI'
+
+*** GAP ANALYSIS PROTOCOL (THE BRAIN) ***
+When generating 'tags' for Roadmap/CV, identify missing ""Silent Pillars"" required for a SENIOR professional in their TARGET ROLE.
+
+   **Step 1: Identify Role** (e.g., Full Stack, CyberSec, DevOps, Embedded).
+   **Step 2: Check for the 3 Professional Pillars (If missing, ADD them as tags):**
+      A. **The Operational Gap** (Delivery/Ops):
+         - Web: CI/CD, Docker, Cloud (AWS).
+         - Cyber: Reporting, SIEM, Scripting.
+         - Embedded: RTOS, Hardware Debugging.
+      B. **The Quality Gap** (Verification):
+         - Web: Testing (Jest/xUnit), SonarQube.
+         - Cyber: Compliance (NIST), Risk Assessment.
+         - Data: Data Cleaning, Validation.
+      C. **The Advanced Gap** (Scale/Depth):
+         - Web: System Design, Microservices, Security.
+         - Cyber: Reverse Engineering, Threat Hunting.
+         - General: Design Patterns, Clean Architecture.
+
+   **Step 3: Tag Generation Rule (STRICT ATOMICITY):**
+   - **Output 5-8 distinct tags.**
+   - **CRITICAL: NEVER combine topics with '&', 'and', or '/'.**
+     - BAD: ""Docker & Kubernetes""
+     - GOOD: ""Docker"", ""Kubernetes""
+     - BAD: ""PostgreSQL and TypeORM""
+     - GOOD: ""PostgreSQL"", ""TypeORM""
+   - Mix: [2 Advanced Ecosystem Tools] + [3 Gap Filling Tags from above].
+   - Tags must be search-friendly (e.g., ""Python Testing"" not just ""Quality"").
+
+*** PARAMETER EXTRACTION RULES ***
+- **prefer_paid**: true if user mentions ""paid"", ""course"", ""udemy"". Default false.
+- **sources**:
+  - If paid: default ['udemy'].
+  - If free: default ['youtube'].
+- **language**: 'ar' or 'en' based on user input language.
 
 {(!string.IsNullOrEmpty(conversationContext) ? $"Conversation History:\n{conversationContext}\n\n" : "")}
 Current User Query: ""{query}""
 
-Respond in this EXACT JSON format:
+Respond in EXACT JSON:
 {{
   ""intent"": ""RoadmapGeneration"" | ""ChatWithAI"" | ""CVAnalysis"" | ""ChooseTrack"" | ""ChooseMethod"",
-  ""confidence"": <number 0-100>,
+  ""confidence"": <0-100>,
   ""response"": ""<Message to show the user IN THEIR LANGUAGE>"",
   ""tool_arguments"": {{
-      ""tags"": [""topic_1"", ""topic_2"", ...],
+      ""tags"": [""tag1"", ""tag2"", ...],
       ""prefer_paid"": <bool>,
       ""language"": ""en"" | ""ar"",
-      ""sources"": [""youtube"" | ""udemy"" | ""coursera""] or null
+      ""sources"": [""youtube"", ""udemy"", ...] or null
   }} or null
-}}
-
-IMPORTANT GUIDELINES for 'tool_arguments' (RoadmapGeneration):
-- **prefer_paid**:
-  - Set to 'true' if user wants paid courses, premium content, or explicitly mentions Udemy/Coursera.
-  - Set to 'false' if user wants free content or explicitly mentions YouTube.
-  
-- **sources** (Array of specific platforms):
-  - IF prefers paid (prefer_paid=true): Default is 'udemy'. You can include 'coursera' if mentioned.
-  - IF prefers free (prefer_paid=false): MUST be ['youtube'] (or null, which pipeline treats as youtube).
-  - Explicit platform mentions override defaults (e.g., ""free roadmap from udemy"" -> prefer_paid=true (since udemy is paid) + sources=['udemy']).
-
-IMPORTANT GUIDELINES for 'response':
-- If CVAnalysis (user wants to upload): Invite them to upload.
-  - AR: ""تمام! ياريت ترفع الـ CV بتاعك عشان أقدر أحللهولك.""
-  - EN: ""Great! Please upload your CV and I will analyze it for you.""
-
-- If CVAnalysis (with CV data): Analyze and summarize.
-  - AR: ""حللت الـ CV بتاعك! بناءً على دور [role] ومتطلبات سوق العمل، محتاج تتعلم: [gaps]. هجهزلك خارطة طريق.""
-  - EN: ""I've analyzed your CV! Based on [role] and market requirements, you should learn: [gaps]. I'll generate a roadmap.""
-
-- If ChooseTrack: Invite them to select.
-  - AR: ""تمام! اختار التراك اللي يناسبك من القائمة.""
-  - EN: ""Great! Please select the track that suits you from the list.""
-  
-- If ChooseMethod: Offer help options.
-  - AR: ""أنا فاهم إنك محتار. أنا مساعد بوصلة، ودول الحاجات اللي ممكن أساعدك فيها:""
-  - EN: ""I understand you might be feeling stuck. Here are the options I can help with:""
-
-- If RoadmapGeneration: Confirm.
-  - AR: ""تمام، هبدأ أجهزلك خارطة طريق مخصصة عشانك.""
-  - EN: ""I'll generate a personalized roadmap for you.""
-
-- If ChatWithAI: Provide natural conversational answer.
-";
+}}";
         try
         {
-            var responseText = await customerHelper.SendRequestToGemini(combinedPrompt);
-
+            var (responseText, modelName) = await customerHelper.SendRequestToGemini(detectionPrompt);
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
-            {
-                return parsed.Value;
-            }
+                return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName);
 
-            return (LLMInteractionType.ChatWithAI, 0, responseText, null);
+            // Fallback
+            return (LLMInteractionType.ChatWithAI, 0, null, null, modelName);
         }
-        catch (Exception ex)
+        catch
         {
-            // Bubble up the error so we can see what's happening
-            throw new Exception($"LLM Error: {ex.Message}", ex);
+            return (LLMInteractionType.ChatWithAI, 0, null, null, "Unknown");
         }
+    }
+
+    private string BuildChatPrompt(string context, string query)
+    {
+        return $@"You are Bosla AI, an intelligent educational assistant.
+System: Be helpful, encouraging, and concise.
+
+Conversation History:
+{context}
+
+Current User Query: {query}
+
+Thought Process Visibility:
+If you need to perform analysis, search memory, or plan your answer, output your thought on a new line starting with >>>.
+Example:
+>>> Analyzing user's .NET background...
+>>> Formulating explanation...
+Then provide your actual response.";
     }
 
     private (LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments)? ParseCombinedResponse(string? responseText)
@@ -259,8 +350,9 @@ IMPORTANT GUIDELINES for 'response':
                 return (intent, Math.Clamp(confidence, 0, 100), response, toolArguments);
             }
         }
-        catch
+        catch (Exception ex)
         {
+            throw new BadRequestException($"Failed to parse AI response: {ex.Message}");
         }
 
         return null;

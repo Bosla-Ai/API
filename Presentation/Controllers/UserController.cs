@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Domain.Exceptions;
 using Domain.Responses;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -12,7 +13,7 @@ using Shared.DTOs.DashboardDTOs;
 
 namespace Presentation.Controllers;
 
-[Authorize]
+//[Authorize]
 public class UserController(
     ILogger<UserController> logger,
     IServiceManager serviceManager,
@@ -39,12 +40,28 @@ public class UserController(
     }
 
     [HttpPost("ask-ai-with-intent")]
-    public async Task<ActionResult<APIResponse<AiIntentDetectionResponse>>> AskAIWithIntent([FromBody] AiQueryRequest request)
+    public async Task AskAIWithIntent([FromBody] AiQueryRequest request)
     {
-        var userId = GetUserId(request.SessionId);
-        var response = await serviceManager.Customer
-            .ProcessUserQueryWithIntentDetectionAsync(userId, request.Query!, request.SessionId);
-        return Ok(response);
+        // var userId = GetUserId(request.SessionId);
+        var userId = "test-123";
+
+        Response.ContentType = "text/event-stream";
+        Response.Headers["Cache-Control"] = "no-cache";
+
+        try
+        {
+            await foreach (var chunk in serviceManager.Customer
+                .ProcessUserQueryStreamAsync(userId, request.Query!, request.SessionId))
+            {
+                await Response.WriteAsync($"data: {chunk}\n\n");
+                await Response.Body.FlushAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            await Response.WriteAsync($"data: __ERROR__:{ex.Message}\n\n");
+            await Response.Body.FlushAsync();
+        }
     }
 
     [HttpGet("GetCustomerProfile/{customerId:guid}")]
