@@ -13,7 +13,7 @@ using Shared.DTOs.DashboardDTOs;
 
 namespace Presentation.Controllers;
 
-//[Authorize]
+[Authorize]
 public class UserController(
     ILogger<UserController> logger,
     IServiceManager serviceManager,
@@ -42,8 +42,7 @@ public class UserController(
     [HttpPost("ask-ai-with-intent")]
     public async Task AskAIWithIntent([FromBody] AiQueryRequest request)
     {
-        // var userId = GetUserId(request.SessionId);
-        var userId = "test-123";
+        var userId = GetUserId(request.SessionId);
 
         Response.ContentType = "text/event-stream";
         Response.Headers["Cache-Control"] = "no-cache";
