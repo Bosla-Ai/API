@@ -20,7 +20,7 @@ public class AiOptions
 
 public class PipelineApiOptions
 {
-    public string BaseUrl { get; set; } = "http://localhost:8000/generate-roadmap";
+    public string BaseUrl { get; set; } = "http://localhost:7860/generate-roadmap";
 }
 
 public class GeminiOptions
@@ -28,6 +28,7 @@ public class GeminiOptions
     public List<string> ApiKeys { get; set; } = new();
     public string Model { get; set; } = "gemini-3-flash-preview";
     public string ApiUrl { get; set; } = string.Empty;
+    public bool IncludeThoughts { get; set; } = true;
 }
 
 public class LlmOptions
@@ -36,6 +37,7 @@ public class LlmOptions
     public string ApiKey { get; set; } = string.Empty;
     public string ApiUrl { get; set; } = "https://openrouter.ai/api/v1/chat/completions";
     public string Model { get; set; } = "qwen/qwen-2.5-coder-32b-instruct";
+    public bool IncludeReasoning { get; set; } = false;
 }
 
 public class PromptOptions

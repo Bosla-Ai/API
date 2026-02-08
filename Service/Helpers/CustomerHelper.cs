@@ -19,6 +19,8 @@ public class CustomerHelper
     // Gemini 
     private readonly List<string> _geminiApiKeys;
     private readonly string _geminiModel;
+    private readonly string _geminiApiUrl;
+    private readonly bool _geminiIncludeThoughts;
     private static volatile int _currentGeminiKeyIndex = 0;
 
     // OpenRouter
@@ -26,6 +28,7 @@ public class CustomerHelper
     private readonly string _llmApiUrl;
     private readonly string _llmModel;
     private readonly string _llmProvider;
+    private readonly bool _llmIncludeReasoning;
 
     public CustomerHelper(ILogger<CustomerHelper> logger, HttpClient httpClient, IOptionsMonitor<AiOptions> options)
     {
@@ -35,11 +38,14 @@ public class CustomerHelper
 
         _geminiApiKeys = aiOptions.Gemini.ApiKeys;
         _geminiModel = aiOptions.Gemini.Model;
+        _geminiApiUrl = aiOptions.Gemini.ApiUrl;
+        _geminiIncludeThoughts = aiOptions.Gemini.IncludeThoughts;
 
         _llmProvider = aiOptions.Llm.Provider;
         _llmApiKey = aiOptions.Llm.ApiKey;
         _llmApiUrl = aiOptions.Llm.ApiUrl;
         _llmModel = aiOptions.Llm.Model;
+        _llmIncludeReasoning = aiOptions.Llm.IncludeReasoning;
 
         if (!_geminiApiKeys.Any() && string.IsNullOrWhiteSpace(_llmApiKey))
         {
@@ -47,13 +53,13 @@ public class CustomerHelper
         }
     }
 
-    public async Task<(string Response, string ModelName)> SendRequestToGemini(string prompt)
+    public async Task<(string Response, string ModelName)> SendRequestToGemini(string prompt, bool useThinking = false)
     {
         if (_geminiApiKeys.Any())
         {
             try
             {
-                return await ExecuteGeminiRequestWithRotation(prompt);
+                return await ExecuteGeminiRequestWithRotation(prompt, useThinking);
             }
             catch (Exception ex)
             {
@@ -69,7 +75,7 @@ public class CustomerHelper
         {
             try
             {
-                return await ExecuteOpenRouterRequest(prompt);
+                return await ExecuteOpenRouterRequest(prompt, useThinking);
             }
             catch (Exception ex)
             {
@@ -80,7 +86,7 @@ public class CustomerHelper
         throw new InternalServerErrorException("All AI providers failed or are not configured.");
     }
 
-    private async Task<(string Response, string ModelName)> ExecuteGeminiRequestWithRotation(string prompt)
+    private async Task<(string Response, string ModelName)> ExecuteGeminiRequestWithRotation(string prompt, bool useThinking)
     {
         for (int i = 0; i < _geminiApiKeys.Count; i++)
         {
@@ -91,14 +97,31 @@ public class CustomerHelper
 
             try
             {
-                var client = new Client(apiKey: currentKey);
-                var response = await client.Models.GenerateContentAsync(
-                    model: _geminiModel,
-                    contents: prompt
-                );
+                var url = $"{_geminiApiUrl}?key={currentKey}";
+
+                var enableThinking = _geminiIncludeThoughts && useThinking;
+
+                var requestBody = new
+                {
+                    contents = new[] { new { parts = new[] { new { text = prompt } } } },
+                    generationConfig = enableThinking ? new { thinking_config = new { include_thoughts = true } } : null
+                };
+
+                var json = JsonConvert.SerializeObject(requestBody, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
+                using var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                var response = await _httpClient.PostAsync(url, content);
+                var responseString = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new Exception($"Gemini Error {response.StatusCode}: {responseString}");
+                }
 
                 _currentGeminiKeyIndex = keyIndex;
-                var text = response.Candidates?[0].Content?.Parts?[0].Text ?? "";
+
+                // Parse response to find text and thoughts
+                var text = ExtractTextFromResponse(responseString, out var thought);
                 return (text, _geminiModel);
             }
             catch (Exception ex) when (ex.Message.Contains("429") || ex.Message.Contains("RESOURCE_EXHAUSTED") || ex.Message.Contains("quota"))
@@ -111,16 +134,19 @@ public class CustomerHelper
         throw new InternalServerErrorException("All Gemini API keys exhausted (Rate Limited)");
     }
 
-    private async Task<(string Response, string ModelName)> ExecuteOpenRouterRequest(string prompt)
+    private async Task<(string Response, string ModelName)> ExecuteOpenRouterRequest(string prompt, bool useReasoning)
     {
+        var enableReasoning = _llmIncludeReasoning && useReasoning;
+
         var requestBody = new
         {
             model = _llmModel,
-            messages = new[] { new { role = "user", content = prompt } }
+            messages = new[] { new { role = "user", content = prompt } },
+            include_reasoning = enableReasoning
         };
 
         var requestJson = JsonConvert.SerializeObject(requestBody);
-        var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
+        using var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
         using var request = new HttpRequestMessage(HttpMethod.Post, _llmApiUrl);
         request.Content = requestContent;
@@ -147,7 +173,24 @@ public class CustomerHelper
         try
         {
             var obj = JsonConvert.DeserializeObject<dynamic>(json);
-            return obj!.choices[0].message.content.ToString();
+            if (obj == null || obj.choices == null || obj.choices.Count == 0) return string.Empty;
+
+            var message = obj.choices?[0]?.message;
+            if (message == null) return string.Empty;
+
+            // Check for reasoning content
+            string? reasoning = null;
+            if (message.reasoning != null)
+            {
+                reasoning = message.reasoning.ToString();
+                // Optionally log reasoning/thought
+                if (!string.IsNullOrWhiteSpace(reasoning))
+                {
+                    _logger.LogInformation("OpenRouter Reasoning: {Reasoning}", reasoning);
+                }
+            }
+
+            return message.content.ToString();
         }
         catch (Exception ex)
         {
@@ -158,16 +201,48 @@ public class CustomerHelper
 
     public string ExtractTextFromResponse(string responseJson)
     {
+        return ExtractTextFromResponse(responseJson, out _);
+    }
+
+    public string ExtractTextFromResponse(string responseJson, out string? thought)
+    {
+        thought = null;
         try
         {
             var obj = JsonConvert.DeserializeObject<dynamic>(responseJson);
-            if (obj!.candidates != null)
+            if (obj != null && obj.candidates != null && obj.candidates.Count > 0)
             {
-                return obj.candidates[0].content.parts[0].text.ToString();
+                var candidate = obj.candidates[0];
+                var parts = candidate?.content?.parts;
+                if (parts == null) return string.Empty;
+
+                var sb = new StringBuilder();
+
+                foreach (var part in parts)
+                {
+                    // Check for thought/reasoning in parts
+                    // Note: API might return "thought": true/false in metadata, or "thought" field in part
+                    // Based on user "Extract the thought field for internal logic validation"
+                    if (part.thought == true || part.thought != null)
+                    {
+                        // Some APIs return "thought": "text..."
+                        thought = part.thought.ToString(); // Or part.text if thought is just a flag
+                        if (part.text != null) thought = part.text.ToString(); // If thought is a flag, text contains the thought
+                        _logger.LogInformation("Gemini Thought: {Thought}", thought);
+                        continue; // Don't include thought in final text
+                    }
+
+                    if (part.text != null)
+                    {
+                        sb.Append(part.text.ToString());
+                    }
+                }
+
+                return sb.ToString();
             }
-            if (obj!.choices != null)
+            if (obj?.choices != null && obj.choices.Count > 0)
             {
-                return obj.choices[0].message.content.ToString();
+                return obj.choices[0]?.message?.content?.ToString() ?? string.Empty;
             }
         }
         catch { /* ignore and throw below */ }
@@ -178,6 +253,7 @@ public class CustomerHelper
 
     public async IAsyncEnumerable<string> SendStreamRequestToGemini(
         string prompt,
+        bool useThinking = false,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         bool useOpenRouter = false;
@@ -193,7 +269,7 @@ public class CustomerHelper
             {
                 try
                 {
-                    await foreach (var chunk in ExecuteGeminiStreamRequestWithRotation(prompt, cancellationToken))
+                    await foreach (var chunk in ExecuteGeminiStreamRequestWithRotation(prompt, useThinking, cancellationToken))
                     {
                         await channel.Writer.WriteAsync(chunk, cancellationToken);
                     }
@@ -233,7 +309,7 @@ public class CustomerHelper
         // Fallback to OpenRouter
         if (useOpenRouter && !string.IsNullOrWhiteSpace(_llmApiKey))
         {
-            await foreach (var chunk in ExecuteOpenRouterStreamRequest(prompt, cancellationToken))
+            await foreach (var chunk in ExecuteOpenRouterStreamRequest(prompt, useThinking, cancellationToken))
             {
                 yield return chunk;
             }
@@ -246,6 +322,7 @@ public class CustomerHelper
 
     private async IAsyncEnumerable<string> ExecuteGeminiStreamRequestWithRotation(
         string prompt,
+        bool useThinking,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // Use a Channel to decouple the producer from consumer for real-time streaming
@@ -266,54 +343,109 @@ public class CustomerHelper
 
                     try
                     {
-                        var client = new Client(apiKey: currentKey);
+                        // Use direct HTTP client for streaming to support thinking_config
+                        // Construct Stream URL: replace :generateContent with :streamGenerateContent
+                        var baseUrl = _geminiApiUrl.Replace(":generateContent", ":streamGenerateContent");
+                        var url = $"{baseUrl}?key={currentKey}&alt=sse"; // Use SSE for easier line-based parsing
+
+                        var enableThinking = _geminiIncludeThoughts && useThinking;
+
+                        var requestBody = new
+                        {
+                            contents = new[] { new { parts = new[] { new { text = prompt } } } },
+                            generationConfig = enableThinking ? new { thinking_config = new { include_thoughts = true } } : null
+                        };
+
+                        var json = JsonConvert.SerializeObject(requestBody, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
+                        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+                        request.Content = content;
 
                         // Send Model Name Protocol
                         await channel.Writer.WriteAsync($"__MODEL__:{_geminiModel}\n", cancellationToken);
 
-                        await foreach (var chunk in client.Models.GenerateContentStreamAsync(
-                            model: _geminiModel,
-                            contents: prompt).WithCancellation(cancellationToken))
+                        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+                        if (!response.IsSuccessStatusCode)
                         {
-                            var text = chunk.Candidates?[0].Content?.Parts?[0].Text;
-                            if (string.IsNullOrEmpty(text)) continue;
+                            var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                            throw new Exception($"Gemini Stream Error {response.StatusCode}: {error}");
+                        }
 
-                            // Process characters to handle Status Protocol (>>>)
-                            foreach (var c in text)
+                        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                        using var reader = new StreamReader(stream);
+
+                        string? line;
+                        while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
+                        {
+                            if (string.IsNullOrWhiteSpace(line)) continue;
+                            if (!line.StartsWith("data: ")) continue;
+
+                            var data = line.Substring(6).Trim();
+                            if (data == "[DONE]") break; // Only if Gemini sends this, usually standard SSE just ends
+
+                            try
                             {
-                                if (c == '\n')
+                                var chunk = JsonConvert.DeserializeObject<dynamic>(data);
+                                if (chunk?.candidates != null && chunk.candidates.Count > 0)
                                 {
-                                    var line = lineBuffer.ToString();
-                                    lineBuffer.Clear();
+                                    var parts = chunk.candidates[0].content?.parts;
+                                    if (parts != null)
+                                    {
+                                        foreach (var part in parts)
+                                        {
+                                            // Handle Thought
+                                            if (part.thought == true || part.thought != null)
+                                            {
+                                                var t = part.thought?.ToString() ?? part.text?.ToString();
+                                                continue;
+                                            }
 
-                                    if (line.TrimStart().StartsWith(">>>"))
-                                    {
-                                        var cleanLine = line.TrimStart().Substring(3).Trim();
-                                        await channel.Writer.WriteAsync($"__STATUS__:{cleanLine}", cancellationToken);
+                                            var text = part.text?.ToString();
+                                            if (string.IsNullOrEmpty(text)) continue;
+
+                                            // Process characters to handle Status Protocol (>>>)
+                                            foreach (var c in text)
+                                            {
+                                                if (c == '\n')
+                                                {
+                                                    var bufferLine = lineBuffer.ToString();
+                                                    lineBuffer.Clear();
+
+                                                    if (bufferLine.TrimStart().StartsWith(">>>"))
+                                                    {
+                                                        var cleanLine = bufferLine.TrimStart().Substring(3).Trim();
+                                                        await channel.Writer.WriteAsync($"__STATUS__:{cleanLine}", cancellationToken);
+                                                    }
+                                                    else
+                                                    {
+                                                        await channel.Writer.WriteAsync(bufferLine + "\n", cancellationToken);
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    lineBuffer.Append(c);
+                                                }
+                                            }
+                                        }
                                     }
-                                    else
-                                    {
-                                        await channel.Writer.WriteAsync(line + "\n", cancellationToken);
-                                    }
-                                }
-                                else
-                                {
-                                    lineBuffer.Append(c);
                                 }
                             }
+                            catch { }
                         }
 
                         // Flush remaining buffer
                         if (lineBuffer.Length > 0)
                         {
-                            var line = lineBuffer.ToString();
-                            if (line.TrimStart().StartsWith(">>>"))
+                            var bufferLine = lineBuffer.ToString();
+                            if (bufferLine.TrimStart().StartsWith(">>>"))
                             {
-                                await channel.Writer.WriteAsync($"__STATUS__:{line.TrimStart().Substring(3).Trim()}", cancellationToken);
+                                await channel.Writer.WriteAsync($"__STATUS__:{bufferLine.TrimStart().Substring(3).Trim()}", cancellationToken);
                             }
                             else
                             {
-                                await channel.Writer.WriteAsync(line, cancellationToken);
+                                await channel.Writer.WriteAsync(bufferLine, cancellationToken);
                             }
                         }
 
@@ -356,6 +488,7 @@ public class CustomerHelper
 
     private async IAsyncEnumerable<string> ExecuteOpenRouterStreamRequest(
         string prompt,
+        bool useReasoning,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var channel = Channel.CreateUnbounded<string>();
@@ -367,15 +500,18 @@ public class CustomerHelper
 
             try
             {
+                var enableReasoning = _llmIncludeReasoning && useReasoning;
+
                 var requestBody = new
                 {
                     model = _llmModel,
                     messages = new[] { new { role = "user", content = prompt } },
-                    stream = true
+                    stream = true,
+                    include_reasoning = enableReasoning
                 };
 
                 var requestJson = JsonConvert.SerializeObject(requestBody);
-                var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
+                using var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
                 using var request = new HttpRequestMessage(HttpMethod.Post, _llmApiUrl);
                 request.Content = requestContent;
@@ -503,7 +639,7 @@ Conversation:
 
 Provide a clear, factual summary:";
 
-        var result = await SendRequestToGemini(prompt);
+        var result = await SendRequestToGemini(prompt, useThinking: false);
         return result.Response;
     }
 }
