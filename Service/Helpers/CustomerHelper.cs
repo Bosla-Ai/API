@@ -30,6 +30,17 @@ public class CustomerHelper
     private readonly string _llmProvider;
     private readonly bool _llmIncludeReasoning;
 
+    private bool IsReasoningModel(string modelName)
+    {
+        if (string.IsNullOrWhiteSpace(modelName)) return false;
+        var name = modelName.ToLowerInvariant();
+        return name.Contains("thinking") ||
+               name.Contains("reasoning") ||
+               name.Contains("deepseek-r1") ||
+               name.Contains("o1") ||
+               name.Contains("o3");
+    }
+
     public CustomerHelper(ILogger<CustomerHelper> logger, HttpClient httpClient, IOptionsMonitor<AiOptions> options)
     {
         _logger = logger;
@@ -99,7 +110,7 @@ public class CustomerHelper
             {
                 var url = $"{_geminiApiUrl}?key={currentKey}";
 
-                var enableThinking = _geminiIncludeThoughts && useThinking;
+                var enableThinking = (_geminiIncludeThoughts || IsReasoningModel(_geminiModel)) && useThinking;
 
                 var requestBody = new
                 {
@@ -136,7 +147,7 @@ public class CustomerHelper
 
     private async Task<(string Response, string ModelName)> ExecuteOpenRouterRequest(string prompt, bool useReasoning)
     {
-        var enableReasoning = _llmIncludeReasoning && useReasoning;
+        var enableReasoning = (_llmIncludeReasoning || IsReasoningModel(_llmModel)) && useReasoning;
 
         var requestBody = new
         {
@@ -343,12 +354,10 @@ public class CustomerHelper
 
                     try
                     {
-                        // Use direct HTTP client for streaming to support thinking_config
-                        // Construct Stream URL: replace :generateContent with :streamGenerateContent
                         var baseUrl = _geminiApiUrl.Replace(":generateContent", ":streamGenerateContent");
-                        var url = $"{baseUrl}?key={currentKey}&alt=sse"; // Use SSE for easier line-based parsing
+                        var url = $"{baseUrl}?key={currentKey}&alt=sse";// Use SSE for easier line-based parsing
 
-                        var enableThinking = _geminiIncludeThoughts && useThinking;
+                        var enableThinking = (_geminiIncludeThoughts || IsReasoningModel(_geminiModel)) && useThinking;
 
                         var requestBody = new
                         {
@@ -500,7 +509,7 @@ public class CustomerHelper
 
             try
             {
-                var enableReasoning = _llmIncludeReasoning && useReasoning;
+                var enableReasoning = (_llmIncludeReasoning || IsReasoningModel(_llmModel)) && useReasoning;
 
                 var requestBody = new
                 {
