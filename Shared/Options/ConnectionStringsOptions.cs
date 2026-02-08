@@ -8,7 +8,7 @@ public class ConnectionStringsOptions
 
     public string CS { get; set; } = string.Empty;
     public string ServerConnection { get; set; } = string.Empty;
-    public string Redis { get; set; } = string.Empty;
+
 }
 
 

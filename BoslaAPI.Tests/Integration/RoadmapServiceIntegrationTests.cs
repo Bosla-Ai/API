@@ -1,7 +1,5 @@
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Configuration;
 using Moq;
 using Persistence.Data.Contexts;
 using Persistence.Repositories;
@@ -19,7 +17,6 @@ public class RoadmapServiceIntegrationTests : IDisposable
     private readonly UnitOfWork _unitOfWork;
     private readonly RoadmapService _service;
 
-    private readonly Mock<IDistributedCache> _mockCache;
     private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
     private readonly IOptions<AiOptions> _options;
 
@@ -33,14 +30,12 @@ public class RoadmapServiceIntegrationTests : IDisposable
         _dbContext = new ApplicationDbContext(options);
         _unitOfWork = new UnitOfWork(_dbContext);
 
-        _mockCache = new Mock<IDistributedCache>();
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
 
         var aiOptions = new AiOptions { PipelineApi = new PipelineApiOptions { BaseUrl = "http://test-api" } };
         _options = Options.Create(aiOptions);
 
         _service = new RoadmapService(
-            _mockCache.Object,
             _mockHttpClientFactory.Object,
             _unitOfWork,
             _options

@@ -1,12 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Text.Json;
 using Domain.Contracts;
 using Domain.Entities;
 using Domain.Exceptions;
 using Domain.ModelsSpecifications;
 using Domain.Responses;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Shared.DTOs.RoadmapDTOs;
@@ -17,18 +15,15 @@ namespace Service.Implementations;
 
 public class RoadmapService : IRoadmapService
 {
-    private readonly IDistributedCache _cache;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IUnitOfWork _unitOfWork;
     private readonly string _pythonApiUrl;
 
     public RoadmapService(
-        IDistributedCache cache,
         IHttpClientFactory httpClientFactory,
         IUnitOfWork unitOfWork,
         IOptions<AiOptions> options)
     {
-        _cache = cache;
         _httpClientFactory = httpClientFactory;
         _unitOfWork = unitOfWork;
         _pythonApiUrl = options.Value.PipelineApi.BaseUrl;
@@ -36,19 +31,6 @@ public class RoadmapService : IRoadmapService
 
     public async Task<APIResponse<RoadmapGenerationDTO>> GenerateRoadmapAsync(string[] tags, string language, bool preferPaid)
     {
-        var sortedTags = tags.OrderBy(t => t).ToArray();
-        string cacheKey = $"roadmap-{string.Join("-", sortedTags)}-{language}-{preferPaid}";
-
-        string? cachedJson = await _cache.GetStringAsync(cacheKey);
-        if (!string.IsNullOrEmpty(cachedJson))
-        {
-            return new APIResponse<RoadmapGenerationDTO>
-            {
-                StatusCode = HttpStatusCode.OK,
-                Data = JsonSerializer.Deserialize<RoadmapGenerationDTO>(cachedJson)!
-            };
-        }
-
         if (!Enum.TryParse<ResourceLanguage>(language, true, out var languageEnum))
         {
             languageEnum = ResourceLanguage.en; // Default fallback
@@ -153,29 +135,16 @@ public class RoadmapService : IRoadmapService
                     break;
                 case Platforms.Coursera:
                     if (!roadmapData.Data.Coursera.ContainsKey(key))
-                    {
-                        roadmapData.Data.Coursera[key] = dto;
-                    }
+                        roadmapData.Data.Coursera[course.Url] = dto;
                     break;
                 case Platforms.Youtube:
-                    if (!roadmapData.Data.Youtube.ContainsKey(key))
-                    {
-                        roadmapData.Data.Youtube[key] = dto;
-                    }
+                    roadmapData.Data.Youtube[course.Url] = dto;
                     break;
                 default:
                     // Handle other platforms or ignore
                     break;
             }
         }
-
-        var cacheOptions = new DistributedCacheEntryOptions
-        {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24)
-        };
-
-        string jsonToCache = JsonSerializer.Serialize(roadmapData);
-        await _cache.SetStringAsync(cacheKey, jsonToCache, cacheOptions);
 
         return new APIResponse<RoadmapGenerationDTO>
         {

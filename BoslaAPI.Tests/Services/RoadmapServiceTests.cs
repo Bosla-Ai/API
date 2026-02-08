@@ -1,11 +1,11 @@
 using System.Net;
 using System.Text.Json;
 using Domain.Contracts;
-using Domain.Entities;
 using Domain.Exceptions;
-using Microsoft.Extensions.Caching.Distributed;
+using Domain.Entities;
 using Microsoft.Extensions.Options;
 using Moq;
+using Moq.Protected;
 using Service.Implementations;
 using Shared.DTOs.RoadmapDTOs;
 using Shared.Options;
@@ -14,7 +14,6 @@ namespace BoslaAPI.Tests.Services;
 
 public class RoadmapServiceTests
 {
-    private readonly Mock<IDistributedCache> _mockCache;
     private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
     private readonly Mock<IUnitOfWork> _mockUnitOfWork;
     private readonly IOptions<AiOptions> _options;
@@ -25,7 +24,6 @@ public class RoadmapServiceTests
 
     public RoadmapServiceTests()
     {
-        _mockCache = new Mock<IDistributedCache>();
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
         _mockUnitOfWork = new Mock<IUnitOfWork>();
         _mockCourseRepo = new Mock<IGenericRepository<Course, int>>();
@@ -38,32 +36,13 @@ public class RoadmapServiceTests
         _mockUnitOfWork.Setup(u => u.GetRepo<Roadmap, int>()).Returns(_mockRoadmapRepo.Object);
 
         _service = new RoadmapService(
-            _mockCache.Object,
             _mockHttpClientFactory.Object,
             _mockUnitOfWork.Object,
             _options
         );
     }
 
-    [Fact]
-    public async Task GenerateRoadmapAsync_ReturnsCachedData_IfPresent()
-    {
-        // Arrange
-        var tags = new[] { "csharp" };
-        var cachedDto = new RoadmapGenerationDTO { Status = "Cached" };
-        var cachedJson = JsonSerializer.Serialize(cachedDto);
 
-        _mockCache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(System.Text.Encoding.UTF8.GetBytes(cachedJson));
-
-        // Act
-        var result = await _service.GenerateRoadmapAsync(tags, "en", false);
-
-        // Assert
-        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
-        Assert.Equal("Cached", result.Data.Status);
-        _mockHttpClientFactory.Verify(x => x.CreateClient(It.IsAny<string>()), Times.Never);
-    }
 
     [Fact]
     public async Task DeleteRoadmapAsync_ThrowsNotFound_IfRoadmapDoesNotExist()
@@ -103,15 +82,10 @@ public class RoadmapServiceTests
     }
 
     [Fact]
-    public async Task GenerateRoadmapAsync_WithEmptyTags_CreatesCacheKeyCorrectly()
+    public async Task GenerateRoadmapAsync_WithEmptyTags_ReturnsSuccess()
     {
         // Arrange
         var tags = Array.Empty<string>();
-        var cachedDto = new RoadmapGenerationDTO { Status = "Empty" };
-        var cachedJson = JsonSerializer.Serialize(cachedDto);
-
-        _mockCache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(System.Text.Encoding.UTF8.GetBytes(cachedJson));
 
         // Act
         var result = await _service.GenerateRoadmapAsync(tags, "en", false);
@@ -126,44 +100,31 @@ public class RoadmapServiceTests
     {
         // Arrange
         var tags = new[] { "python" };
-        var cachedDto = new RoadmapGenerationDTO { Status = "Cached" };
-        var cachedJson = JsonSerializer.Serialize(cachedDto);
 
-        _mockCache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(System.Text.Encoding.UTF8.GetBytes(cachedJson));
+        var expectedResponse = new RoadmapGenerationDTO { Status = "Fresh" };
+        var httpMessageHandlerMock = new Mock<HttpMessageHandler>();
+        httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>()
+            )
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent(JsonSerializer.Serialize(expectedResponse))
+            });
+
+        var httpClient = new HttpClient(httpMessageHandlerMock.Object);
+        _mockHttpClientFactory.Setup(x => x.CreateClient(It.IsAny<string>())).Returns(httpClient);
 
         // Act - Pass invalid language
         var result = await _service.GenerateRoadmapAsync(tags, "invalid_lang", false);
 
         // Assert - Should not throw and return cached data
         Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal("Fresh", result.Data.Status);
     }
 
-    [Fact]
-    public async Task GenerateRoadmapAsync_CacheKeyIsDeterministic()
-    {
-        // Arrange - Same tags in different order should produce same cache key
-        var tags1 = new[] { "csharp", "dotnet" };
-        var tags2 = new[] { "dotnet", "csharp" };
-        var cachedDto = new RoadmapGenerationDTO { Status = "Cached" };
-        var cachedJson = JsonSerializer.Serialize(cachedDto);
 
-        string? capturedKey1 = null;
-        string? capturedKey2 = null;
-
-        _mockCache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Callback<string, CancellationToken>((key, _) =>
-            {
-                if (capturedKey1 == null) capturedKey1 = key;
-                else capturedKey2 = key;
-            })
-            .ReturnsAsync(System.Text.Encoding.UTF8.GetBytes(cachedJson));
-
-        // Act
-        await _service.GenerateRoadmapAsync(tags1, "en", false);
-        await _service.GenerateRoadmapAsync(tags2, "en", false);
-
-        // Assert - Both should produce the same cache key (tags are sorted)
-        Assert.Equal(capturedKey1, capturedKey2);
-    }
 }

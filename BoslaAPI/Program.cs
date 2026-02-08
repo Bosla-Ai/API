@@ -39,11 +39,7 @@ builder.Services.AddAppConfiguration(builder.Configuration);
 var connectionStrings = builder.Configuration.GetSection(ConnectionStringsOptions.SectionName).Get<ConnectionStringsOptions>();
 var authOptions = builder.Configuration.GetSection(BoslaAuthenticationOptions.SectionName).Get<BoslaAuthenticationOptions>();
 
-builder.Services.AddStackExchangeRedisCache(options =>
-{
-    options.Configuration = connectionStrings!.Redis;
-    options.InstanceName = "Bosla_";
-});
+
 builder.Services.AddDbContext<ApplicationDbContext>(option =>
 {
     option.UseSqlServer(connectionStrings.ServerConnection);
