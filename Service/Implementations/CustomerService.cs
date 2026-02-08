@@ -11,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Service.Helpers;
+using Shared;
 using Shared.DTOs;
 using Shared.DTOs.CustomerDTOs;
 using Shared.DTOs.RoadmapDTOs;
@@ -25,7 +26,8 @@ public class CustomerService(
     , CustomerHelper customerHelper
     , ConversationContextManager conversationContextManager
     , IOptionsMonitor<AiOptions> options
-    , IHttpClientFactory httpClientFactory) : ICustomerService
+    , IHttpClientFactory httpClientFactory
+    , AiRequestStore aiRequestStore) : ICustomerService
 {
     public async Task<APIResponse<string>> ProcessUserQueryAsync(string userId, string query, string? sessionId = null)
     {
@@ -448,6 +450,30 @@ public class CustomerService(
             .GetAsync(new CustomerDetailsSpecification(id));
 
         return mapper.Map<CustomerDTO>(customer);
+    }
+
+    public string CreateAiRequest(string userId, AiQueryRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            throw new BadRequestException("UserId is required");
+        if (request == null)
+            throw new BadRequestException("Request is required");
+        if (string.IsNullOrWhiteSpace(request.Query))
+            throw new BadRequestException("Query is required");
+
+        return aiRequestStore.Create(userId, request);
+    }
+
+    public (string UserId, AiQueryRequest Request) GetAiRequest(string requestId)
+    {
+        if (string.IsNullOrWhiteSpace(requestId))
+            throw new BadRequestException("RequestId is required");
+
+        var stored = aiRequestStore.GetAndRemove(requestId);
+        if (stored == null)
+            throw new NotFoundException("Request not found or expired");
+
+        return stored.Value;
     }
 
     private string FormatSse(string eventName, object data)

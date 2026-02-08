@@ -15,3 +15,5 @@ public class AiQueryResponse
 
     public string? ErrorMessage { get; set; }
 }
+
+public record AiRequestIdResponse(string RequestId);

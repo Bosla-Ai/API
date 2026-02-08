@@ -18,6 +18,7 @@ using Service.MappingProfiles;
 using System.Net;
 using Domain.Responses;
 using Shared.Options;
+using Service.Helpers;
 
 // Load environment variables from .env file
 Env.Load("../.env");
@@ -47,6 +48,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(option =>
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<IDbInitializer, DbInitializer>();
+builder.Services.AddSingleton<AiRequestStore>();
 
 builder.Services.AddServices(builder.Configuration);
 builder.Services
