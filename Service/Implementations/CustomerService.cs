@@ -40,7 +40,7 @@ public class CustomerService(
 
         string aiPrompt = $"Context:\n{conversationContext}\n\nCurrent User Query: {query}\n\nPlease provide a helpful response considering the conversation history if relevant.";
 
-        var (geminiResponse, _) = await customerHelper.SendRequestToGemini(aiPrompt);
+        var (geminiResponse, _) = await customerHelper.SendRequestToGemini(aiPrompt, useThinking: false);
         string responseText = geminiResponse;
 
         await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, responseText, "assistant");
@@ -80,7 +80,8 @@ public class CustomerService(
 
             try
             {
-                await foreach (var chunk in customerHelper.SendStreamRequestToGemini(chatPrompt))
+                // Disable thinking for streaming chat
+                await foreach (var chunk in customerHelper.SendStreamRequestToGemini(chatPrompt, useThinking: false))
                 {
                     yield return chunk;
 
@@ -200,7 +201,7 @@ public class CustomerService(
             query);
         try
         {
-            var (responseText, modelName) = await customerHelper.SendRequestToGemini(detectionPrompt);
+            var (responseText, modelName) = await customerHelper.SendRequestToGemini(detectionPrompt, useThinking: true);
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
                 return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName);
