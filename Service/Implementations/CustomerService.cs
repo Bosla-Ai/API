@@ -40,7 +40,7 @@ public class CustomerService(
 
         string aiPrompt = $"Context:\n{conversationContext}\n\nCurrent User Query: {query}\n\nPlease provide a helpful response considering the conversation history if relevant.";
 
-        var (geminiResponse, _) = await customerHelper.SendRequestToGemini(aiPrompt, useThinking: false);
+        var (geminiResponse, _, _) = await customerHelper.SendRequestToGemini(aiPrompt, useThinking: false);
         string responseText = geminiResponse;
 
         await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, responseText, "assistant");
@@ -64,29 +64,92 @@ public class CustomerService(
         await Task.WhenAll(contextTask, addMessageTask);
         var conversationContext = await contextTask;
 
-        yield return "__STATUS__:Analyzing your request...";
+        yield return FormatSse("status", new { message = "Analyzing your request...", step = "init" });
 
-        var (interactionType, confidence, aiResponse, toolArguments, detectionModel) = await DetectIntentAsync(query, conversationContext.ToString());
+        // --- Start Streaming Intent Detection ---
+        var prompts = options.CurrentValue.Prompts;
+        var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
+            prompts.IntentDetectionSystemPrompt,
+            (!string.IsNullOrEmpty(conversationContext.ToString()) ? $"Conversation History:\n{conversationContext}\n\n" : ""),
+            query);
 
-        yield return $"__MODEL__:{detectionModel}";
+        var detectionJsonBuilder = new StringBuilder();
+        string detectionModel = "Unknown";
+        string thinkingLog = "";
+        string? thinkingTitle = null;
+        bool titleExtracted = false;
 
-        yield return $"__INTENT__:{interactionType}";
+        // Stream the detection process to catch thoughts in real-time
+        await foreach (var chunk in customerHelper.SendStreamRequestToGemini(detectionPrompt, useThinking: true))
+        {
+            if (chunk.StartsWith("__MODEL__:"))
+            {
+                detectionModel = chunk.Substring(10).Trim();
+                yield return FormatSse("model", new { name = detectionModel });
+            }
+            else if (chunk.StartsWith("__THINKING_CONTENT__:"))
+            {
+                var content = chunk.Substring(21);
+                thinkingLog += content;
+
+                // Title Extraction Logic: First line is title, rest is debug log
+                if (!titleExtracted)
+                {
+                    if (thinkingLog.Contains("\n"))
+                    {
+                        var firstNewLineIndex = thinkingLog.IndexOf('\n');
+                        thinkingTitle = thinkingLog.Substring(0, firstNewLineIndex).Trim('*', ' ', '#'); // Clean md formatting
+                        titleExtracted = true;
+
+                        // Emit title
+                        yield return FormatSse("thinking", new { title = thinkingTitle, debug = "" });
+
+                        // Emit remainder as debug
+                        var remainder = thinkingLog.Substring(firstNewLineIndex + 1);
+                        if (!string.IsNullOrEmpty(remainder))
+                        {
+                            yield return FormatSse("thinking", new { title = thinkingTitle, debug = remainder });
+                        }
+                    }
+                }
+                else
+                {
+                    // Already extracted title, stream as debug delta
+                    yield return FormatSse("thinking", new { title = thinkingTitle ?? "Thinking...", debug = content });
+                }
+            }
+            else if (!chunk.StartsWith("__STATUS__"))
+            {
+                detectionJsonBuilder.Append(chunk);
+            }
+        }
+
+        // Parse the accumulated JSON
+        var responseText = detectionJsonBuilder.ToString();
+        var parsed = ParseCombinedResponse(responseText);
+
+        var interactionType = parsed?.intent ?? LLMInteractionType.ChatWithAI;
+        var confidence = parsed?.confidence ?? 0;
+        var aiResponse = parsed?.response;
+        var toolArguments = parsed?.toolArguments;
+
+        // --- End Streaming Intent Detection ---
+
+        yield return FormatSse("intent", new { name = interactionType.ToString(), confidence = confidence });
 
         if (interactionType == LLMInteractionType.ChatWithAI || interactionType == LLMInteractionType.ChooseMethod)
         {
-            string chatPrompt = BuildChatPrompt(conversationContext, query);
+            string chatPrompt = BuildChatPrompt(conversationContext.ToString(), query);
 
             var fullResponseBuilder = new StringBuilder();
 
             try
             {
-                // Disable thinking for streaming chat
                 await foreach (var chunk in customerHelper.SendStreamRequestToGemini(chatPrompt, useThinking: false))
                 {
-                    yield return chunk;
-
-                    if (!chunk.StartsWith("__STATUS__"))
+                    if (!chunk.StartsWith("__STATUS__") && !chunk.StartsWith("__MODEL__") && !chunk.StartsWith("__THINKING_CONTENT__"))
                     {
+                        yield return FormatSse("text", new { delta = chunk });
                         fullResponseBuilder.Append(chunk);
                     }
                 }
@@ -102,32 +165,58 @@ public class CustomerService(
         }
         else
         {
-
             string finalResponse = "";
 
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
-                yield return "__STATUS__:Running Bosla Education Pipeline...";
-                if (toolArguments?.Tags != null) yield return $"__STATUS__:Detected Interests: {string.Join(", ", toolArguments.Tags)}";
+                yield return FormatSse("status", new { message = "Running Bosla Education Pipeline...", step = "tool_execution" });
+                if (toolArguments?.Tags != null)
+                    yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "start", summary = $"Detected Interests: {string.Join(", ", toolArguments.Tags)}" });
+
+                yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "processing" });
 
                 var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments!);
                 finalResponse = $"[SYSTEM]: Roadmap generated successfully.\nDetails: {apiResponse}";
 
-                yield return "__STATUS__:generation complete.";
+                object? resultData = null;
+                try
+                {
+                    var apiParsed = JsonSerializer.Deserialize<JsonElement>(apiResponse);
+                    if (apiParsed.TryGetProperty("data", out var innerData))
+                    {
+                        resultData = innerData;
+                    }
+                    else
+                    {
+                        resultData = apiParsed;
+                    }
+                }
+                catch
+                {
+                    resultData = apiResponse;
+                }
+
+                yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "end", summary = "Roadmap generated" });
+                yield return FormatSse("result", new { status = "success", data = resultData });
             }
             else if (interactionType == LLMInteractionType.ChooseTrack)
             {
                 finalResponse = "Please select a track from the list below.";
+                yield return FormatSse("text", new { delta = finalResponse });
             }
             else
             {
                 finalResponse = "I have processed your request.";
+                yield return FormatSse("text", new { delta = finalResponse });
             }
 
-            yield return finalResponse;
-
-            await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, finalResponse, "assistant");
+            if (!string.IsNullOrEmpty(finalResponse))
+            {
+                await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, finalResponse, "assistant");
+            }
         }
+
+        yield return FormatSse("done", new { });
     }
 
     public async Task<APIResponse<AiIntentDetectionResponse>> ProcessUserQueryWithIntentDetectionAsync(string userId, string query, string? sessionId = null)
@@ -145,7 +234,7 @@ public class CustomerService(
             await Task.WhenAll(contextTask, addMessageTask);
             var conversationContext = await contextTask;
 
-            var (interactionType, confidence, aiResponse, toolArguments, _) = await DetectIntentAsync(query, conversationContext.ToString());
+            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent) = await DetectIntentAsync(query, conversationContext.ToString());
 
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
@@ -163,7 +252,9 @@ public class CustomerService(
                 InteractionType = interactionType,
                 Confidence = confidence,
                 Success = true,
-                Answer = !string.IsNullOrEmpty(aiResponse) ? aiResponse : null
+                Answer = !string.IsNullOrEmpty(aiResponse) ? aiResponse : null,
+                Thinking = !string.IsNullOrEmpty(thinkingContent),
+                ThinkingLog = thinkingContent
             };
 
             if (!string.IsNullOrEmpty(response.Answer))
@@ -192,7 +283,7 @@ public class CustomerService(
         }
     }
 
-    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName)> DetectIntentAsync(string query, string conversationContext)
+    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent)> DetectIntentAsync(string query, string conversationContext)
     {
         var prompts = options.CurrentValue.Prompts;
         var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
@@ -201,17 +292,17 @@ public class CustomerService(
             query);
         try
         {
-            var (responseText, modelName) = await customerHelper.SendRequestToGemini(detectionPrompt, useThinking: true);
+            var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestToGemini(detectionPrompt, useThinking: true);
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
-                return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName);
+                return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName, thinkingContent);
 
             // Fallback
-            return (LLMInteractionType.ChatWithAI, 0, null, null, modelName);
+            return (LLMInteractionType.ChatWithAI, 0, null, null, modelName, thinkingContent);
         }
         catch
         {
-            return (LLMInteractionType.ChatWithAI, 0, null, null, "Unknown");
+            return (LLMInteractionType.ChatWithAI, 0, null, null, "Unknown", null);
         }
     }
 
@@ -357,5 +448,11 @@ public class CustomerService(
             .GetAsync(new CustomerDetailsSpecification(id));
 
         return mapper.Map<CustomerDTO>(customer);
+    }
+
+    private string FormatSse(string eventName, object data)
+    {
+        var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        return $"event: {eventName}\ndata: {json}";
     }
 }

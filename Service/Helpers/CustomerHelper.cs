@@ -64,7 +64,7 @@ public class CustomerHelper
         }
     }
 
-    public async Task<(string Response, string ModelName)> SendRequestToGemini(string prompt, bool useThinking = false)
+    public async Task<(string Response, string ModelName, string? ThinkingContent)> SendRequestToGemini(string prompt, bool useThinking = false)
     {
         if (_geminiApiKeys.Any())
         {
@@ -97,7 +97,7 @@ public class CustomerHelper
         throw new InternalServerErrorException("All AI providers failed or are not configured.");
     }
 
-    private async Task<(string Response, string ModelName)> ExecuteGeminiRequestWithRotation(string prompt, bool useThinking)
+    private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteGeminiRequestWithRotation(string prompt, bool useThinking)
     {
         for (int i = 0; i < _geminiApiKeys.Count; i++)
         {
@@ -133,7 +133,7 @@ public class CustomerHelper
 
                 // Parse response to find text and thoughts
                 var text = ExtractTextFromResponse(responseString, out var thought);
-                return (text, _geminiModel);
+                return (text, _geminiModel, thought);
             }
             catch (Exception ex) when (ex.Message.Contains("429") || ex.Message.Contains("RESOURCE_EXHAUSTED") || ex.Message.Contains("quota"))
             {
@@ -145,7 +145,7 @@ public class CustomerHelper
         throw new InternalServerErrorException("All Gemini API keys exhausted (Rate Limited)");
     }
 
-    private async Task<(string Response, string ModelName)> ExecuteOpenRouterRequest(string prompt, bool useReasoning)
+    private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteOpenRouterRequest(string prompt, bool useReasoning)
     {
         var enableReasoning = (_llmIncludeReasoning || IsReasoningModel(_llmModel)) && useReasoning;
 
@@ -175,12 +175,13 @@ public class CustomerHelper
             throw new InternalServerErrorException($"LLM API Error {response.StatusCode}: {responseContent}");
         }
 
-        var text = ExtractTextFromOpenAIResponse(responseContent);
-        return (text, _llmModel);
+        var text = ExtractTextFromOpenAIResponse(responseContent, out var reasoning);
+        return (text, _llmModel, reasoning);
     }
 
-    private string ExtractTextFromOpenAIResponse(string json)
+    private string ExtractTextFromOpenAIResponse(string json, out string? reasoning)
     {
+        reasoning = null;
         try
         {
             var obj = JsonConvert.DeserializeObject<dynamic>(json);
@@ -190,7 +191,6 @@ public class CustomerHelper
             if (message == null) return string.Empty;
 
             // Check for reasoning content
-            string? reasoning = null;
             if (message.reasoning != null)
             {
                 reasoning = message.reasoning.ToString();
@@ -407,7 +407,19 @@ public class CustomerHelper
                                             // Handle Thought
                                             if (part.thought == true || part.thought != null)
                                             {
-                                                var t = part.thought?.ToString() ?? part.text?.ToString();
+                                                var t = part.thought?.ToString();
+
+                                                // If 'thought' is just a flag (true), get the actual text from 'text' property
+                                                if ((t == "True" || string.IsNullOrEmpty(t)) && part.text != null)
+                                                {
+                                                    t = part.text.ToString();
+                                                }
+
+                                                // If we have content and it's not the boolean flag string representation
+                                                if (!string.IsNullOrEmpty(t) && t != "True")
+                                                {
+                                                    await channel.Writer.WriteAsync($"__THINKING_CONTENT__:{t}\n", cancellationToken);
+                                                }
                                                 continue;
                                             }
 
@@ -532,6 +544,7 @@ public class CustomerHelper
 
                 // Send Model Name Protocol
                 await channel.Writer.WriteAsync($"__MODEL__:{_llmModel}\n", cancellationToken);
+                if (enableReasoning) await channel.Writer.WriteAsync($"__THINKING_CONTENT__: [Reasoning Enabled]\n", cancellationToken);
 
                 using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
