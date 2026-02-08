@@ -11,10 +11,13 @@ using Domain.Responses;
 
 namespace Presentation.Controllers;
 
+using Microsoft.Extensions.Options;
+using Shared.Options;
+
 [ApiController]
 public class RoadmapGeneratorController(
     IServiceManager serviceManager
-    , IConfiguration configuration) : ApiController(configuration)
+    , IOptions<CookieSettingsOptions> cookieOptions) : ApiController(cookieOptions)
 {
     // Regex to allow only alphanumeric, spaces, hyphens, and common characters
     private static readonly Regex SafeTagPattern = new(@"^[\w\s\-\.\#\+]+$", RegexOptions.Compiled);

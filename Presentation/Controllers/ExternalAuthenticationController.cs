@@ -6,24 +6,19 @@ using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Service.Abstraction;
-using Shared;
+using Shared.Options;
 
 namespace Presentation.Controllers;
 
 public class ExternalAuthenticationController(
     IServiceManager serviceManager,
     IAuthTicketStore authTicketStore,
-    IConfiguration configuration) : ApiController(configuration)
+    IOptions<OAuthSettingsOptions> oauthOptions,
+    IOptions<CookieSettingsOptions> cookieOptions) : ApiController(cookieOptions)
 {
-    // Read OAuth settings from configuration - support multiple domains
-    private readonly string _defaultReturnUrl = configuration["OAuthSettings:DefaultReturnUrl"] ?? "https://bosla.me/";
-    private readonly string[] _allowedDomains = new[]
-    {
-        configuration["OAuthSettings:AllowedDomain"] ?? "https://bosla.me",
-        configuration["OAuthSettings:AlternateDomain"] ?? ""
-    }.Where(d => !string.IsNullOrEmpty(d)).ToArray();
+    private readonly OAuthSettingsOptions _oauthSettings = oauthOptions.Value;
 
     /// <summary>
     /// Validates the returnUrl to prevent Open Redirect attacks.
@@ -32,16 +27,19 @@ public class ExternalAuthenticationController(
     private string ValidateReturnUrl(string? returnUrl)
     {
         if (string.IsNullOrWhiteSpace(returnUrl))
-            return _defaultReturnUrl;
+            return _oauthSettings.DefaultReturnUrl;
 
         // Prevent open redirect attacks by validating the return URL against all allowed domains
-        foreach (var allowedDomain in _allowedDomains)
+        var allowed = new[] { _oauthSettings.AllowedDomain, _oauthSettings.AlternateDomain }
+            .Where(d => !string.IsNullOrEmpty(d));
+
+        foreach (var allowedDomain in allowed)
         {
             if (returnUrl.StartsWith(allowedDomain, StringComparison.OrdinalIgnoreCase))
                 return returnUrl;
         }
 
-        return _defaultReturnUrl;
+        return _oauthSettings.DefaultReturnUrl;
     }
 
     [EnableRateLimiting("AuthPolicy")]

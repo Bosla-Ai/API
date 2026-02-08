@@ -260,7 +260,7 @@ public class AuthenticationServiceTests
             customerServiceMock.Object,
             unitOfWorkMock.Object,
             mapper ?? new Mock<IMapper>().Object,
-            configurationMock.Object,
+
             _userManagerMock.Object,
             roleManagerMock.Object,
             null!);  // AuthenticationHelper - skipped for these tests

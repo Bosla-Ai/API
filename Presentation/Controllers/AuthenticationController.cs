@@ -5,20 +5,22 @@ using Domain.Requests;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Shared;
 using Shared.DTOs.ApplicationUserDTOs;
 using Shared.DTOs.LoginDTOs;
 using Shared.DTOs.RegisterDTOs;
+using Shared.Options;
 
 namespace Presentation.Controllers;
+
 
 public class AuthenticationController(
     IServiceManager serviceManager,
     IAuthTicketStore authTicketStore,
-    IConfiguration configuration)
-    : ApiController(configuration)
+    IOptions<CookieSettingsOptions> cookieOptions)
+    : ApiController(cookieOptions)
 {
     [HttpPost("ExchangeToken")]
     public async Task<ActionResult<LoginClientResponse>> ExchangeToken([FromBody] TokenExchangeRequest request)

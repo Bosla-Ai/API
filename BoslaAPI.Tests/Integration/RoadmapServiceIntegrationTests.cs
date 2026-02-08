@@ -8,6 +8,8 @@ using Persistence.Repositories;
 using Service.Implementations;
 using Shared.DTOs.RoadmapDTOs;
 using Shared.Enums;
+using Shared.Options;
+using Microsoft.Extensions.Options;
 
 namespace BoslaAPI.Tests.Integration;
 
@@ -19,7 +21,7 @@ public class RoadmapServiceIntegrationTests : IDisposable
 
     private readonly Mock<IDistributedCache> _mockCache;
     private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
-    private readonly Mock<IConfiguration> _mockConfiguration;
+    private readonly IOptions<AiOptions> _options;
 
     public RoadmapServiceIntegrationTests()
     {
@@ -33,15 +35,15 @@ public class RoadmapServiceIntegrationTests : IDisposable
 
         _mockCache = new Mock<IDistributedCache>();
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
-        _mockConfiguration = new Mock<IConfiguration>();
 
-        _mockConfiguration.Setup(c => c["PipelineApi:BaseUrl"]).Returns("http://test-api");
+        var aiOptions = new AiOptions { PipelineApi = new PipelineApiOptions { BaseUrl = "http://test-api" } };
+        _options = Options.Create(aiOptions);
 
         _service = new RoadmapService(
             _mockCache.Object,
             _mockHttpClientFactory.Object,
             _unitOfWork,
-            _mockConfiguration.Object
+            _options
         );
     }
 

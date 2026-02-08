@@ -1,10 +1,9 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Shared;
+using Shared.Options;
 
 namespace BoslaAPI.Extensions;
 
@@ -12,7 +11,7 @@ public static class JwtExtensions
 {
     public static AuthenticationBuilder AddJwtConfiguration(this IServiceCollection services, IConfiguration configuration)
     {
-        var jwtOptions = configuration.GetSection("JWT").Get<JwtOptions>();
+        var jwtOptions = configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>();
 
         return services.AddAuthentication(options =>
             {

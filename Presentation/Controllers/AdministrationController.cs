@@ -1,20 +1,20 @@
 using Domain.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
 using Shared;
 using Shared.DTOs.AdministrationDTOs.DomainDTOs;
-using Shared.DTOs.AdministrationDTOs.TrackChoiceDTOs;
 using Shared.DTOs.AdministrationDTOs.TrackDTOs;
-using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
+using Microsoft.Extensions.Options;
+using Shared.Options;
 
 namespace Presentation.Controllers;
 
+
 [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
 public class AdministrationController(
-    IConfiguration configuration,
-    IServiceManager serviceManager) : ApiController(configuration)
+    IOptions<CookieSettingsOptions> cookieOptions,
+    IServiceManager serviceManager) : ApiController(cookieOptions)
 {
     [HttpGet("GetDomains")]
     public async Task<ActionResult<APIResponse>> GetDomains([FromQuery] bool isActive = true)

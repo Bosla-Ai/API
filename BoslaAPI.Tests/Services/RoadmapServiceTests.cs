@@ -4,10 +4,11 @@ using Domain.Contracts;
 using Domain.Entities;
 using Domain.Exceptions;
 using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Moq;
 using Service.Implementations;
 using Shared.DTOs.RoadmapDTOs;
+using Shared.Options;
 
 namespace BoslaAPI.Tests.Services;
 
@@ -16,7 +17,7 @@ public class RoadmapServiceTests
     private readonly Mock<IDistributedCache> _mockCache;
     private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
     private readonly Mock<IUnitOfWork> _mockUnitOfWork;
-    private readonly Mock<IConfiguration> _mockConfiguration;
+    private readonly IOptions<AiOptions> _options;
     private readonly Mock<IGenericRepository<Course, int>> _mockCourseRepo;
     private readonly Mock<IGenericRepository<Roadmap, int>> _mockRoadmapRepo;
 
@@ -27,11 +28,11 @@ public class RoadmapServiceTests
         _mockCache = new Mock<IDistributedCache>();
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
         _mockUnitOfWork = new Mock<IUnitOfWork>();
-        _mockConfiguration = new Mock<IConfiguration>();
         _mockCourseRepo = new Mock<IGenericRepository<Course, int>>();
         _mockRoadmapRepo = new Mock<IGenericRepository<Roadmap, int>>();
 
-        _mockConfiguration.Setup(c => c["PipelineApi:BaseUrl"]).Returns("http://python-api/generate");
+        var aiOptions = new AiOptions { PipelineApi = new PipelineApiOptions { BaseUrl = "http://python-api/generate" } };
+        _options = Options.Create(aiOptions);
 
         _mockUnitOfWork.Setup(u => u.GetRepo<Course, int>()).Returns(_mockCourseRepo.Object);
         _mockUnitOfWork.Setup(u => u.GetRepo<Roadmap, int>()).Returns(_mockRoadmapRepo.Object);
@@ -40,7 +41,7 @@ public class RoadmapServiceTests
             _mockCache.Object,
             _mockHttpClientFactory.Object,
             _mockUnitOfWork.Object,
-            _mockConfiguration.Object
+            _options
         );
     }
 

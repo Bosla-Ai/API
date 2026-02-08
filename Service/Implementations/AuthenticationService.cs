@@ -24,7 +24,6 @@ public class AuthenticationService(
     ICustomerService customerService,
     IUnitOfWork unitOfWork,
     IMapper mapper,
-    IConfiguration configuration,
     UserManager<ApplicationUser> userManager,
     RoleManager<IdentityRole> roleManager,
     AuthenticationHelper accountHelper) : IAuthenticationService

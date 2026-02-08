@@ -1,15 +1,16 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Shared.DTOs.DashboardDTOs;
 using Domain.Responses;
+using Shared.Options;
 
 namespace Presentation.Controllers;
 
+
 public class DashboardController(
-    IConfiguration configuration
-    , IServiceManager serviceManager) : ApiController(configuration)
+    IOptions<CookieSettingsOptions> cookieOptions
+    , IServiceManager serviceManager) : ApiController(cookieOptions)
 {
     [HttpGet]
     public async Task<ActionResult<APIResponse<Dashboard>>> GetDashboardData()

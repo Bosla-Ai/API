@@ -4,21 +4,22 @@ using Domain.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using Service.Abstraction;
 using Shared;
-using Shared.DTOs;
+using Shared.Options;
 using Shared.DTOs.DashboardDTOs;
 
 namespace Presentation.Controllers;
+
 
 [Authorize]
 public class UserController(
     ILogger<UserController> logger,
     IServiceManager serviceManager,
-    IConfiguration configuration)
-    : ApiController(configuration)
+    IOptions<CookieSettingsOptions> cookieOptions)
+    : ApiController(cookieOptions)
 {
     private string GetUserId(string? sessionId = null)
     {

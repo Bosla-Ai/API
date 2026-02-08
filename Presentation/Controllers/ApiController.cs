@@ -1,8 +1,9 @@
 using Domain.Responses;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Shared;
+using Shared.Options;
 
 namespace Presentation.Controllers;
 
@@ -11,14 +12,16 @@ namespace Presentation.Controllers;
 [ProducesResponseType(StatusCodes.Status200OK)]
 [ProducesResponseType(StatusCodes.Status400BadRequest)]
 [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-public class ApiController(IConfiguration configuration) : ControllerBase
+public class ApiController(IOptions<CookieSettingsOptions> cookieOptions) : ControllerBase
 {
+    private readonly CookieSettingsOptions _cookieSettings = cookieOptions?.Value ?? new CookieSettingsOptions();
+
     protected CookieOptions GetCookieOptions(DateTime lifeTime)
     {
-        var domain = configuration["CookieSettings:AllowedSubDomain"];
-        var isSecure = bool.TryParse(configuration["CookieSettings:Secure"], out var secure) ? secure : true;
-        var sameSite = Enum.TryParse<SameSiteMode>(configuration["CookieSettings:SameSite"], out var mode) ? mode : SameSiteMode.None;
-        var isPartitioned = bool.TryParse(configuration["CookieSettings:Partitioned"], out var partitioned) ? partitioned : false;
+        var domain = _cookieSettings.AllowedSubDomain;
+        var isSecure = _cookieSettings.Secure;
+        var sameSite = Enum.TryParse<SameSiteMode>(_cookieSettings.SameSite, out var mode) ? mode : SameSiteMode.None;
+        var isPartitioned = _cookieSettings.Partitioned;
 
         var options = new CookieOptions
         {

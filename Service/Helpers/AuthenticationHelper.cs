@@ -6,18 +6,20 @@ using Domain.Contracts;
 using Domain.Entities;
 using Domain.Responses;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Service.Abstraction;
+using Shared.Options;
 
 namespace Service.Helpers;
 
 public class AuthenticationHelper(
     UserManager<ApplicationUser> userManager
     , IRefreshTokenService refreshTokenService
-    , IUnitOfWork unitOfWork
-    , IConfiguration configuration)
+    , IOptions<JwtOptions> jwtOptions)
 {
+    private readonly JwtOptions _jwtOptions = jwtOptions.Value;
+
     public (string hash, string salt) CreateTokenHashAndSalt(string token)
     {
         var saltBytes = RandomNumberGenerator.GetBytes(16);
@@ -69,16 +71,16 @@ public class AuthenticationHelper(
         }
 
         var key = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(configuration["JWT:Key"]!)
+            Encoding.UTF8.GetBytes(_jwtOptions.Key)
         );
 
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var jwtToken = new JwtSecurityToken(
-            issuer: configuration["JWT:Issuer"],
-            audience: configuration["JWT:Audience"],
+            issuer: _jwtOptions.Issuer,
+            audience: _jwtOptions.Audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(Convert.ToDouble(configuration["JWT:Expires"]!)),
+            expires: DateTime.UtcNow.AddMinutes(_jwtOptions.Expires),
             signingCredentials: creds
         );
 
@@ -108,7 +110,7 @@ public class AuthenticationHelper(
             TokenHash = hash,
             TokenSalt = salt,
             Created = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(Convert.ToDouble(configuration["JWT:RefreshTokenLifeTime"]!)),
+            ExpiresAt = DateTime.UtcNow.AddDays(_jwtOptions.RefreshTokenLifeTime),
             UserId = user.Id,
             JwtTokenId = jwtToken.Id
         };

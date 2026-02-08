@@ -3,12 +3,12 @@ using System.Text.Json;
 using Domain.Contracts;
 using Domain.Entities;
 using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Configuration;
 using Moq;
 using Moq.Protected;
 using Service.Implementations;
 using Shared.DTOs.RoadmapDTOs;
-using Xunit;
+using Microsoft.Extensions.Options;
+using Shared.Options;
 
 namespace BoslaAPI.Tests;
 
@@ -17,7 +17,7 @@ public class ApplicationLayerTests
     private readonly Mock<IDistributedCache> _mockCache;
     private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
     private readonly Mock<IUnitOfWork> _mockUnitOfWork;
-    private readonly Mock<IConfiguration> _mockConfiguration;
+    private readonly IOptions<AiOptions> _options;
     private readonly Mock<IGenericRepository<Course, int>> _mockCourseRepo;
     private readonly RoadmapService _roadmapService;
 
@@ -26,10 +26,10 @@ public class ApplicationLayerTests
         _mockCache = new Mock<IDistributedCache>();
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
         _mockUnitOfWork = new Mock<IUnitOfWork>();
-        _mockConfiguration = new Mock<IConfiguration>();
         _mockCourseRepo = new Mock<IGenericRepository<Course, int>>();
 
-        _mockConfiguration.Setup(c => c["PipelineApi:BaseUrl"]).Returns("http://test-api/generate-roadmap");
+        var aiOptions = new AiOptions { PipelineApi = new PipelineApiOptions { BaseUrl = "http://test-api/generate-roadmap" } };
+        _options = Options.Create(aiOptions);
 
         // Setup the repository mock
         _mockUnitOfWork.Setup(u => u.GetRepo<Course, int>()).Returns(_mockCourseRepo.Object);
@@ -40,7 +40,7 @@ public class ApplicationLayerTests
             _mockCache.Object,
             _mockHttpClientFactory.Object,
             _mockUnitOfWork.Object,
-            _mockConfiguration.Object
+            _options
         );
     }
 

@@ -2,14 +2,18 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Domain.Requests;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Service.Abstraction;
 using Shared;
+using Shared.Options;
 
 namespace BoslaAPI.Middlewares;
 
-public class TokenRefreshMiddleware(RequestDelegate next, IConfiguration configuration)
+public class TokenRefreshMiddleware(RequestDelegate next, IOptions<JwtOptions> jwtOptions)
 {
+    private readonly JwtOptions _jwtOptions = jwtOptions.Value;
+
     public async Task InvokeAsync(HttpContext context, IServiceScopeFactory serviceScopeFactory)
     {
         if (context.User.Identity?.IsAuthenticated == true)
@@ -82,7 +86,7 @@ public class TokenRefreshMiddleware(RequestDelegate next, IConfiguration configu
     private ClaimsPrincipal? ValidateToken(string token)
     {
         var tokenHandler = new JwtSecurityTokenHandler();
-        var key = Encoding.UTF8.GetBytes(configuration["JWT:Key"]!);
+        var key = Encoding.UTF8.GetBytes(_jwtOptions.Key);
 
         try
         {
@@ -91,9 +95,9 @@ public class TokenRefreshMiddleware(RequestDelegate next, IConfiguration configu
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = new SymmetricSecurityKey(key),
                 ValidateIssuer = true,
-                ValidIssuer = configuration["JWT:Issuer"],
+                ValidIssuer = _jwtOptions.Issuer,
                 ValidateAudience = true,
-                ValidAudience = configuration["JWT:Audience"],
+                ValidAudience = _jwtOptions.Audience,
                 ClockSkew = TimeSpan.Zero
             }, out _);
 

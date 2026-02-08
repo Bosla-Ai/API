@@ -34,19 +34,24 @@ builder.Services.AddHttpClient(string.Empty, client =>
 
 builder.Services.AddAutoMapper(cfg => { }, typeof(CustomerMapping).Assembly);
 builder.Services.AddControllers();
+builder.Services.AddAppConfiguration(builder.Configuration);
+
+var connectionStrings = builder.Configuration.GetSection(ConnectionStringsOptions.SectionName).Get<ConnectionStringsOptions>();
+var authOptions = builder.Configuration.GetSection(BoslaAuthenticationOptions.SectionName).Get<BoslaAuthenticationOptions>();
+
 builder.Services.AddStackExchangeRedisCache(options =>
 {
-    options.Configuration = builder.Configuration.GetConnectionString("Redis");
+    options.Configuration = connectionStrings!.Redis;
     options.InstanceName = "Bosla_";
 });
 builder.Services.AddDbContext<ApplicationDbContext>(option =>
 {
-    option.UseSqlServer(builder.Configuration.GetConnectionString("ServerConnection"));
-    // option.UseSqlServer(builder.Configuration.GetConnectionString("CS")); // forDevelopment
+    option.UseSqlServer(connectionStrings.ServerConnection);
 });
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<IDbInitializer, DbInitializer>();
+
 builder.Services.AddServices(builder.Configuration);
 builder.Services
     .AddJwtConfiguration(builder.Configuration)
@@ -70,8 +75,8 @@ builder.Services
     .AddGoogle("Google", options =>
     {
         options.SignInScheme = IdentityConstants.ExternalScheme;
-        options.ClientId = builder.Configuration["Authentication:Google:ClientId"]!;
-        options.ClientSecret = builder.Configuration["Authentication:Google:ClientSecret"]!;
+        options.ClientId = authOptions!.Google.ClientId;
+        options.ClientSecret = authOptions.Google.ClientSecret;
         options.CallbackPath = "/api/ExternalAuthentication/signin-google";
         options.ClaimActions.MapJsonKey("urn:google:email_verified", "email_verified");
         options.UsePkce = true;
@@ -79,8 +84,8 @@ builder.Services
     .AddGitHub("Github", options =>
     {
         options.SignInScheme = IdentityConstants.ExternalScheme;
-        options.ClientId = builder.Configuration["Authentication:Github:ClientId"]!;
-        options.ClientSecret = builder.Configuration["Authentication:Github:ClientSecret"]!;
+        options.ClientId = authOptions!.Github.ClientId;
+        options.ClientSecret = authOptions.Github.ClientSecret;
         options.CallbackPath = "/api/ExternalAuthentication/signin-github";
         options.Scope.Add("user:email"); // Request email access
         options.ClaimActions.MapJsonKey("urn:github:login", "login");
@@ -90,7 +95,7 @@ builder.Services
 
 
 
-builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
+
 builder.Services.AddRateLimiterConfiguration();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
