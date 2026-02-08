@@ -12,6 +12,11 @@ public interface ICustomerService
     IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null);
 
     Task<APIResponse<AiIntentDetectionResponse>> ProcessUserQueryWithIntentDetectionAsync(string userId, string query, string? sessionId = null);
+
+    string CreateAiRequest(string userId, AiQueryRequest request);
+
+    (string UserId, AiQueryRequest Request) GetAiRequest(string requestId);
+
     Task<APIResponse> GetCustomerProfileAsync(string customerId);
     Task<IEnumerable<Customer>> GetAllAsync();
     Task<Customer> GetByIdAsync(string id);

@@ -41,25 +41,36 @@ public class UserController(
     }
 
     [HttpPost("ask-ai-with-intent")]
-    public async Task AskAIWithIntent([FromBody] AiQueryRequest request)
+    public ActionResult<AiRequestIdResponse> StartAIQuery([FromBody] AiQueryRequest request)
     {
         var userId = GetUserId(request.SessionId);
+        var requestId = serviceManager.Customer.CreateAiRequest(userId, request);
+        return Ok(new AiRequestIdResponse(requestId));
+    }
+
+    [HttpGet("ask-ai-with-intent/stream")]
+    public async Task StreamAIQuery([FromQuery] string requestId)
+    {
+        var (userId, request) = serviceManager.Customer.GetAiRequest(requestId);
 
         Response.ContentType = "text/event-stream";
         Response.Headers["Cache-Control"] = "no-cache";
+        Response.Headers["Connection"] = "keep-alive";
+        Response.Headers["X-Accel-Buffering"] = "no";
 
         try
         {
             await foreach (var chunk in serviceManager.Customer
                 .ProcessUserQueryStreamAsync(userId, request.Query!, request.SessionId))
             {
-                await Response.WriteAsync($"data: {chunk}\n\n");
+                await Response.WriteAsync($"{chunk}\n\n");
                 await Response.Body.FlushAsync();
             }
         }
         catch (Exception ex)
         {
-            await Response.WriteAsync($"data: __ERROR__:{ex.Message}\n\n");
+            logger.LogError(ex, "Error streaming AI response for requestId: {RequestId}", requestId);
+            await Response.WriteAsync($"event: error\ndata: {{\"message\": \"An error occurred\"}}\n\n");
             await Response.Body.FlushAsync();
         }
     }

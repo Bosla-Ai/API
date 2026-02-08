@@ -166,6 +166,6 @@ public class CustomerServiceTests
     // so we skip testing methods that require them
     private CustomerService CreateServiceWithMockedDependencies(IMapper mapper)
     {
-        return new CustomerService(_unitOfWorkMock.Object, mapper, null!, null!, null!, null!);
+        return new CustomerService(_unitOfWorkMock.Object, mapper, null!, null!, null!, null!, null!);
     }
 }
