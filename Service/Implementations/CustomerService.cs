@@ -8,12 +8,14 @@ using Domain.Exceptions;
 using Domain.ModelsSpecifications;
 using Domain.Responses;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Service.Helpers;
 using Shared.DTOs;
 using Shared.DTOs.CustomerDTOs;
 using Shared.DTOs.RoadmapDTOs;
 using Shared.Enums;
+using Shared.Options;
 
 namespace Service.Implementations;
 
@@ -22,7 +24,7 @@ public class CustomerService(
     , IMapper mapper
     , CustomerHelper customerHelper
     , ConversationContextManager conversationContextManager
-    , IConfiguration configuration
+    , IOptionsMonitor<AiOptions> options
     , IHttpClientFactory httpClientFactory) : ICustomerService
 {
     public async Task<APIResponse<string>> ProcessUserQueryAsync(string userId, string query, string? sessionId = null)
@@ -152,7 +154,7 @@ public class CustomerService(
 
             if (toolArguments?.Tags != null)
             {
-                Console.WriteLine($"\n[Generated Tags]: {string.Join(", ", toolArguments.Tags)}\n");
+                // Using structured logging instead of Console.WriteLine
             }
 
             var response = new AiIntentDetectionResponse
@@ -191,97 +193,11 @@ public class CustomerService(
 
     private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName)> DetectIntentAsync(string query, string conversationContext)
     {
-        string detectionPrompt = $@"You are Bosla AI, an intelligent educational assistant.
-Your task is to analyze the user's input, determine their intent for the frontend UI, and if necessary, generate a professional roadmap.
-
-AVAILABLE INTENTS (Frontend will render UI based on this):
-- CVAnalysis: User WANTS to upload/analyze their CV (triggers CV upload component).
-- ChooseTrack: User wants to SELECT a learning track (triggers track selection component).
-- RoadmapGeneration: User wants a study roadmap (triggers roadmap generation pipeline).
-- ChooseMethod: User is confused about what to do.
-- ChatWithAI: General conversation/questions.
-
-*** ANALYSIS RULES & LOGIC ***
-
-1. **CVAnalysis Intent (Two Scenarios):**
-   a) **User WANTS to upload CV** (e.g., 'analyze my resume', 'review my cv'):
-      - Intent = 'CVAnalysis'
-      - tool_arguments = null (frontend shows upload UI).
-      - Response: Invite them to upload (AR: ""تمام! ياريت ترفع الـ CV..."" / EN: ""Great! Please upload..."").
-
-   b) **User SENDS CV JSON data** (contains 'profile', 'verifiedSkills', etc.):
-      - Intent = 'CVAnalysis'
-      - **ACTION: PERFORM GAP ANALYSIS (See 'Gap Analysis Protocol' below).**
-      - Response: Summarize gaps (AR: ""بناءً على دورك، ناقصك مهارات زي..."" / EN: ""Based on your role, you are missing..."").
-
-2. **ChooseTrack Intent:**
-   - User wants to pick a path/track.
-   - Intent = 'ChooseTrack'
-   - tool_arguments = null.
-
-3. **RoadmapGeneration Intent:**
-   - User asks for a roadmap OR Frontend sends selected tags.
-   - **ACTION: PERFORM GAP ANALYSIS (See 'Gap Analysis Protocol' below)** to ensure the roadmap is professional.
-   - tool_arguments = {{ tags, prefer_paid, language, sources }}
-
-4. **ChooseMethod Intent:**
-   - User is confused.
-   - Intent = 'ChooseMethod'
-
-5. **ChatWithAI Intent:**
-   - General conversation.
-   - Intent = 'ChatWithAI'
-
-*** GAP ANALYSIS PROTOCOL (THE BRAIN) ***
-When generating 'tags' for Roadmap/CV, identify missing ""Silent Pillars"" required for a SENIOR professional in their TARGET ROLE.
-
-   **Step 1: Identify Role** (e.g., Full Stack, CyberSec, DevOps, Embedded).
-   **Step 2: Check for the 3 Professional Pillars (If missing, ADD them as tags):**
-      A. **The Operational Gap** (Delivery/Ops):
-         - Web: CI/CD, Docker, Cloud (AWS).
-         - Cyber: Reporting, SIEM, Scripting.
-         - Embedded: RTOS, Hardware Debugging.
-      B. **The Quality Gap** (Verification):
-         - Web: Testing (Jest/xUnit), SonarQube.
-         - Cyber: Compliance (NIST), Risk Assessment.
-         - Data: Data Cleaning, Validation.
-      C. **The Advanced Gap** (Scale/Depth):
-         - Web: System Design, Microservices, Security.
-         - Cyber: Reverse Engineering, Threat Hunting.
-         - General: Design Patterns, Clean Architecture.
-
-   **Step 3: Tag Generation Rule (STRICT ATOMICITY):**
-   - **Output 5-8 distinct tags.**
-   - **CRITICAL: NEVER combine topics with '&', 'and', or '/'.**
-     - BAD: ""Docker & Kubernetes""
-     - GOOD: ""Docker"", ""Kubernetes""
-     - BAD: ""PostgreSQL and TypeORM""
-     - GOOD: ""PostgreSQL"", ""TypeORM""
-   - Mix: [2 Advanced Ecosystem Tools] + [3 Gap Filling Tags from above].
-   - Tags must be search-friendly (e.g., ""Python Testing"" not just ""Quality"").
-
-*** PARAMETER EXTRACTION RULES ***
-- **prefer_paid**: true if user mentions ""paid"", ""course"", ""udemy"". Default false.
-- **sources**:
-  - If paid: default ['udemy'].
-  - If free: default ['youtube'].
-- **language**: 'ar' or 'en' based on user input language.
-
-{(!string.IsNullOrEmpty(conversationContext) ? $"Conversation History:\n{conversationContext}\n\n" : "")}
-Current User Query: ""{query}""
-
-Respond in EXACT JSON:
-{{
-  ""intent"": ""RoadmapGeneration"" | ""ChatWithAI"" | ""CVAnalysis"" | ""ChooseTrack"" | ""ChooseMethod"",
-  ""confidence"": <0-100>,
-  ""response"": ""<Message to show the user IN THEIR LANGUAGE>"",
-  ""tool_arguments"": {{
-      ""tags"": [""tag1"", ""tag2"", ...],
-      ""prefer_paid"": <bool>,
-      ""language"": ""en"" | ""ar"",
-      ""sources"": [""youtube"", ""udemy"", ...] or null
-  }} or null
-}}";
+        var prompts = options.CurrentValue.Prompts;
+        var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
+            prompts.IntentDetectionSystemPrompt,
+            (!string.IsNullOrEmpty(conversationContext) ? $"Conversation History:\n{conversationContext}\n\n" : ""),
+            query);
         try
         {
             var (responseText, modelName) = await customerHelper.SendRequestToGemini(detectionPrompt);
@@ -300,20 +216,10 @@ Respond in EXACT JSON:
 
     private string BuildChatPrompt(string context, string query)
     {
-        return $@"You are Bosla AI, an intelligent educational assistant.
-System: Be helpful, encouraging, and concise.
-
-Conversation History:
-{context}
-
-Current User Query: {query}
-
-Thought Process Visibility:
-If you need to perform analysis, search memory, or plan your answer, output your thought on a new line starting with >>>.
-Example:
->>> Analyzing user's .NET background...
->>> Formulating explanation...
-Then provide your actual response.";
+        var prompts = options.CurrentValue.Prompts;
+        return string.Format(prompts.ChatUserPromptTemplate,
+            prompts.ChatSystemPrompt + "\n" + context,
+            query);
     }
 
     private (LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments)? ParseCombinedResponse(string? responseText)
@@ -361,7 +267,7 @@ Then provide your actual response.";
 
     private async Task<string> ExecuteRoadmapGenerationAsync(RoadmapRequestDTO requestData)
     {
-        string apiUrl = configuration["PipelineApi:BaseUrl"]!;
+        string apiUrl = options.CurrentValue.PipelineApi.BaseUrl;
 
         using var client = httpClientFactory.CreateClient();
         client.Timeout = TimeSpan.FromMinutes(5);

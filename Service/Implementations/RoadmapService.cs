@@ -7,10 +7,11 @@ using Domain.Exceptions;
 using Domain.ModelsSpecifications;
 using Domain.Responses;
 using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Shared.DTOs.RoadmapDTOs;
 using Shared.Enums;
+using Shared.Options;
 
 namespace Service.Implementations;
 
@@ -25,12 +26,12 @@ public class RoadmapService : IRoadmapService
         IDistributedCache cache,
         IHttpClientFactory httpClientFactory,
         IUnitOfWork unitOfWork,
-        IConfiguration configuration)
+        IOptions<AiOptions> options)
     {
         _cache = cache;
         _httpClientFactory = httpClientFactory;
         _unitOfWork = unitOfWork;
-        _pythonApiUrl = configuration["PipelineApi:BaseUrl"]!;
+        _pythonApiUrl = options.Value.PipelineApi.BaseUrl;
     }
 
     public async Task<APIResponse<RoadmapGenerationDTO>> GenerateRoadmapAsync(string[] tags, string language, bool preferPaid)
@@ -97,10 +98,12 @@ public class RoadmapService : IRoadmapService
                 if (!response.IsSuccessStatusCode)
                     throw new InternalServerErrorException($"Python Scraper failed with status {response.StatusCode}: {response.ReasonPhrase}");
 
-                roadmapData = await response.Content.ReadFromJsonAsync<RoadmapGenerationDTO>();
+                var roadmapResponse = await response.Content.ReadFromJsonAsync<RoadmapGenerationDTO>();
 
-                if (roadmapData == null)
+                if (roadmapResponse == null)
                     throw new InternalServerErrorException("Received empty data from Python Microservice.");
+
+                roadmapData = roadmapResponse;
             }
             catch (HttpRequestException ex)
             {

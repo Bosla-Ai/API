@@ -6,6 +6,8 @@ using Google.GenAI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
+using Microsoft.Extensions.Options;
+using Shared.Options;
 
 namespace Service.Helpers;
 
@@ -25,22 +27,19 @@ public class CustomerHelper
     private readonly string _llmModel;
     private readonly string _llmProvider;
 
-    public CustomerHelper(ILogger<CustomerHelper> logger, HttpClient httpClient, IConfiguration configuration)
+    public CustomerHelper(ILogger<CustomerHelper> logger, HttpClient httpClient, IOptionsMonitor<AiOptions> options)
     {
         _logger = logger;
         _httpClient = httpClient;
+        var aiOptions = options.CurrentValue;
 
-        var geminiKeysString = configuration["Gemini:ApiKey"];
-        _geminiApiKeys = !string.IsNullOrEmpty(geminiKeysString)
-            ? geminiKeysString.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList()
-            : new List<string>();
+        _geminiApiKeys = aiOptions.Gemini.ApiKeys;
+        _geminiModel = aiOptions.Gemini.Model;
 
-        _geminiModel = configuration["Gemini:Model"] ?? "gemini-3-flash-preview";
-
-        _llmProvider = configuration["LLM:Provider"]?.ToLower() ?? "openrouter";
-        _llmApiKey = configuration["LLM:ApiKey"] ?? "";
-        _llmApiUrl = configuration["LLM:ApiUrl"] ?? "https://openrouter.ai/api/v1/chat/completions";
-        _llmModel = configuration["LLM:Model"] ?? "qwen/qwen3-coder:free";
+        _llmProvider = aiOptions.Llm.Provider;
+        _llmApiKey = aiOptions.Llm.ApiKey;
+        _llmApiUrl = aiOptions.Llm.ApiUrl;
+        _llmModel = aiOptions.Llm.Model;
 
         if (!_geminiApiKeys.Any() && string.IsNullOrWhiteSpace(_llmApiKey))
         {
@@ -423,7 +422,7 @@ public class CustomerHelper
                             throw new InternalServerErrorException($"OpenRouter stream error: {errorMessage}");
                         }
 
-                        var content = chunk?.choices?[0]?.delta?.content?.ToString();
+                        var content = chunk?.choices?[0]?.delta?.content?.ToString() ?? string.Empty;
 
                         if (string.IsNullOrEmpty(content)) continue;
 

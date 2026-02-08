@@ -17,6 +17,7 @@ using Service.Extensions;
 using Service.MappingProfiles;
 using System.Net;
 using Domain.Responses;
+using Shared.Options;
 
 // Load environment variables from .env file
 Env.Load("../.env");
@@ -88,6 +89,8 @@ builder.Services
     });
 
 
+
+builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
 builder.Services.AddRateLimiterConfiguration();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
