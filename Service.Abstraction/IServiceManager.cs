@@ -9,6 +9,7 @@ public interface IServiceManager
     public IAdministrationService Administration { get; }
     public IDashboardService Dashboard { get; }
     public IUserService User { get; }
+    public IJobMarketService JobMarket { get; }
 
     Task SaveChangesAsync();
 }
