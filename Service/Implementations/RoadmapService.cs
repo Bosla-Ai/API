@@ -62,11 +62,13 @@ public class RoadmapService : IRoadmapService
 
         if (missingTags.Any())
         {
+            var jobId = Guid.NewGuid().ToString("N")[..12];
             var requestPayload = new
             {
                 tags = missingTags,
                 language = language,
-                prefer_paid = preferPaid
+                prefer_paid = preferPaid,
+                job_id = jobId
             };
 
             var httpClient = _httpClientFactory.CreateClient();
