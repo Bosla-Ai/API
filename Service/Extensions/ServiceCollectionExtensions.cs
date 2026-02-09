@@ -21,6 +21,7 @@ public static class ServiceCollectionExtensions
         services.Configure<ConnectionStringsOptions>(configuration.GetSection(ConnectionStringsOptions.SectionName));
         services.Configure<OAuthSettingsOptions>(configuration.GetSection(OAuthSettingsOptions.SectionName));
         services.Configure<CookieSettingsOptions>(configuration.GetSection(CookieSettingsOptions.SectionName));
+        services.Configure<JobMarketOptions>(configuration.GetSection(JobMarketOptions.SectionName));
 
         return services;
     }
@@ -70,6 +71,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAdministrationService, AdministrationService>();
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IJobMarketService, JobMarketService>();
 
         services.AddScoped<IServiceManager, ServiceManager>(); // for generalization
         services.AddScoped<AuthenticationHelper>();

@@ -1,50 +1,15 @@
 namespace Shared.DTOs;
 
-/// <summary>
-/// Aggregated labor-market insight extracted from real job postings.
-/// Injected into the intent-detection prompt so tags are market-aligned.
-/// </summary>
 public class MarketInsightDTO
 {
-    /// <summary>
-    /// Top skills/tools mentioned across analyzed job postings,
-    /// sorted by frequency descending (e.g. "TypeScript", "Docker").
-    /// </summary>
     public string[] TopRequiredSkills { get; set; } = Array.Empty<string>();
-
-    /// <summary>
-    /// Common job titles found in the search results.
-    /// </summary>
     public string[] CommonJobTitles { get; set; } = Array.Empty<string>();
-
-    /// <summary>
-    /// Skill → number of job postings that mention it.
-    /// </summary>
     public Dictionary<string, int> SkillFrequency { get; set; } = new();
-
-    /// <summary>
-    /// Salary range discovered from the Adzuna salary endpoint.
-    /// </summary>
     public SalaryRange? Salary { get; set; }
-
-    /// <summary>
-    /// Total number of job postings analyzed.
-    /// </summary>
     public int TotalJobsAnalyzed { get; set; }
-
-    /// <summary>
-    /// Country/region used for the search.
-    /// </summary>
     public string Region { get; set; } = string.Empty;
-
-    /// <summary>
-    /// The original search query used.
-    /// </summary>
     public string SearchQuery { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Format the insight as a concise prompt fragment for the LLM.
-    /// </summary>
     public string ToPromptContext()
     {
         if (TopRequiredSkills.Length == 0)
@@ -55,7 +20,6 @@ public class MarketInsightDTO
             $"CURRENT LABOR MARKET DATA (based on {TotalJobsAnalyzed} active job postings for \"{SearchQuery}\" in {Region.ToUpperInvariant()}):"
         };
 
-        // Top skills with percentages
         var maxCount = SkillFrequency.Values.DefaultIfEmpty(1).Max();
         var skillLines = TopRequiredSkills
             .Take(15)
@@ -84,9 +48,6 @@ public class MarketInsightDTO
     }
 }
 
-/// <summary>
-/// Salary range for a role/query.
-/// </summary>
 public class SalaryRange
 {
     public decimal Min { get; set; }

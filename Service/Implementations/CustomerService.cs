@@ -27,7 +27,8 @@ public class CustomerService(
     , ConversationContextManager conversationContextManager
     , IOptionsMonitor<AiOptions> options
     , IHttpClientFactory httpClientFactory
-    , AiRequestStore aiRequestStore) : ICustomerService
+    , AiRequestStore aiRequestStore
+    , IJobMarketService jobMarketService) : ICustomerService
 {
     public async Task<APIResponse<string>> ProcessUserQueryAsync(string userId, string query, string? sessionId = null)
     {
@@ -61,17 +62,94 @@ public class CustomerService(
 
         var actualSessionId = !string.IsNullOrEmpty(sessionId) ? sessionId : GenerateSessionId(userId);
 
+        var pendingSseEvents = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        conversationContextManager.OnSseEvent = (eventName, data) =>
+        {
+            pendingSseEvents.Enqueue(FormatSse(eventName, data));
+        };
+
         var contextTask = conversationContextManager.GetConversationContextAsync(userId, actualSessionId);
         var addMessageTask = conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, query, "user");
         await Task.WhenAll(contextTask, addMessageTask);
         var conversationContext = await contextTask;
 
+        // Drain any buffered SSE events (e.g. summarization)
+        while (pendingSseEvents.TryDequeue(out var sseEvent))
+            yield return sseEvent;
+
         yield return FormatSse("status", new { message = "Analyzing your request...", step = "init" });
 
-        // --- Start Streaming Intent Detection ---
+        string marketContext = "";
+        MarketInsightDTO? fetchedMarketInsight = null;
+        var marketKeywords = ExtractKeywordsFromQuery(query);
+        if (marketKeywords.Length > 0)
+        {
+            yield return FormatSse("tool", new { name = "MarketAnalysis", state = "start", summary = $"Scanning labor market for: {string.Join(", ", marketKeywords)}..." });
+
+            var pendingEvents = new List<string>();
+            try
+            {
+                fetchedMarketInsight = await jobMarketService.GetMarketInsightsAsync(marketKeywords);
+                if (fetchedMarketInsight is not null)
+                {
+                    marketContext = fetchedMarketInsight.ToPromptContext();
+                    var topSkillsSummary = string.Join(", ", fetchedMarketInsight.TopRequiredSkills.Take(5));
+                    var salaryInfo = fetchedMarketInsight.Salary is not null
+                        ? $" | Salary range: {fetchedMarketInsight.Salary.Currency}{fetchedMarketInsight.Salary.Min:N0}–{fetchedMarketInsight.Salary.Currency}{fetchedMarketInsight.Salary.Max:N0}"
+                        : "";
+                    pendingEvents.Add(FormatSse("tool", new
+                    {
+                        name = "MarketAnalysis",
+                        state = "end",
+                        summary = $"Analyzed {fetchedMarketInsight.TotalJobsAnalyzed} jobs. Top skills: {topSkillsSummary}{salaryInfo}"
+                    }));
+
+                    var pulse = jobMarketService.CalculateReadiness(marketKeywords, fetchedMarketInsight);
+                    if (pulse is not null)
+                    {
+                        pendingEvents.Add(FormatSse("career_pulse", new
+                        {
+                            readinessScore = pulse.ReadinessScore,
+                            readinessLevel = pulse.ReadinessLevel,
+                            matchedSkills = pulse.MatchedSkills,
+                            topGaps = pulse.TopGaps.Select(g => new { skill = g.Skill, demandPercent = g.DemandPercent, category = g.Category }),
+                            insight = pulse.Insight,
+                            targetRole = pulse.TargetRole,
+                            jobsAnalyzed = pulse.JobsAnalyzed
+                        }));
+                    }
+                }
+                else
+                {
+                    pendingEvents.Add(FormatSse("tool", new { name = "MarketAnalysis", state = "end", summary = "No market data available — using knowledge base." }));
+                }
+            }
+            catch
+            {
+                pendingEvents.Add(FormatSse("tool", new { name = "MarketAnalysis", state = "end", summary = "Market search skipped — using knowledge base." }));
+            }
+
+            foreach (var evt in pendingEvents)
+                yield return evt;
+        }
+
+        // Intent Detection
         var prompts = options.CurrentValue.Prompts;
+
+        // Inject market context into system prompt
+        var systemPrompt = prompts.IntentDetectionSystemPrompt;
+        if (!string.IsNullOrEmpty(marketContext))
+        {
+            systemPrompt = systemPrompt.Replace("{MARKET_CONTEXT}", marketContext);
+        }
+        else
+        {
+            systemPrompt = systemPrompt.Replace("{MARKET_CONTEXT}",
+                "No real-time market data available. Use your knowledge of current labor market trends.");
+        }
+
         var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
-            prompts.IntentDetectionSystemPrompt,
+            systemPrompt,
             (!string.IsNullOrEmpty(conversationContext.ToString()) ? $"Conversation History:\n{conversationContext}\n\n" : ""),
             query);
 
@@ -81,7 +159,7 @@ public class CustomerService(
         string? thinkingTitle = null;
         bool titleExtracted = false;
 
-        // Stream the detection process to catch thoughts in real-time
+        // Stream detection to catch thoughts in real-time
         await foreach (var chunk in customerHelper.SendStreamRequestToGemini(detectionPrompt, useThinking: true))
         {
             if (chunk.StartsWith("__MODEL__:"))
@@ -135,7 +213,7 @@ public class CustomerService(
         var aiResponse = parsed?.response;
         var toolArguments = parsed?.toolArguments;
 
-        // --- End Streaming Intent Detection ---
+        // --- End Intent Detection ---
 
         yield return FormatSse("intent", new { name = interactionType.ToString(), confidence = confidence });
 
@@ -171,6 +249,39 @@ public class CustomerService(
 
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
+                // Career Pulse from CV/roadmap tags — fetch market data if not already done
+                if (toolArguments.Tags is { Length: > 0 })
+                {
+                    string? tagPulseEvent = null;
+                    try
+                    {
+                        var tagArray = toolArguments.Tags.ToArray();
+                        fetchedMarketInsight ??= await jobMarketService.GetMarketInsightsAsync(tagArray);
+
+                        if (fetchedMarketInsight is not null)
+                        {
+                            var tagPulse = jobMarketService.CalculateReadiness(tagArray, fetchedMarketInsight);
+                            if (tagPulse is not null)
+                            {
+                                tagPulseEvent = FormatSse("career_pulse", new
+                                {
+                                    readinessScore = tagPulse.ReadinessScore,
+                                    readinessLevel = tagPulse.ReadinessLevel,
+                                    matchedSkills = tagPulse.MatchedSkills,
+                                    topGaps = tagPulse.TopGaps.Select(g => new { skill = g.Skill, demandPercent = g.DemandPercent, category = g.Category }),
+                                    insight = tagPulse.Insight,
+                                    targetRole = tagPulse.TargetRole,
+                                    jobsAnalyzed = tagPulse.JobsAnalyzed
+                                });
+                            }
+                        }
+                    }
+                    catch { /* graceful — don't block roadmap generation */ }
+
+                    if (tagPulseEvent is not null)
+                        yield return tagPulseEvent;
+                }
+
                 var jobId = Guid.NewGuid().ToString("N")[..12];
                 toolArguments.JobId = jobId;
 
@@ -486,5 +597,39 @@ public class CustomerService(
     {
         var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         return $"event: {eventName}\ndata: {json}";
+    }
+
+    private static string[] ExtractKeywordsFromQuery(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query) || query.Length < 10)
+            return Array.Empty<string>();
+
+        var words = query.Split(new[] { ' ', ',', '.', '!', '?', '\n', '\r', '\t' },
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var keywords = new List<string>();
+
+        foreach (var word in words)
+        {
+            var clean = word.Trim('\'', '"', '(', ')', '[', ']');
+            if (clean.Length < 2) continue;
+
+            var found = SkillDictionary.ExtractSkills(clean);
+            if (found.Count > 0)
+            {
+                keywords.AddRange(found.Keys);
+            }
+        }
+
+        // Multi-word combinations (e.g. "React Native", "Spring Boot")
+        var fullText = string.Join(" ", words);
+        var multiWordSkills = SkillDictionary.ExtractSkills(fullText);
+        foreach (var (skill, _) in multiWordSkills)
+        {
+            if (!keywords.Contains(skill, StringComparer.OrdinalIgnoreCase))
+                keywords.Add(skill);
+        }
+
+        return keywords.Distinct(StringComparer.OrdinalIgnoreCase).Take(5).ToArray();
     }
 }

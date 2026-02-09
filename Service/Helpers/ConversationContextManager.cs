@@ -13,6 +13,8 @@ public class ConversationContextManager
     private readonly TimeSpan _hotCacheExpiration = TimeSpan.FromMinutes(5);
     private const int SummarizationThreshold = 50;
 
+    public Action<string, object>? OnSseEvent { get; set; }
+
     public ConversationContextManager(IMemoryCache cache, IChatRepository chatRepository, CustomerHelper customerHelper)
     {
         _cache = cache;
@@ -90,6 +92,8 @@ public class ConversationContextManager
 
     private async Task SummarizeAndCompressAsync(string userId, string sessionId, List<ChatMessageEntity> messages)
     {
+        OnSseEvent?.Invoke("tool", new { name = "Summarization", state = "start", summary = $"Compressing {messages.Count} messages into context summary..." });
+
         var conversationText = new StringBuilder();
         foreach (var msg in messages)
         {
@@ -110,6 +114,8 @@ public class ConversationContextManager
             CreatedAt = DateTime.UtcNow
         };
         await _chatRepository.AddMessageAsync(summaryEntity);
+
+        OnSseEvent?.Invoke("tool", new { name = "Summarization", state = "end", summary = "Conversation context optimized." });
     }
 
     public Task ClearConversationContextAsync(string userId, string sessionId)
