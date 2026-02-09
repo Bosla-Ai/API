@@ -171,6 +171,11 @@ public class CustomerService(
 
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
+                var jobId = Guid.NewGuid().ToString("N")[..12];
+                toolArguments.JobId = jobId;
+
+                yield return FormatSse("pipeline_job", new { jobId });
+
                 yield return FormatSse("status", new { message = "Running Bosla Education Pipeline...", step = "tool_execution" });
                 if (toolArguments?.Tags != null)
                     yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "start", summary = $"Detected Interests: {string.Join(", ", toolArguments.Tags)}" });
@@ -240,6 +245,7 @@ public class CustomerService(
 
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
+                toolArguments.JobId = Guid.NewGuid().ToString("N")[..12];
                 var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments);
                 aiResponse += $"\n\n[SYSTEM]: Roadmap generated successfully.\nDetails: {apiResponse}";
             }
