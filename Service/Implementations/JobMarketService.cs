@@ -282,7 +282,7 @@ public class JobMarketService : IJobMarketService
         return combined;
     }
 
- 
+
     private static string NormalizeJobTitle(string title)
     {
         if (string.IsNullOrWhiteSpace(title))
