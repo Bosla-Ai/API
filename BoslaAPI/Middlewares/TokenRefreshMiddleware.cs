@@ -10,9 +10,13 @@ using Shared.Options;
 
 namespace BoslaAPI.Middlewares;
 
-public class TokenRefreshMiddleware(RequestDelegate next, IOptions<JwtOptions> jwtOptions)
+public class TokenRefreshMiddleware(
+    RequestDelegate next,
+    IOptions<JwtOptions> jwtOptions,
+    IOptions<CookieSettingsOptions> cookieOptions)
 {
     private readonly JwtOptions _jwtOptions = jwtOptions.Value;
+    private readonly CookieSettingsOptions _cookieSettings = cookieOptions.Value;
 
     public async Task InvokeAsync(HttpContext context, IServiceScopeFactory serviceScopeFactory)
     {
@@ -43,30 +47,14 @@ public class TokenRefreshMiddleware(RequestDelegate next, IOptions<JwtOptions> j
 
                 if (loginServerResponse != null)
                 {
-                    var cookieOptions = new CookieOptions
-                    {
-                        HttpOnly = true,
-                        Secure = true,
-                        SameSite = SameSiteMode.None,
-                        Expires = loginServerResponse.RefreshTokenExpiration
-                    };
+                    context.Response.Cookies.Append(StaticData.AccessToken, loginServerResponse.AccessToken,
+                        GetCookieOptions(loginServerResponse.AccessTokenExpiration));
 
+                    context.Response.Cookies.Append(StaticData.RefreshToken, loginServerResponse.RefreshToken,
+                        GetCookieOptions(loginServerResponse.RefreshTokenExpiration));
 
-                    context.Response.Cookies.Append(StaticData.AccessToken, loginServerResponse.AccessToken, new CookieOptions
-                    {
-                        HttpOnly = true,
-                        Secure = true,
-                        SameSite = SameSiteMode.None,
-                        Expires = loginServerResponse.AccessTokenExpiration
-                    });
-
-                    context.Response.Cookies.Append(StaticData.RefreshToken, loginServerResponse.RefreshToken, new CookieOptions
-                    {
-                        HttpOnly = true,
-                        Secure = true,
-                        SameSite = SameSiteMode.None,
-                        Expires = loginServerResponse.RefreshTokenExpiration
-                    });
+                    context.Response.Cookies.Append(StaticData.DeviceId, deviceId.ToString(),
+                        GetCookieOptions(loginServerResponse.RefreshTokenExpiration));
 
                     var principal = ValidateToken(loginServerResponse.AccessToken);
                     if (principal != null)
@@ -81,6 +69,30 @@ public class TokenRefreshMiddleware(RequestDelegate next, IOptions<JwtOptions> j
         }
 
         await next(context);
+    }
+
+    private CookieOptions GetCookieOptions(DateTime expires)
+    {
+        var domain = _cookieSettings.AllowedSubDomain;
+        var isSecure = _cookieSettings.Secure;
+        var sameSite = Enum.TryParse<SameSiteMode>(_cookieSettings.SameSite, out var mode) ? mode : SameSiteMode.None;
+        var isPartitioned = _cookieSettings.Partitioned;
+
+        var options = new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = isSecure,
+            SameSite = sameSite,
+            Expires = expires
+        };
+
+        if (isPartitioned)
+            options.Extensions.Add("Partitioned");
+
+        if (!string.IsNullOrEmpty(domain))
+            options.Domain = domain;
+
+        return options;
     }
 
     private ClaimsPrincipal? ValidateToken(string token)
