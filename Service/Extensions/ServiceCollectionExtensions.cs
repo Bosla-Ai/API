@@ -72,6 +72,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IJobMarketService, JobMarketService>();
+        services.AddScoped<IChatHistoryService, ChatHistoryService>();
 
         services.AddScoped<IServiceManager, ServiceManager>(); // for generalization
         services.AddScoped<AuthenticationHelper>();

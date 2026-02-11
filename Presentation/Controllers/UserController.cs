@@ -9,12 +9,13 @@ using Microsoft.Extensions.Logging;
 using Service.Abstraction;
 using Shared;
 using Shared.Options;
+using Shared.DTOs;
 using Shared.DTOs.DashboardDTOs;
 
 namespace Presentation.Controllers;
 
 
-[Authorize]
+//[Authorize]
 public class UserController(
     ILogger<UserController> logger,
     IServiceManager serviceManager,
@@ -89,6 +90,38 @@ public class UserController(
     {
         var response = await serviceManager.User
             .GetAllDomainsWithHierarchyAsync(isActive);
+        return Ok(response);
+    }
+
+    [HttpPost("start-chat")]
+    public async Task<ActionResult<APIResponse<string>>> StartNewChat()
+    {
+        var userId = GetUserId();
+        var response = await serviceManager.ChatHistory.StartNewSessionAsync(userId);
+        return Ok(response);
+    }
+
+    [HttpGet("chat-history")]
+    public async Task<ActionResult<APIResponse<List<ChatSessionSummaryDTO>>>> GetChatHistory()
+    {
+        var userId = GetUserId();
+        var response = await serviceManager.ChatHistory.GetUserChatSessionsAsync(userId);
+        return Ok(response);
+    }
+
+    [HttpGet("chat-history/{sessionId}")]
+    public async Task<ActionResult<APIResponse<ChatSessionMessagesDTO>>> GetChatSession(string sessionId)
+    {
+        var userId = GetUserId();
+        var response = await serviceManager.ChatHistory.GetSessionMessagesAsync(userId, sessionId);
+        return Ok(response);
+    }
+
+    [HttpDelete("chat-history/{sessionId}")]
+    public async Task<ActionResult<APIResponse<int>>> DeleteChatSession(string sessionId)
+    {
+        var userId = GetUserId();
+        var response = await serviceManager.ChatHistory.DeleteSessionAsync(userId, sessionId);
         return Ok(response);
     }
 }

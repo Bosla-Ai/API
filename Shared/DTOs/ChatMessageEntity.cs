@@ -16,4 +16,6 @@ public class ChatMessageEntity
     public string Role { get; set; } = string.Empty;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public DateTime LastAccessedAt { get; set; } = DateTime.UtcNow;
 }
