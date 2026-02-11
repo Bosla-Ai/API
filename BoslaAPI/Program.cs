@@ -19,6 +19,7 @@ using System.Net;
 using Domain.Responses;
 using Shared.Options;
 using Service.Helpers;
+using BoslaAPI.BackgroundServices;
 
 // Load environment variables from .env file
 Env.Load("../.env");
@@ -49,6 +50,7 @@ builder.Services.AddIdentityConfiguration();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<IDbInitializer, DbInitializer>();
 builder.Services.AddSingleton<AiRequestStore>();
+builder.Services.AddHostedService<ChatCleanupBackgroundService>();
 
 builder.Services.AddServices(builder.Configuration);
 builder.Services
