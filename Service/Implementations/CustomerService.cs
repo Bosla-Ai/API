@@ -32,6 +32,8 @@ public class CustomerService(
 {
     public async Task<APIResponse<string>> ProcessUserQueryAsync(string userId, string query, string? sessionId = null)
     {
+        if (string.IsNullOrWhiteSpace(userId))
+            throw new BadRequestException("User ID is required");
         if (string.IsNullOrWhiteSpace(query))
             throw new BadRequestException("Query is empty");
 
@@ -57,6 +59,8 @@ public class CustomerService(
 
     public async IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null)
     {
+        if (string.IsNullOrWhiteSpace(userId))
+            throw new BadRequestException("User ID is required");
         if (string.IsNullOrWhiteSpace(query))
             yield break;
 
@@ -339,6 +343,8 @@ public class CustomerService(
 
     public async Task<APIResponse<AiIntentDetectionResponse>> ProcessUserQueryWithIntentDetectionAsync(string userId, string query, string? sessionId = null)
     {
+        if (string.IsNullOrWhiteSpace(userId))
+            throw new BadRequestException("User ID is required");
         if (string.IsNullOrWhiteSpace(query))
             throw new BadRequestException("Query is empty");
 
@@ -543,26 +549,37 @@ public class CustomerService(
 
     public async Task<Customer> GetByIdAsync(string id)
     {
+        if (string.IsNullOrWhiteSpace(id))
+            throw new BadRequestException("Customer ID cannot be empty");
         return await unitOfWork.GetRepo<Customer, string>().GetIdAsync(id);
     }
 
     public async Task CreateAsync(Customer customer)
     {
+        if (customer == null)
+            throw new BadRequestException("Customer cannot be null");
         await unitOfWork.GetRepo<Customer, string>().CreateAsync(customer);
     }
 
     public async Task UpdateAsync(Customer customer)
     {
+        if (customer == null)
+            throw new BadRequestException("Customer cannot be null");
         await unitOfWork.GetRepo<Customer, string>().UpdateAsync(customer);
     }
 
     public async Task DeleteAsync(Customer customer)
     {
+        if (customer == null)
+            throw new BadRequestException("Customer cannot be null");
         await unitOfWork.GetRepo<Customer, string>().DeleteAsync(customer);
     }
 
     public async Task<CustomerDTO> GetALlCustomerDetailsAsync(string id)
     {
+        if (string.IsNullOrWhiteSpace(id))
+            throw new BadRequestException("Customer ID cannot be empty");
+
         var customer = await unitOfWork.GetRepo<Customer, string>()
             .GetAsync(new CustomerDetailsSpecification(id));
 

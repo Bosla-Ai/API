@@ -36,7 +36,7 @@ public class AdministrationService(
 
     public async Task<APIResponse<DomainsDTO>> GetDomainAsync(int id)
     {
-        if (id == 0 || id == null)
+        if (id <= 0 || id == null)
             throw new BadRequestException("invalid domain id");
 
         var spec = new DomainByIdSpecifications(id);
@@ -87,7 +87,7 @@ public class AdministrationService(
 
     public async Task<APIResponse> DeleteDomain(int id)
     {
-        if (id == 0 || id == null)
+        if (id <= 0 || id == null)
             throw new BadRequestException("invalid domain id");
 
         var spec = new DomainByIdSpecifications(id);
@@ -105,6 +105,9 @@ public class AdministrationService(
 
     public async Task<APIResponse<IEnumerable<TrackDTO>>> GetTracks(int domainId)
     {
+        if (domainId <= 0)
+            throw new BadRequestException("Invalid domain ID");
+
         var spec = new TracksByDomainIdSpecification(domainId);
         var tracks = await unitOfWork.GetRepo<Track, int>().GetAllAsync(spec);
         if (tracks == null)
@@ -140,8 +143,8 @@ public class AdministrationService(
 
     public async Task<APIResponse<TrackFullDTO>> GetFullTrack(int id)
     {
-        if (id == 0)
-            throw new BadRequestException("invalid track id");
+        if (id <= 0)
+            throw new BadRequestException("Invalid track ID");
 
         var spec = new TrackWithFullStructureSpecification(id);
         var track = await unitOfWork.GetRepo<Track, int>().GetAsync(spec);
@@ -230,7 +233,7 @@ public class AdministrationService(
 
     public async Task<APIResponse> DeleteTrack(int id)
     {
-        if (id == 0 || id == null)
+        if (id <= 0 || id == null)
             throw new BadRequestException("invalid track id");
 
         var spec = new TrackByIdSpecification(id);
@@ -248,8 +251,8 @@ public class AdministrationService(
 
     public async Task<APIResponse> DeleteSection(int id)
     {
-        if (id == 0 || id == null)
-            throw new BadRequestException("id is 0 or null");
+        if (id <= 0 || id == null)
+            throw new BadRequestException("invalid section id");
 
         var section = new TrackSectionByIdSpecification(id);
         var existingSection = await unitOfWork
@@ -269,7 +272,7 @@ public class AdministrationService(
 
     public async Task<APIResponse> DeleteChoice(int id)
     {
-        if (id == 0 || id == null)
+        if (id <= 0 || id == null)
             throw new BadRequestException("id is 0 or null");
 
         var choice = new TrackChoiceByIdSpecification(id);

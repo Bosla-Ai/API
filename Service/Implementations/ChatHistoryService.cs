@@ -4,6 +4,7 @@ using System.Text;
 using Domain.Exceptions;
 using Domain.Responses;
 using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Protocols.Configuration;
 using Service.Abstraction;
 using Shared.DTOs;
 
@@ -17,6 +18,9 @@ public class ChatHistoryService(
 
     public Task<APIResponse<string>> StartNewSessionAsync(string userId)
     {
+        if (string.IsNullOrEmpty(userId))
+            throw new BadRequestException("Invalid user ID");
+
         var input = $"{userId}_{DateTime.UtcNow:yyyyMMddHHmmssfff}_{Guid.NewGuid():N}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
         var sessionId = Convert.ToHexString(hash)[..16].ToLower();
@@ -30,9 +34,12 @@ public class ChatHistoryService(
 
     public async Task<APIResponse<List<ChatSessionSummaryDTO>>> GetUserChatSessionsAsync(string userId)
     {
+        if (string.IsNullOrEmpty(userId))
+            throw new BadRequestException("Invalid user ID");
+
         var allMessages = await chatRepository.GetAllUserMessagesAsync(userId);
 
-        if (allMessages.Count == 0)
+        if (allMessages == null || allMessages.Count == 0)
         {
             return new APIResponse<List<ChatSessionSummaryDTO>>
             {
@@ -78,7 +85,13 @@ public class ChatHistoryService(
 
     public async Task<APIResponse<ChatSessionMessagesDTO>> GetSessionMessagesAsync(string userId, string sessionId)
     {
+        if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(sessionId))
+            throw new BadRequestException("Invalid user ID or session ID");
+
         var messages = await chatRepository.GetMessagesAsync(userId, sessionId, limit: 100);
+
+        if (messages == null || messages.Count == 0)
+            throw new NotFoundException("Chat session not found");
 
         // Renew cleanup timer when user views a session
         _ = chatRepository.TouchSessionAsync(userId, sessionId);
@@ -103,6 +116,9 @@ public class ChatHistoryService(
 
     public async Task<APIResponse<int>> DeleteSessionAsync(string userId, string sessionId)
     {
+        if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(sessionId))
+            throw new BadRequestException("Invalid user ID or session ID");
+
         var deletedCount = await chatRepository.DeleteSessionAsync(userId, sessionId);
 
         if (deletedCount == 0)
@@ -121,6 +137,9 @@ public class ChatHistoryService(
 
     public async Task<int> CleanInactiveChatsAsync(int maxAgeDays, int renewalGraceDays)
     {
+        if (maxAgeDays <= 0 || renewalGraceDays <= 0)
+            throw new BadRequestException("Invalid max age or renewal grace days");
+
         var createdCutoff = DateTime.UtcNow.AddDays(-maxAgeDays);
         var accessCutoff = DateTime.UtcNow.AddDays(-renewalGraceDays);
         var deletedCount = await chatRepository.DeleteInactiveMessagesAsync(createdCutoff, accessCutoff);
