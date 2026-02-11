@@ -11,19 +11,37 @@ public class NullChatRepository : IChatRepository
 {
     public Task AddMessageAsync(ChatMessageEntity message)
     {
-        // No-op: CosmosDB is not configured
         return Task.CompletedTask;
     }
 
     public Task<List<ChatMessageEntity>> GetMessagesAsync(string userId, string sessionId, int limit = 15)
     {
-        // Return empty list when CosmosDB is not configured
         return Task.FromResult(new List<ChatMessageEntity>());
     }
 
     public Task DeleteMessagesAsync(string userId, string sessionId, IEnumerable<string> messageIds)
     {
-        // No-op: CosmosDB is not configured
         return Task.CompletedTask;
     }
+
+    public Task<List<ChatMessageEntity>> GetAllUserMessagesAsync(string userId)
+    {
+        return Task.FromResult(new List<ChatMessageEntity>());
+    }
+
+    public Task TouchSessionAsync(string userId, string sessionId)
+    {
+        return Task.CompletedTask;
+    }
+
+    public Task<int> DeleteSessionAsync(string userId, string sessionId)
+    {
+        return Task.FromResult(0);
+    }
+
+    public Task<int> DeleteInactiveMessagesAsync(DateTime createdBefore, DateTime accessedBefore)
+    {
+        return Task.FromResult(0);
+    }
 }
+

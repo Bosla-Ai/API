@@ -15,6 +15,7 @@ public class ServiceManager : IServiceManager
     public IRefreshTokenService RefreshToken { get; }
     public IUserService User { get; private set; }
     public IJobMarketService JobMarket { get; private set; }
+    public IChatHistoryService ChatHistory { get; private set; }
 
 
     public ServiceManager(
@@ -26,7 +27,8 @@ public class ServiceManager : IServiceManager
         IDashboardService dashboard,
         IRefreshTokenService refreshToken,
         IUserService user,
-        IJobMarketService jobMarket)
+        IJobMarketService jobMarket,
+        IChatHistoryService chatHistory)
     {
         _unitOfWork = unitOfWork;
         Authentication = authentication;
@@ -37,6 +39,7 @@ public class ServiceManager : IServiceManager
         RefreshToken = refreshToken;
         User = user;
         JobMarket = jobMarket;
+        ChatHistory = chatHistory;
     }
     public async Task SaveChangesAsync()
     {

@@ -10,6 +10,7 @@ public interface IServiceManager
     public IDashboardService Dashboard { get; }
     public IUserService User { get; }
     public IJobMarketService JobMarket { get; }
+    public IChatHistoryService ChatHistory { get; }
 
     Task SaveChangesAsync();
 }
