@@ -4,6 +4,7 @@ using Moq;
 using Service.Abstraction;
 using Service.Implementations;
 using Shared.DTOs;
+using Domain.Exceptions;
 
 namespace BoslaAPI.Tests.Services;
 
@@ -87,7 +88,7 @@ public class ChatHistoryServiceTests
     }
 
     [Fact]
-    public async Task GetSessionMessagesAsync_ReturnsEmptyForNonExistentSession()
+    public async Task GetSessionMessagesAsync_ThrowsNotFoundForNonExistentSession()
     {
         // Arrange
         _chatRepoMock
@@ -95,12 +96,11 @@ public class ChatHistoryServiceTests
             .ReturnsAsync(new List<ChatMessageEntity>());
 
         // Act
-        var response = await _sut.GetSessionMessagesAsync("u1", "none");
-        var result = response.Data!;
+        Func<Task> act = async () => await _sut.GetSessionMessagesAsync("u1", "none");
 
         // Assert
-        result.SessionId.Should().Be("none");
-        result.Messages.Should().BeEmpty();
+        await act.Should().ThrowAsync<NotFoundException>()
+            .WithMessage("Chat session not found");
     }
 
     [Fact]
