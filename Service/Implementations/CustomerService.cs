@@ -8,6 +8,7 @@ using Domain.Exceptions;
 using Domain.ModelsSpecifications;
 using Domain.Responses;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Service.Helpers;
@@ -23,6 +24,7 @@ namespace Service.Implementations;
 public class CustomerService(
     IUnitOfWork unitOfWork
     , IMapper mapper
+    , ILogger<CustomerService> _logger
     , CustomerHelper customerHelper
     , ConversationContextManager conversationContextManager
     , IOptionsMonitor<AiOptions> options
@@ -166,7 +168,12 @@ public class CustomerService(
         // Stream detection to catch thoughts in real-time
         await foreach (var chunk in customerHelper.SendStreamRequestToGemini(detectionPrompt, useThinking: true))
         {
-            if (chunk.StartsWith("__MODEL__:"))
+            if (chunk.StartsWith("__FALLBACK__:"))
+            {
+                var provider = chunk.Substring(13).Trim();
+                yield return FormatSse("fallback", new { provider, message = "Switched to backup AI model" });
+            }
+            else if (chunk.StartsWith("__MODEL__:"))
             {
                 detectionModel = chunk.Substring(10).Trim();
                 yield return FormatSse("model", new { name = detectionModel });
@@ -216,10 +223,44 @@ public class CustomerService(
         var confidence = parsed?.confidence ?? 0;
         var aiResponse = parsed?.response;
         var toolArguments = parsed?.toolArguments;
+        var targetRole = parsed?.targetRole;
+        var followUpSuggestions = parsed?.followUpSuggestions;
+
+        // If we didn't get market data yet but now have a target role, try again
+        if (fetchedMarketInsight is null && !string.IsNullOrEmpty(targetRole))
+        {
+            string? retryMarketEvent = null;
+            try
+            {
+                var roleKeywords = new[] { targetRole }.Concat(marketKeywords).Distinct().Take(5).ToArray();
+                fetchedMarketInsight = await jobMarketService.GetMarketInsightsAsync(roleKeywords);
+                if (fetchedMarketInsight is not null)
+                {
+                    marketContext = fetchedMarketInsight.ToPromptContext();
+                    var topSkillsSummary = string.Join(", ", fetchedMarketInsight.TopRequiredSkills.Take(5));
+                    retryMarketEvent = FormatSse("tool", new
+                    {
+                        name = "MarketAnalysis",
+                        state = "end",
+                        summary = $"Analyzed {fetchedMarketInsight.TotalJobsAnalyzed} jobs for {targetRole}. Top skills: {topSkillsSummary}"
+                    });
+                }
+            }
+            catch { /* market data is optional */ }
+
+            if (retryMarketEvent is not null)
+                yield return retryMarketEvent;
+        }
 
         // --- End Intent Detection ---
 
-        yield return FormatSse("intent", new { name = interactionType.ToString(), confidence = confidence });
+        yield return FormatSse("intent", new
+        {
+            name = interactionType.ToString(),
+            confidence = confidence,
+            tags = toolArguments?.Tags,
+            targetRole = targetRole,
+        });
 
         if (interactionType == LLMInteractionType.ChatWithAI || interactionType == LLMInteractionType.ChooseMethod)
         {
@@ -231,7 +272,12 @@ public class CustomerService(
             {
                 await foreach (var chunk in customerHelper.SendStreamRequestToGemini(chatPrompt, useThinking: false))
                 {
-                    if (!chunk.StartsWith("__STATUS__") && !chunk.StartsWith("__MODEL__") && !chunk.StartsWith("__THINKING_CONTENT__"))
+                    if (chunk.StartsWith("__FALLBACK__:"))
+                    {
+                        var provider = chunk.Substring(13).Trim();
+                        yield return FormatSse("fallback", new { provider, message = "Switched to backup AI model" });
+                    }
+                    else if (!chunk.StartsWith("__STATUS__") && !chunk.StartsWith("__MODEL__") && !chunk.StartsWith("__THINKING_CONTENT__"))
                     {
                         yield return FormatSse("text", new { delta = chunk });
                         fullResponseBuilder.Append(chunk);
@@ -338,6 +384,11 @@ public class CustomerService(
             }
         }
 
+        if (followUpSuggestions is { Length: > 0 })
+        {
+            yield return FormatSse("suggestions", new { items = followUpSuggestions });
+        }
+
         yield return FormatSse("done", new { });
     }
 
@@ -358,7 +409,7 @@ public class CustomerService(
             await Task.WhenAll(contextTask, addMessageTask);
             var conversationContext = await contextTask;
 
-            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent) = await DetectIntentAsync(query, conversationContext.ToString());
+            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _) = await DetectIntentAsync(query, conversationContext.ToString());
 
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
@@ -408,7 +459,7 @@ public class CustomerService(
         }
     }
 
-    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent)> DetectIntentAsync(string query, string conversationContext)
+    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions)> DetectIntentAsync(string query, string conversationContext)
     {
         var prompts = options.CurrentValue.Prompts;
         var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
@@ -420,14 +471,14 @@ public class CustomerService(
             var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestToGemini(detectionPrompt, useThinking: true);
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
-                return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName, thinkingContent);
+                return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName, thinkingContent, parsed.Value.targetRole, parsed.Value.followUpSuggestions);
 
             // Fallback
-            return (LLMInteractionType.ChatWithAI, 0, null, null, modelName, thinkingContent);
+            return (LLMInteractionType.ChatWithAI, 0, null, null, modelName, thinkingContent, null, null);
         }
         catch
         {
-            return (LLMInteractionType.ChatWithAI, 0, null, null, "Unknown", null);
+            return (LLMInteractionType.ChatWithAI, 0, null, null, "Unknown", null, null, null);
         }
     }
 
@@ -439,7 +490,7 @@ public class CustomerService(
             query);
     }
 
-    private (LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments)? ParseCombinedResponse(string? responseText)
+    private (LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string? targetRole, string[]? followUpSuggestions)? ParseCombinedResponse(string? responseText)
     {
         if (string.IsNullOrWhiteSpace(responseText))
             return null;
@@ -455,6 +506,14 @@ public class CustomerService(
                 cleaned = cleaned[..^3];
             cleaned = cleaned.Trim();
 
+            // Try to extract just the JSON object (in case of trailing garbage)
+            var firstBrace = cleaned.IndexOf('{');
+            var lastBrace = cleaned.LastIndexOf('}');
+            if (firstBrace >= 0 && lastBrace > firstBrace)
+            {
+                cleaned = cleaned[firstBrace..(lastBrace + 1)];
+            }
+
             using var doc = JsonDocument.Parse(cleaned);
             var root = doc.RootElement;
 
@@ -468,14 +527,29 @@ public class CustomerService(
                 ? JsonSerializer.Deserialize<RoadmapRequestDTO>(argsProp.GetRawText())
                 : null;
 
+            var targetRole = root.TryGetProperty("target_role", out var roleProp) && roleProp.ValueKind == JsonValueKind.String
+                ? roleProp.GetString()
+                : null;
+
+            string[]? followUpSuggestions = null;
+            if (root.TryGetProperty("follow_up_suggestions", out var sugProp) && sugProp.ValueKind == JsonValueKind.Array)
+            {
+                followUpSuggestions = sugProp.EnumerateArray()
+                    .Where(e => e.ValueKind == JsonValueKind.String)
+                    .Select(e => e.GetString()!)
+                    .Take(3)
+                    .ToArray();
+            }
+
             if (!string.IsNullOrEmpty(intentStr) && Enum.TryParse<LLMInteractionType>(intentStr, true, out var intent))
             {
-                return (intent, Math.Clamp(confidence, 0, 100), response, toolArguments);
+                return (intent, Math.Clamp(confidence, 0, 100), response, toolArguments, targetRole, followUpSuggestions);
             }
         }
         catch (Exception ex)
         {
-            throw new BadRequestException($"Failed to parse AI response: {ex.Message}");
+            _logger.LogWarning(ex, "Failed to parse AI response, falling back to general chat. Raw: {ResponseText}", responseText?[..Math.Min(responseText.Length, 200)]);
+            return null;
         }
 
         return null;
