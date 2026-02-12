@@ -320,6 +320,7 @@ public class CustomerHelper
         // Fallback to OpenRouter
         if (useOpenRouter && !string.IsNullOrWhiteSpace(_llmApiKey))
         {
+            yield return "__FALLBACK__:openrouter";
             await foreach (var chunk in ExecuteOpenRouterStreamRequest(prompt, useThinking, cancellationToken))
             {
                 yield return chunk;
