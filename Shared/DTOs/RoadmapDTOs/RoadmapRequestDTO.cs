@@ -20,6 +20,9 @@ public class RoadmapRequestDTO
     [JsonPropertyName("sources")]
     public string[]? Sources { get; set; }
 
+    [JsonPropertyName("tag_checkpoints")]
+    public Dictionary<string, string[]>? TagCheckpoints { get; set; }
+
     [JsonPropertyName("job_id")]
     public string? JobId { get; set; }
 }
