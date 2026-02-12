@@ -19,8 +19,8 @@ public class ApiResponseMiddleware(RequestDelegate next, ILogger<ApiResponseMidd
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Bypass middleware for streaming endpoints (SSE)
-        if (context.Request.Path.StartsWithSegments("/api/User/ask-ai-with-intent"))
+        // Bypass middleware for streaming endpoints
+        if (context.Request.Path.StartsWithSegments("/api/User/ask-ai-with-intent/stream"))
         {
             await next.Invoke(context);
             return;
