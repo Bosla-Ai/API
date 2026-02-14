@@ -225,6 +225,7 @@ public class CustomerService(
         var toolArguments = parsed?.toolArguments;
         var targetRole = parsed?.targetRole;
         var followUpSuggestions = parsed?.followUpSuggestions;
+        var videoUrl = parsed?.videoUrl;
 
         // If we didn't get market data yet but now have a target role, try again
         if (fetchedMarketInsight is null && !string.IsNullOrEmpty(targetRole))
@@ -262,7 +263,16 @@ public class CustomerService(
             targetRole = targetRole,
         });
 
-        if (interactionType == LLMInteractionType.ChatWithAI || interactionType == LLMInteractionType.ChooseMethod)
+        if (interactionType == LLMInteractionType.TopicPreview && !string.IsNullOrEmpty(videoUrl))
+        {
+            var previewMessage = !string.IsNullOrEmpty(aiResponse) ? aiResponse : "Here's a quick look at this topic:";
+            yield return FormatSse("video", new { url = videoUrl, message = previewMessage });
+
+            await conversationContextManager
+                .AddMessageToContextAsync(userId, actualSessionId, $"{previewMessage}\n[Video: {videoUrl}]", "assistant");
+        }
+        else if (interactionType == LLMInteractionType.ChatWithAI || interactionType == LLMInteractionType.ChooseMethod
+                 || interactionType == LLMInteractionType.TopicPreview)
         {
             string chatPrompt = BuildChatPrompt(conversationContext.ToString(), query);
 
@@ -409,7 +419,7 @@ public class CustomerService(
             await Task.WhenAll(contextTask, addMessageTask);
             var conversationContext = await contextTask;
 
-            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _) = await DetectIntentAsync(query, conversationContext.ToString());
+            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl) = await DetectIntentAsync(query, conversationContext.ToString());
 
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
@@ -430,7 +440,8 @@ public class CustomerService(
                 Success = true,
                 Answer = !string.IsNullOrEmpty(aiResponse) ? aiResponse : null,
                 Thinking = !string.IsNullOrEmpty(thinkingContent),
-                ThinkingLog = thinkingContent
+                ThinkingLog = thinkingContent,
+                VideoUrl = interactionType == LLMInteractionType.TopicPreview ? videoUrl : null
             };
 
             if (!string.IsNullOrEmpty(response.Answer))
@@ -459,7 +470,7 @@ public class CustomerService(
         }
     }
 
-    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions)> DetectIntentAsync(string query, string conversationContext)
+    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl)> DetectIntentAsync(string query, string conversationContext)
     {
         var prompts = options.CurrentValue.Prompts;
         var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
@@ -471,14 +482,13 @@ public class CustomerService(
             var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestToGemini(detectionPrompt, useThinking: true);
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
-                return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName, thinkingContent, parsed.Value.targetRole, parsed.Value.followUpSuggestions);
+                return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName, thinkingContent, parsed.Value.targetRole, parsed.Value.followUpSuggestions, parsed.Value.videoUrl);
 
-            // Fallback
-            return (LLMInteractionType.ChatWithAI, 0, null, null, modelName, thinkingContent, null, null);
+            return (LLMInteractionType.ChatWithAI, 0, null, null, modelName, thinkingContent, null, null, null);
         }
         catch
         {
-            return (LLMInteractionType.ChatWithAI, 0, null, null, "Unknown", null, null, null);
+            return (LLMInteractionType.ChatWithAI, 0, null, null, "Unknown", null, null, null, null);
         }
     }
 
@@ -490,7 +500,7 @@ public class CustomerService(
             query);
     }
 
-    private (LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string? targetRole, string[]? followUpSuggestions)? ParseCombinedResponse(string? responseText)
+    private (LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string? targetRole, string[]? followUpSuggestions, string? videoUrl)? ParseCombinedResponse(string? responseText)
     {
         if (string.IsNullOrWhiteSpace(responseText))
             return null;
@@ -541,9 +551,13 @@ public class CustomerService(
                     .ToArray();
             }
 
+            var videoUrl = root.TryGetProperty("video_url", out var videoProp) && videoProp.ValueKind == JsonValueKind.String
+                ? videoProp.GetString()
+                : null;
+
             if (!string.IsNullOrEmpty(intentStr) && Enum.TryParse<LLMInteractionType>(intentStr, true, out var intent))
             {
-                return (intent, Math.Clamp(confidence, 0, 100), response, toolArguments, targetRole, followUpSuggestions);
+                return (intent, Math.Clamp(confidence, 0, 100), response, toolArguments, targetRole, followUpSuggestions, videoUrl);
             }
         }
         catch (Exception ex)
