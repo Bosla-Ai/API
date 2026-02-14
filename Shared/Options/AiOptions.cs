@@ -21,6 +21,7 @@ public class AiOptions
 public class PipelineApiOptions
 {
     public string BaseUrl { get; set; } = "http://localhost:7860/generate-roadmap";
+    public string VideoSearchUrl { get; set; } = "http://localhost:7860/search-embeddable-video";
 }
 
 public class GeminiOptions
