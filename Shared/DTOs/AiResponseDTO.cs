@@ -11,4 +11,5 @@ public class AiIntentDetectionResponse
     public bool Thinking { get; set; }
     public string? ThinkingLog { get; set; }
     public string? ErrorMessage { get; set; }
+    public string? VideoUrl { get; set; }
 }

@@ -7,4 +7,5 @@ public enum LLMInteractionType
     ChatWithAI,
     ChooseTrack,
     ChooseMethod,
+    TopicPreview,
 }
