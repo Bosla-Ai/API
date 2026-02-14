@@ -17,3 +17,8 @@ public class AiQueryResponse
 }
 
 public record AiRequestIdResponse(string RequestId);
+
+public class CancelChatRequest
+{
+    public string? PartialResponse { get; set; }
+}
