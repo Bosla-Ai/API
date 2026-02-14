@@ -50,7 +50,7 @@ public class UserController(
     }
 
     [HttpGet("ask-ai-with-intent/stream")]
-    public async Task StreamAIQuery([FromQuery] string requestId)
+    public async Task StreamAIQuery([FromQuery] string requestId, CancellationToken cancellationToken)
     {
         var (userId, request) = serviceManager.Customer.GetAiRequest(requestId);
 
@@ -62,17 +62,30 @@ public class UserController(
         try
         {
             await foreach (var chunk in serviceManager.Customer
-                .ProcessUserQueryStreamAsync(userId, request.Query!, request.SessionId))
+                .ProcessUserQueryStreamAsync(userId, request.Query!, request.SessionId, cancellationToken)
+                .WithCancellation(cancellationToken))
             {
-                await Response.WriteAsync($"{chunk}\n\n");
-                await Response.Body.FlushAsync();
+                await Response.WriteAsync($"{chunk}\n\n", cancellationToken);
+                await Response.Body.FlushAsync(cancellationToken);
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Client disconnected — frontend cancel endpoint handles cleanup & DB marker
+            logger.LogInformation("Client disconnected SSE stream for requestId: {RequestId}", requestId);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error streaming AI response for requestId: {RequestId}", requestId);
-            await Response.WriteAsync($"event: error\ndata: {{\"message\": \"An error occurred\"}}\n\n");
-            await Response.Body.FlushAsync();
+            try
+            {
+                await Response.WriteAsync($"event: error\ndata: {{\"message\": \"An error occurred\"}}\n\n");
+                await Response.Body.FlushAsync();
+            }
+            catch
+            {
+                // Client already disconnected
+            }
         }
     }
 
@@ -98,6 +111,14 @@ public class UserController(
     {
         var userId = GetUserId();
         var response = await serviceManager.ChatHistory.StartNewSessionAsync(userId);
+        return Ok(response);
+    }
+
+    [HttpPost("cancel-chat/{sessionId}")]
+    public async Task<ActionResult<APIResponse>> CancelChat(string sessionId, [FromBody] CancelChatRequest? request = null)
+    {
+        var userId = GetUserId();
+        var response = await serviceManager.ChatHistory.CancelRequestAsync(userId, sessionId, request?.PartialResponse);
         return Ok(response);
     }
 
