@@ -59,9 +59,9 @@ public class ChatHistoryService(
                 var firstUserMessage = messages
                     .LastOrDefault(m => m.Role == "user");
 
-                // Preview from latest assistant message, skipping [SYSTEM] prefixed ones
+                // Preview from latest assistant message, skipping [SYSTEM] and [CANCELLED] prefixed ones
                 var previewMessage = messages
-                    .FirstOrDefault(m => m.Role == "assistant" && !m.Message.StartsWith("[SYSTEM]"))
+                    .FirstOrDefault(m => m.Role == "assistant" && !m.Message.StartsWith("[SYSTEM]") && m.Message != "[CANCELLED]")
                     ?? latestMessage;
 
                 return new ChatSessionSummaryDTO
@@ -148,6 +148,44 @@ public class ChatHistoryService(
             deletedCount, maxAgeDays, renewalGraceDays);
 
         return deletedCount;
+    }
+
+    public async Task<APIResponse> CancelRequestAsync(string userId, string sessionId, string? partialResponse = null)
+    {
+        if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(sessionId))
+            throw new BadRequestException("Invalid user ID or session ID");
+
+        // If there was partial streamed text before cancellation, save it first
+        if (!string.IsNullOrEmpty(partialResponse))
+        {
+            await chatRepository.AddMessageAsync(new ChatMessageEntity
+            {
+                UserId = userId,
+                SessionId = sessionId,
+                Message = partialResponse,
+                Role = "assistant",
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+
+        // Save the cancellation marker
+        await chatRepository.AddMessageAsync(new ChatMessageEntity
+        {
+            UserId = userId,
+            SessionId = sessionId,
+            Message = "[CANCELLED]",
+            Role = "assistant",
+            CreatedAt = DateTime.UtcNow
+        });
+
+        logger.LogInformation(
+            "Chat request cancelled for session {SessionId}, user {UserId}. Partial text: {HasPartial}",
+            sessionId, userId, !string.IsNullOrEmpty(partialResponse));
+
+        return new APIResponse
+        {
+            StatusCode = HttpStatusCode.OK
+        };
     }
 
     private static string TruncatePreview(string message)
