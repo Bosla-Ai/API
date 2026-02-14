@@ -13,6 +13,9 @@ public class CourseConfigurations : IEntityTypeConfiguration<Course>
         // Unique Constraints
         builder.HasIndex(c => c.Url).IsUnique();
 
+        // Indexes
+        builder.HasIndex(c => new { c.Language, c.Platform });
+
         // Properties
         builder.Property(c => c.Title)
             .HasMaxLength(500)

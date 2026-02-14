@@ -10,6 +10,9 @@ public class RoadmapConfigurations : IEntityTypeConfiguration<Roadmap>
     {
         builder.HasKey(r => r.Id);
 
+        // Indexes
+        builder.HasIndex(r => new { r.CustomerId, r.CreatedAt });
+
         builder.Property(r => r.Title)
             .HasMaxLength(200)
             .IsRequired();

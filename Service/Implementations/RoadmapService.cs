@@ -216,7 +216,7 @@ public class RoadmapService : IRoadmapService
                         Duration = dto.Duration,
                         Rating = dto.Score > 5 ? 5.0 : dto.Score,
                         Platform = platformEnum,
-                        Language = ResourceLanguage.en, // Default
+                        Language = ResourceLanguage.en,
                         RetrievedAt = DateTime.UtcNow
                     };
 
@@ -230,7 +230,7 @@ public class RoadmapService : IRoadmapService
             {
                 Course = courseToLink,
                 Order = orderCounter++,
-                SectionName = platformName, // e.g. "Coursera"
+                SectionName = platformName,
                 IsCompleted = false
             };
 
