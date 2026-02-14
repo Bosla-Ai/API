@@ -13,5 +13,7 @@ public interface IChatHistoryService
 
     Task<APIResponse<int>> DeleteSessionAsync(string userId, string sessionId);
 
+    Task<APIResponse> CancelRequestAsync(string userId, string sessionId, string? partialResponse = null);
+
     Task<int> CleanInactiveChatsAsync(int maxAgeDays, int renewalGraceDays);
 }
