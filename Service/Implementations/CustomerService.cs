@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -60,7 +61,8 @@ public class CustomerService(
         };
     }
 
-    public async IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null)
+    public async IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userId))
             throw new BadRequestException("User ID is required");
@@ -97,6 +99,7 @@ public class CustomerService(
             try
             {
                 fetchedMarketInsight = await jobMarketService.GetMarketInsightsAsync(marketKeywords);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (fetchedMarketInsight is not null)
                 {
                     marketContext = fetchedMarketInsight.ToPromptContext();
@@ -167,7 +170,7 @@ public class CustomerService(
         bool titleExtracted = false;
 
         // Stream detection to catch thoughts in real-time
-        await foreach (var chunk in customerHelper.SendStreamRequestToGemini(detectionPrompt, useThinking: true))
+        await foreach (var chunk in customerHelper.SendStreamRequestToGemini(detectionPrompt, useThinking: true, cancellationToken: cancellationToken))
         {
             if (chunk.StartsWith("__FALLBACK__:"))
             {
@@ -236,8 +239,7 @@ public class CustomerService(
             try
             {
                 var roleKeywords = new[] { targetRole }.Concat(marketKeywords).Distinct().Take(5).ToArray();
-                fetchedMarketInsight = await jobMarketService.GetMarketInsightsAsync(roleKeywords);
-                if (fetchedMarketInsight is not null)
+                fetchedMarketInsight = await jobMarketService.GetMarketInsightsAsync(roleKeywords); cancellationToken.ThrowIfCancellationRequested(); if (fetchedMarketInsight is not null)
                 {
                     marketContext = fetchedMarketInsight.ToPromptContext();
                     var topSkillsSummary = string.Join(", ", fetchedMarketInsight.TopRequiredSkills.Take(5));
@@ -282,7 +284,7 @@ public class CustomerService(
 
                 var encodedQuery = Uri.EscapeDataString(searchTerm);
                 var url = $"{pipelineVideoSearchUrl}?q={encodedQuery}&lang=en";
-                var response = await client.GetAsync(url);
+                var response = await client.GetAsync(url, cancellationToken);
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -328,7 +330,7 @@ public class CustomerService(
 
             try
             {
-                await foreach (var chunk in customerHelper.SendStreamRequestToGemini(chatPrompt, useThinking: false))
+                await foreach (var chunk in customerHelper.SendStreamRequestToGemini(chatPrompt, useThinking: false, cancellationToken: cancellationToken))
                 {
                     if (chunk.StartsWith("__FALLBACK__:"))
                     {
@@ -344,7 +346,7 @@ public class CustomerService(
             }
             finally
             {
-                if (!string.IsNullOrEmpty(fullResponseBuilder.ToString()))
+                if (!cancellationToken.IsCancellationRequested && !string.IsNullOrEmpty(fullResponseBuilder.ToString()))
                 {
                     await conversationContextManager
                         .AddMessageToContextAsync(userId, actualSessionId, fullResponseBuilder.ToString(), "assistant");
@@ -401,7 +403,7 @@ public class CustomerService(
 
                 yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "processing" });
 
-                var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments!);
+                var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments!, cancellationToken);
                 finalResponse = $"[SYSTEM]: Roadmap generated successfully.\nDetails: {apiResponse}";
 
                 object? resultData = null;
@@ -436,7 +438,7 @@ public class CustomerService(
                 yield return FormatSse("text", new { delta = finalResponse });
             }
 
-            if (!string.IsNullOrEmpty(finalResponse))
+            if (!cancellationToken.IsCancellationRequested && !string.IsNullOrEmpty(finalResponse))
             {
                 await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, finalResponse, "assistant");
             }
@@ -621,7 +623,7 @@ public class CustomerService(
     }
 
 
-    private async Task<string> ExecuteRoadmapGenerationAsync(RoadmapRequestDTO requestData)
+    private async Task<string> ExecuteRoadmapGenerationAsync(RoadmapRequestDTO requestData, CancellationToken cancellationToken = default)
     {
         string apiUrl = options.CurrentValue.PipelineApi.BaseUrl;
 
@@ -633,7 +635,7 @@ public class CustomerService(
 
         try
         {
-            var response = await client.PostAsync(apiUrl, httpContent);
+            var response = await client.PostAsync(apiUrl, httpContent, cancellationToken);
 
             if (response.IsSuccessStatusCode)
             {
