@@ -32,7 +32,7 @@ public class GenericRepository<TEntity, TKey> : IGenericRepository<TEntity, TKey
 
     public async Task<IEnumerable<TEntity>> GetAllAsync(Specifications<TEntity> specification = null)
     {
-        IQueryable<TEntity> query = _dbSet;
+        IQueryable<TEntity> query = _dbSet.AsNoTracking();
         if (specification != null)
         {
             query = SpecificationsEvaluator.GetQuery(query, specification)!;
@@ -58,7 +58,7 @@ public class GenericRepository<TEntity, TKey> : IGenericRepository<TEntity, TKey
     }
     public async Task<int> CountAsync(Specifications<TEntity> specification = null)
     {
-        IQueryable<TEntity> query = _dbSet;
+        IQueryable<TEntity> query = _dbSet.AsNoTracking();
         if (specification is not null)
         {
             query = SpecificationsEvaluator.GetQuery(query, specification)!;
@@ -70,7 +70,7 @@ public class GenericRepository<TEntity, TKey> : IGenericRepository<TEntity, TKey
         Specifications<TEntity> specification
         , Expression<Func<TEntity, TProperty>> selector)
     {
-        IQueryable<TEntity> query = _dbSet;
+        IQueryable<TEntity> query = _dbSet.AsNoTracking();
         if (specification != null)
         {
             query = SpecificationsEvaluator.GetQuery(query, specification)!;

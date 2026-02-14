@@ -11,6 +11,9 @@ public class CourseTagConfigurations : IEntityTypeConfiguration<CourseTag>
 
         builder.HasKey(ct => new { ct.CourseId, ct.TagId });
 
+        // Indexes
+        builder.HasIndex(ct => ct.TagId);
+
         // Relationships
         builder.HasOne(ct => ct.Course)
             .WithMany(c => c.CourseTags)
