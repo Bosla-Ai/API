@@ -27,34 +27,41 @@ public class JobMarketService(
 
         var opts = _options.CurrentValue;
         var country = region ?? opts.DefaultCountry;
-        var searchQuery = BuildSearchQuery(tags);
-        var cacheKey = $"{country}:{searchQuery}".ToLowerInvariant();
 
-        // Check cache
-        if (_cache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAt > DateTime.UtcNow)
+        var perTagResults = new List<MarketInsightDTO>();
+
+        foreach (var tag in tags)
         {
-            _logger.LogDebug("Market cache hit for '{Key}'", cacheKey);
-            return cached.Data;
-        }
+            var searchQuery = BuildSearchQuery(tag);
+            var cacheKey = $"{country}:{searchQuery}".ToLowerInvariant();
 
-        // Fetch from Adzuna
-        try
-        {
-            var insight = await FetchFromAdzunaAsync(searchQuery, country, opts);
-
-            if (insight is not null)
+            if (_cache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAt > DateTime.UtcNow)
             {
-                EvictIfNeeded(opts.MaxCacheEntries);
-                _cache[cacheKey] = (DateTime.UtcNow.AddMinutes(opts.CacheMinutes), insight);
+                _logger.LogDebug("Market cache hit for '{Key}'", cacheKey);
+                perTagResults.Add(cached.Data);
+                continue;
             }
 
-            return insight;
+            try
+            {
+                var insight = await FetchFromAdzunaAsync(searchQuery, country, opts);
+                if (insight is not null)
+                {
+                    EvictIfNeeded(opts.MaxCacheEntries);
+                    _cache[cacheKey] = (DateTime.UtcNow.AddMinutes(opts.CacheMinutes), insight);
+                    perTagResults.Add(insight);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Adzuna API call failed for tag '{Tag}'. Skipping.", tag);
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Adzuna API call failed for query '{Query}'. Proceeding without market data.", searchQuery);
+
+        if (perTagResults.Count == 0)
             return null;
-        }
+
+        return AggregateInsights(perTagResults, tags);
     }
 
     public CareerPulseDTO? CalculateReadiness(string[] userSkills, MarketInsightDTO marketInsight)
@@ -262,17 +269,81 @@ public class JobMarketService(
         return insight;
     }
 
-    private static string BuildSearchQuery(string[] tags)
+    private static string BuildSearchQuery(string tag)
     {
-        var combined = string.Join(" ", tags);
-
         var roleKeywords = new[] { "developer", "engineer", "architect", "designer", "analyst", "manager", "devops", "sre", "lead" };
-        if (!roleKeywords.Any(r => combined.Contains(r, StringComparison.OrdinalIgnoreCase)))
+        if (!roleKeywords.Any(r => tag.Contains(r, StringComparison.OrdinalIgnoreCase)))
         {
-            combined += " developer";
+            return $"{tag} developer";
         }
 
-        return combined;
+        return tag;
+    }
+
+    private static MarketInsightDTO AggregateInsights(List<MarketInsightDTO> results, string[] originalTags)
+    {
+        var mergedSkills = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var mergedTitles = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        int totalJobs = 0;
+        decimal salaryMin = decimal.MaxValue, salaryMax = 0;
+        var salaryValues = new List<decimal>();
+        string? currency = null;
+
+        foreach (var result in results)
+        {
+            totalJobs += result.TotalJobsAnalyzed;
+
+            foreach (var (skill, count) in result.SkillFrequency)
+                mergedSkills[skill] = mergedSkills.GetValueOrDefault(skill, 0) + count;
+
+            foreach (var title in result.CommonJobTitles)
+                mergedTitles[title] = mergedTitles.GetValueOrDefault(title, 0) + 1;
+
+            if (result.Salary is not null)
+            {
+                currency ??= result.Salary.Currency;
+                if (result.Salary.Min > 0 && result.Salary.Min < salaryMin)
+                    salaryMin = result.Salary.Min;
+                if (result.Salary.Max > salaryMax)
+                    salaryMax = result.Salary.Max;
+                salaryValues.Add(result.Salary.Median);
+            }
+        }
+
+        SalaryRange? salary = null;
+        if (salaryValues.Count > 0)
+        {
+            salaryValues.Sort();
+            salary = new SalaryRange
+            {
+                Min = salaryMin == decimal.MaxValue ? 0 : salaryMin,
+                Max = salaryMax,
+                Median = salaryValues[salaryValues.Count / 2],
+                Currency = currency ?? "£"
+            };
+        }
+
+        return new MarketInsightDTO
+        {
+            TopRequiredSkills = mergedSkills
+                .OrderByDescending(kv => kv.Value)
+                .Take(15)
+                .Select(kv => kv.Key)
+                .ToArray(),
+            CommonJobTitles = mergedTitles
+                .OrderByDescending(kv => kv.Value)
+                .Take(5)
+                .Select(kv => kv.Key)
+                .ToArray(),
+            SkillFrequency = mergedSkills
+                .OrderByDescending(kv => kv.Value)
+                .Take(20)
+                .ToDictionary(kv => kv.Key, kv => kv.Value),
+            TotalJobsAnalyzed = totalJobs,
+            Region = results[0].Region,
+            SearchQuery = string.Join(", ", originalTags),
+            Salary = salary
+        };
     }
 
 
