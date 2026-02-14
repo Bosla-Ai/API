@@ -165,7 +165,7 @@ public class JobMarketService(
             return null;
         }
 
-        var json = await response.Content.ReadAsStringAsync();
+        var json = System.Text.Encoding.UTF8.GetString(await response.Content.ReadAsByteArrayAsync());
         var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
