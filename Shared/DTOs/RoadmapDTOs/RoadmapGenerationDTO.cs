@@ -9,4 +9,7 @@ public class RoadmapGenerationDTO
 
     [JsonPropertyName("data")]
     public RoadmapSourcesDTO Data { get; set; } = new();
+
+    [JsonPropertyName("learning_path")]
+    public LearningPathDTO? LearningPath { get; set; }
 }

@@ -160,28 +160,13 @@ public class RoadmapService(
 
         await _unitOfWork.GetRepo<Roadmap, int>().CreateAsync(roadmap);
 
-        var allItems = new List<(RoadmapItemDTO Item, string Platform)>();
-
-        if (request.RoadmapData.Data.Udemy != null)
-            allItems.AddRange(request.RoadmapData.Data.Udemy.Values
-                .Where(x => x != null)
-                .Select(x => (x!, "Udemy")));
-
-        if (request.RoadmapData.Data.Coursera != null)
-            allItems.AddRange(request.RoadmapData.Data.Coursera.Values
-                .Where(x => x != null)
-                .Select(x => (x!, "Coursera")));
-
-        if (request.RoadmapData.Data.Youtube != null)
-            allItems.AddRange(request.RoadmapData.Data.Youtube.Values
-                .Where(x => x != null)
-                .Select(x => (x!, "Youtube")));
+        var allItems = CollectAllItems(request.RoadmapData);
+        var orderedItems = OrderByLearningPath(allItems, request.RoadmapData.LearningPath);
 
         int orderCounter = 1;
-
         var processedCourses = new Dictionary<string, Course>();
 
-        foreach (var (dto, platformName) in allItems)
+        foreach (var (dto, sectionName) in orderedItems)
         {
             if (!processedCourses.TryGetValue(dto.Url, out var courseToLink))
             {
@@ -194,7 +179,7 @@ public class RoadmapService(
                 }
                 else
                 {
-                    Enum.TryParse<Platforms>(platformName, true, out var platformEnum);
+                    Enum.TryParse<Platforms>(dto.Platform ?? sectionName, true, out var platformEnum);
 
                     courseToLink = new Course
                     {
@@ -219,7 +204,7 @@ public class RoadmapService(
             {
                 Course = courseToLink,
                 Order = orderCounter++,
-                SectionName = platformName,
+                SectionName = sectionName,
                 IsCompleted = false
             };
 
@@ -247,5 +232,71 @@ public class RoadmapService(
         {
             StatusCode = HttpStatusCode.OK,
         };
+    }
+
+    private static List<(RoadmapItemDTO Item, string Platform, string TagKey)> CollectAllItems(RoadmapGenerationDTO roadmapData)
+    {
+        var items = new List<(RoadmapItemDTO, string, string)>();
+
+        AddPlatformItems(items, roadmapData.Data.Udemy, "Udemy");
+        AddPlatformItems(items, roadmapData.Data.Coursera, "Coursera");
+        AddPlatformItems(items, roadmapData.Data.Youtube, "Youtube");
+
+        return items;
+    }
+
+    private static void AddPlatformItems(
+        List<(RoadmapItemDTO, string, string)> target,
+        Dictionary<string, RoadmapItemDTO?>? source,
+        string platformName)
+    {
+        if (source == null) return;
+
+        foreach (var (tagKey, item) in source)
+        {
+            if (item != null)
+                target.Add((item, platformName, tagKey));
+        }
+    }
+
+    private static List<(RoadmapItemDTO Item, string SectionName)> OrderByLearningPath(
+        List<(RoadmapItemDTO Item, string Platform, string TagKey)> allItems,
+        LearningPathDTO? learningPath)
+    {
+        if (learningPath?.Phases == null || learningPath.Phases.Count == 0)
+            return allItems.Select(x => (x.Item, x.Platform)).ToList();
+
+        // Build tag→position from the learning path's sorted phases
+        var tagOrder = new Dictionary<string, (int Order, string PhaseName)>(StringComparer.OrdinalIgnoreCase);
+        int position = 0;
+        foreach (var phase in learningPath.Phases)
+        {
+            foreach (var tagInfo in phase.Tags)
+            {
+                if (!tagOrder.ContainsKey(tagInfo.Tag))
+                    tagOrder[tagInfo.Tag] = (position++, phase.Name);
+            }
+        }
+
+        int fallbackOrder = position;
+
+        return allItems
+            .Select(x =>
+            {
+                string sectionName = x.Platform;
+                int order = fallbackOrder++;
+
+                // Match by exact dictionary key (tag name from Pipeline)
+                if (tagOrder.TryGetValue(x.TagKey, out var info))
+                {
+                    order = info.Order;
+                    sectionName = info.PhaseName;
+                }
+
+                return (x.Item, SectionName: sectionName, Order: order);
+            })
+            .OrderBy(x => x.Order)
+            .Select(x => (x.Item, x.SectionName))
+            .ToList();
     }
 }
