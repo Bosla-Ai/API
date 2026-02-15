@@ -10,8 +10,9 @@ fi
 echo "[Bosla] Running dotnet format on staged files..."
 
 # Run dotnet format using the rules in .editorconfig
-# We use --include to only format staged files for better performance
-dotnet format --include $staged_files
+# We use 'style' to ensure unused usings and redundant qualifiers are removed.
+dotnet format style --severity info --include $staged_files
+dotnet format whitespace --include $staged_files
 
 # Check if dotnet format succeeded
 if [ $? -ne 0 ]; then
