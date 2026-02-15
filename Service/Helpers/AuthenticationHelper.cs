@@ -125,6 +125,7 @@ public class AuthenticationHelper(
             RefreshTokenExpiration = refreshEntity.ExpiresAt,
             FirstName = user.FirstName,
             LastName = user.LastName,
+            ProfilePictureUrl = user.ProfilePictureUrl,
             UserName = user.UserName!,
             Email = user.Email!,
             Role = roles.FirstOrDefault() ?? "",

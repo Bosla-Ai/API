@@ -17,6 +17,9 @@ public static class IdentityExtensions
                 options.Password.RequireNonAlphanumeric = true;
                 options.Password.RequiredLength = 8;
 
+                // Enforce unique emails at the Identity level
+                options.User.RequireUniqueEmail = true;
+
                 // Account lockout settings to prevent brute force attacks
                 // After 5 failed attempts, the account is locked for 15 minutes
                 options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);

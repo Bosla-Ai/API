@@ -38,6 +38,7 @@ public class AuthenticationController(
         {
             FirstName = response.FirstName,
             LastName = response.LastName,
+            ProfilePictureUrl = response.ProfilePictureUrl,
             UserName = response.UserName,
             Email = response.Email,
             Role = response.Role ?? StaticData.CustomerRoleName

@@ -42,11 +42,22 @@ public class AuthenticationService(
         var externalId = principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         var email = principal?.FindFirst(ClaimTypes.Email)?.Value;
         var name = principal?.FindFirst(ClaimTypes.Name)?.Value;
+        var firstName = principal?.FindFirst(ClaimTypes.GivenName)?.Value;
+        var lastName = principal?.FindFirst(ClaimTypes.Surname)?.Value;
+        var pictureUrl = principal?.FindFirst("picture")?.Value;
 
         if (string.IsNullOrWhiteSpace(externalId))
             throw new BadRequestException("LinkedIn did not return an identifier.");
         if (string.IsNullOrWhiteSpace(email))
             throw new BadRequestException("Email not received from LinkedIn provider.");
+
+        // If GivenName/Surname not available, split the full Name claim
+        if (string.IsNullOrWhiteSpace(firstName) && !string.IsNullOrWhiteSpace(name))
+        {
+            var parts = name.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            firstName = parts[0];
+            lastName = parts.Length > 1 ? parts[1] : lastName;
+        }
 
         var user = await userManager.FindByEmailAsync(email);
         if (user == null)
@@ -55,7 +66,9 @@ public class AuthenticationService(
             {
                 UserName = email,
                 Email = email,
-                FirstName = string.IsNullOrWhiteSpace(name) ? "LinkedIn User" : name,
+                FirstName = firstName ?? (string.IsNullOrWhiteSpace(name) ? "LinkedIn User" : name),
+                LastName = lastName,
+                ProfilePictureUrl = pictureUrl,
                 EmailConfirmed = true
             };
 
@@ -63,8 +76,32 @@ public class AuthenticationService(
             if (!createRes.Succeeded)
                 throw new BadRequestException(createRes.Errors.Select(e => e.Description).First());
 
+            await AssignUserToRoleAsync(user, StaticData.CustomerRoleName);
+
             var customer = new Customer { ApplicationUserId = user.Id };
             await customerService.CreateAsync(customer);
+        }
+        else
+        {
+            // Update profile info from provider if missing
+            var updated = false;
+            if (string.IsNullOrWhiteSpace(user.FirstName) || user.FirstName == "Unknown" || user.FirstName == "LinkedIn User")
+            {
+                user.FirstName = firstName ?? name ?? user.FirstName;
+                updated = true;
+            }
+            if (string.IsNullOrWhiteSpace(user.LastName) && !string.IsNullOrWhiteSpace(lastName))
+            {
+                user.LastName = lastName;
+                updated = true;
+            }
+            if (string.IsNullOrWhiteSpace(user.ProfilePictureUrl) && !string.IsNullOrWhiteSpace(pictureUrl))
+            {
+                user.ProfilePictureUrl = pictureUrl;
+                updated = true;
+            }
+            if (updated)
+                await userManager.UpdateAsync(user);
         }
 
         var alreadyLinked = await IsLoginLinkedAsync(user.Id, provider, externalId);
@@ -91,12 +128,23 @@ public class AuthenticationService(
         var email = principal?.FindFirst(ClaimTypes.Email)?.Value;
         var name = principal?.FindFirst(ClaimTypes.Name)?.Value ??
                    principal?.FindFirst("urn:github:login")?.Value;
+        var pictureUrl = principal?.FindFirst("urn:github:avatar")?.Value;
 
         if (string.IsNullOrWhiteSpace(externalId))
             throw new BadRequestException("GitHub did not return an identifier.");
 
         if (string.IsNullOrWhiteSpace(email))
             throw new BadRequestException("Email not received from GitHub provider.");
+
+        // Split the full name into first/last
+        string? firstName = null;
+        string? lastName = null;
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            var parts = name.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            firstName = parts[0];
+            lastName = parts.Length > 1 ? parts[1] : null;
+        }
 
         var user = await userManager.FindByEmailAsync(email);
         if (user == null)
@@ -105,7 +153,9 @@ public class AuthenticationService(
             {
                 UserName = email,
                 Email = email,
-                FirstName = name ?? "GitHub User",
+                FirstName = firstName ?? "GitHub User",
+                LastName = lastName,
+                ProfilePictureUrl = pictureUrl,
                 EmailConfirmed = true
             };
 
@@ -114,11 +164,35 @@ public class AuthenticationService(
             if (!createRes.Succeeded)
                 throw new BadRequestException(createRes.Errors.Select(e => e.Description).FirstOrDefault()!);
 
+            await AssignUserToRoleAsync(user, StaticData.CustomerRoleName);
+
             var customer = new Customer()
             {
                 ApplicationUserId = user.Id,
             };
             await customerService.CreateAsync(customer);
+        }
+        else
+        {
+            // Update profile info from provider if missing
+            var updated = false;
+            if (string.IsNullOrWhiteSpace(user.FirstName) || user.FirstName == "Unknown" || user.FirstName == "GitHub User")
+            {
+                user.FirstName = firstName ?? user.FirstName;
+                updated = true;
+            }
+            if (string.IsNullOrWhiteSpace(user.LastName) && !string.IsNullOrWhiteSpace(lastName))
+            {
+                user.LastName = lastName;
+                updated = true;
+            }
+            if (string.IsNullOrWhiteSpace(user.ProfilePictureUrl) && !string.IsNullOrWhiteSpace(pictureUrl))
+            {
+                user.ProfilePictureUrl = pictureUrl;
+                updated = true;
+            }
+            if (updated)
+                await userManager.UpdateAsync(user);
         }
 
         var loginInfo = new UserLoginInfo(provider, externalId, provider);
@@ -353,12 +427,24 @@ public class AuthenticationService(
     {
         var externalId = principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         var email = principal?.FindFirst(ClaimTypes.Email)?.Value;
+        var firstName = principal?.FindFirst(ClaimTypes.GivenName)?.Value;
+        var lastName = principal?.FindFirst(ClaimTypes.Surname)?.Value;
+        var name = principal?.FindFirst(ClaimTypes.Name)?.Value;
+        var pictureUrl = principal?.FindFirst("picture")?.Value;
 
         if (string.IsNullOrWhiteSpace(externalId))
             throw new BadRequestException("Provider did not return an identifier.");
 
         if (string.IsNullOrWhiteSpace(email))
             throw new BadRequestException("Email not received from external provider.");
+
+        // If GivenName/Surname not available, split the full Name claim
+        if (string.IsNullOrWhiteSpace(firstName) && !string.IsNullOrWhiteSpace(name))
+        {
+            var parts = name.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            firstName = parts[0];
+            lastName = parts.Length > 1 ? parts[1] : null;
+        }
 
         var user = await userManager.FindByEmailAsync(email);
         if (user == null)
@@ -367,7 +453,9 @@ public class AuthenticationService(
             {
                 UserName = email,
                 Email = email,
-                FirstName = "Unknown",
+                FirstName = firstName ?? "Google User",
+                LastName = lastName,
+                ProfilePictureUrl = pictureUrl,
                 EmailConfirmed = true
             };
 
@@ -376,11 +464,35 @@ public class AuthenticationService(
             if (!createRes.Succeeded)
                 throw new BadRequestException(createRes.Errors.Select(e => e.Description).FirstOrDefault()!);
 
+            await AssignUserToRoleAsync(user, StaticData.CustomerRoleName);
+
             var customer = new Customer()
             {
                 ApplicationUserId = user.Id,
             };
             await customerService.CreateAsync(customer);
+        }
+        else
+        {
+            // Update profile info from provider if missing
+            var updated = false;
+            if (string.IsNullOrWhiteSpace(user.FirstName) || user.FirstName == "Unknown" || user.FirstName == "Google User")
+            {
+                user.FirstName = firstName ?? user.FirstName;
+                updated = true;
+            }
+            if (string.IsNullOrWhiteSpace(user.LastName) && !string.IsNullOrWhiteSpace(lastName))
+            {
+                user.LastName = lastName;
+                updated = true;
+            }
+            if (string.IsNullOrWhiteSpace(user.ProfilePictureUrl) && !string.IsNullOrWhiteSpace(pictureUrl))
+            {
+                user.ProfilePictureUrl = pictureUrl;
+                updated = true;
+            }
+            if (updated)
+                await userManager.UpdateAsync(user);
         }
 
         var loginInfo = new UserLoginInfo(provider, externalId, provider);
@@ -393,9 +505,6 @@ public class AuthenticationService(
             var addLoginResult = await AddLoginAsync(user, loginInfo);
             if (!addLoginResult.Succeeded)
                 throw new BadRequestException(addLoginResult.Errors.First().Description);
-
-            if (addLoginResult is IdentityResult identityResult && !identityResult.Succeeded)
-                throw new BadRequestException(identityResult.Errors.First().Description);
         }
 
         var loginResponse = await accountHelper
