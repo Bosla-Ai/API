@@ -3,10 +3,6 @@ using Domain.Entities;
 
 namespace Domain.ModelsSpecifications.Administration.DomainSpecifications;
 
-public class DomainByIdSpecifications : Specifications<Domains>
+public class DomainByIdSpecifications(int id) : Specifications<Domains>(d => d.Id == id)
 {
-    public DomainByIdSpecifications(int id)
-        : base(d => d.Id == id)
-    {
-    }
 }

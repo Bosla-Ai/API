@@ -392,7 +392,7 @@ public class CustomerHelper
                             if (string.IsNullOrWhiteSpace(line)) continue;
                             if (!line.StartsWith("data: ")) continue;
 
-                            var data = line.Substring(6).Trim();
+                            var data = line[6..].Trim();
                             if (data == "[DONE]") break; // Only if Gemini sends this, usually standard SSE just ends
 
                             try
@@ -437,7 +437,7 @@ public class CustomerHelper
 
                                                     if (bufferLine.TrimStart().StartsWith(">>>"))
                                                     {
-                                                        var cleanLine = bufferLine.TrimStart().Substring(3).Trim();
+                                                        var cleanLine = bufferLine.TrimStart()[3..].Trim();
                                                         await channel.Writer.WriteAsync($"__STATUS__:{cleanLine}", cancellationToken);
                                                     }
                                                     else
@@ -463,7 +463,7 @@ public class CustomerHelper
                             var bufferLine = lineBuffer.ToString();
                             if (bufferLine.TrimStart().StartsWith(">>>"))
                             {
-                                await channel.Writer.WriteAsync($"__STATUS__:{bufferLine.TrimStart().Substring(3).Trim()}", cancellationToken);
+                                await channel.Writer.WriteAsync($"__STATUS__:{bufferLine.TrimStart()[3..].Trim()}", cancellationToken);
                             }
                             else
                             {
@@ -567,7 +567,7 @@ public class CustomerHelper
 
                     if (!line.StartsWith("data: ")) continue;
 
-                    var jsonData = line.Substring(6);
+                    var jsonData = line[6..];
                     if (jsonData == "[DONE]") break;
 
                     try
@@ -595,7 +595,7 @@ public class CustomerHelper
 
                                 if (bufferLine.TrimStart().StartsWith(">>>"))
                                 {
-                                    var cleanLine = bufferLine.TrimStart().Substring(3).Trim();
+                                    var cleanLine = bufferLine.TrimStart()[3..].Trim();
                                     await channel.Writer.WriteAsync($"__STATUS__:{cleanLine}", cancellationToken);
                                 }
                                 else
@@ -621,7 +621,7 @@ public class CustomerHelper
                     var bufferLine = lineBuffer.ToString();
                     if (bufferLine.TrimStart().StartsWith(">>>"))
                     {
-                        await channel.Writer.WriteAsync($"__STATUS__:{bufferLine.TrimStart().Substring(3).Trim()}", cancellationToken);
+                        await channel.Writer.WriteAsync($"__STATUS__:{bufferLine.TrimStart()[3..].Trim()}", cancellationToken);
                     }
                     else
                     {
@@ -662,7 +662,7 @@ Conversation:
 
 Provide a clear, factual summary:";
 
-        var result = await SendRequestToGemini(prompt, useThinking: false);
-        return result.Response;
+        var (Response, ModelName, ThinkingContent) = await SendRequestToGemini(prompt, useThinking: false);
+        return Response;
     }
 }

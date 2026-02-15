@@ -36,7 +36,7 @@ public class UserService(IUnitOfWork unitOfWork) : IUserService
                     Description = row.DomainDescription,
                     IconUrl = row.DomainIconUrl,
                     IsActive = row.DomainIsActive,
-                    Tracks = new List<DashboardTrackDTO>()
+                    Tracks = []
                 };
                 domains[row.DomainId] = domain;
             }
@@ -55,7 +55,7 @@ public class UserService(IUnitOfWork unitOfWork) : IUserService
                     IconUrl = row.TrackIconUrl ?? "",
                     IsActive = row.TrackIsActive ?? true,
                     FixedTagsPayload = row.FixedTagsPayload ?? "",
-                    Sections = new List<DashboardTrackSectionDTO>()
+                    Sections = []
                 };
                 domain.Tracks.Add(track);
             }
@@ -72,7 +72,7 @@ public class UserService(IUnitOfWork unitOfWork) : IUserService
                     Title = row.SectionTitle ?? "",
                     IsMultiSelect = row.IsMultiSelect ?? false,
                     OrderIndex = row.OrderIndex ?? 0,
-                    Choices = new List<DashboardTrackChoiceDTO>()
+                    Choices = []
                 };
                 track.Sections.Add(section);
             }

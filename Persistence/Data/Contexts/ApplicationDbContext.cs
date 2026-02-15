@@ -11,13 +11,8 @@ using Shared.DTOs.DashboardDTOs;
 namespace Persistence.Data.Contexts;
 
 
-public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
+public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> context) : IdentityDbContext<ApplicationUser>(context)
 {
-    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> context) : base(context)
-    {
-
-    }
-
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());

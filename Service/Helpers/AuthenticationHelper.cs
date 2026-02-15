@@ -59,10 +59,10 @@ public class AuthenticationHelper(
     {
         var claims = new List<Claim>()
         {
-            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Name, user.UserName!),
-            new Claim(ClaimTypes.Email, user.Email!),
-            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Name, user.UserName!),
+            new(ClaimTypes.Email, user.Email!),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
         foreach (var role in roles)
@@ -90,7 +90,7 @@ public class AuthenticationHelper(
 
     public List<string> AddIdentityErrors(IdentityResult result)
     {
-        return result.Errors.Select(e => e.Description).ToList();
+        return [.. result.Errors.Select(e => e.Description)];
     }
 
     public async Task<LoginServerResponse>

@@ -6,16 +6,11 @@ using Shared.DTOs.DashboardDTOs;
 
 namespace Persistence.Repositories;
 
-public class UnitOfWork : IUnitOfWork
+public class UnitOfWork(ApplicationDbContext context) : IUnitOfWork
 {
-    private readonly ApplicationDbContext _context;
-    public ConcurrentDictionary<string, object> _repositories;
+    private readonly ApplicationDbContext _context = context;
+    public ConcurrentDictionary<string, object> _repositories = new ConcurrentDictionary<string, object>();
 
-    public UnitOfWork(ApplicationDbContext context)
-    {
-        _context = context;
-        _repositories = new ConcurrentDictionary<string, object>();
-    }
     public async Task<int> SaveChangesAsync()
     {
         return await _context.SaveChangesAsync();

@@ -4,10 +4,6 @@ using Domain.Entities;
 
 namespace Domain.ModelsSpecifications.Administration.TrackSpecifications;
 
-public class TracksByDomainIdSpecification : Specifications<Track>
+public class TracksByDomainIdSpecification(int domainId) : Specifications<Track>(t => t.DomainId == domainId)
 {
-    public TracksByDomainIdSpecification(int domainId)
-        : base(t => t.DomainId == domainId)
-    {
-    }
 }

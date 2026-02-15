@@ -7,7 +7,7 @@ public class AiRequestStore
 {
     private readonly ConcurrentDictionary<string, RequestEntry> _requests = new();
     private readonly TimeSpan _ttl = TimeSpan.FromSeconds(60);
-    private readonly object _cleanupLock = new();
+    private readonly Lock _cleanupLock = new();
     private DateTime _lastCleanup = DateTime.UtcNow;
     private readonly TimeSpan _cleanupInterval = TimeSpan.FromSeconds(30);
 

@@ -23,10 +23,7 @@ public class AdministrationService(
     public async Task<APIResponse<IEnumerable<DomainsDTO>>> GetDomainsAsync(bool isActive)
     {
         var spec = new DomainsIsActiveSpecifications(isActive);
-        var domains = await unitOfWork.GetRepo<Domains, int>().GetAllAsync(spec);
-        if (domains == null)
-            throw new NotFoundException("No Domains Exit Right Now");
-
+        var domains = await unitOfWork.GetRepo<Domains, int>().GetAllAsync(spec) ?? throw new NotFoundException("No Domains Exit Right Now");
         return new APIResponse<IEnumerable<DomainsDTO>>()
         {
             StatusCode = HttpStatusCode.OK,
@@ -40,10 +37,7 @@ public class AdministrationService(
             throw new BadRequestException("invalid domain id");
 
         var spec = new DomainByIdSpecifications(id);
-        var domain = await unitOfWork.GetRepo<Domains, int>().GetAsync(spec);
-        if (domain == null)
-            throw new NotFoundException("This No Domain Match This Id !!");
-
+        var domain = await unitOfWork.GetRepo<Domains, int>().GetAsync(spec) ?? throw new NotFoundException("This No Domain Match This Id !!");
         return new APIResponse<DomainsDTO>()
         {
             StatusCode = HttpStatusCode.OK,
@@ -72,10 +66,7 @@ public class AdministrationService(
         if (domainsDto == null)
             throw new BadRequestException("invalid domain details");
 
-        var domain = mapper.Map<Domains>(domainsDto);
-        if (domain == null)
-            throw new InternalServerErrorException("Internal Server Error While Mapping");
-
+        var domain = mapper.Map<Domains>(domainsDto) ?? throw new InternalServerErrorException("Internal Server Error While Mapping");
         await unitOfWork.GetRepo<Domains, int>().UpdateAsync(domain);
         await unitOfWork.SaveChangesAsync();
 
@@ -91,10 +82,7 @@ public class AdministrationService(
             throw new BadRequestException("invalid domain id");
 
         var spec = new DomainByIdSpecifications(id);
-        var domain = await unitOfWork.GetRepo<Domains, int>().GetAsync(spec);
-        if (domain == null)
-            throw new NotFoundException("This No Domain Match This Id !!");
-
+        var domain = await unitOfWork.GetRepo<Domains, int>().GetAsync(spec) ?? throw new NotFoundException("This No Domain Match This Id !!");
         await unitOfWork.GetRepo<Domains, int>().DeleteAsync(domain);
         await unitOfWork.SaveChangesAsync();
         return new APIResponse()
@@ -109,10 +97,7 @@ public class AdministrationService(
             throw new BadRequestException("Invalid domain ID");
 
         var spec = new TracksByDomainIdSpecification(domainId);
-        var tracks = await unitOfWork.GetRepo<Track, int>().GetAllAsync(spec);
-        if (tracks == null)
-            throw new NotFoundException("No Tracks Exit Right Now");
-
+        var tracks = await unitOfWork.GetRepo<Track, int>().GetAllAsync(spec) ?? throw new NotFoundException("No Tracks Exit Right Now");
         return new APIResponse<IEnumerable<TrackDTO>>()
         {
             StatusCode = HttpStatusCode.OK,
@@ -147,10 +132,7 @@ public class AdministrationService(
             throw new BadRequestException("Invalid track ID");
 
         var spec = new TrackWithFullStructureSpecification(id);
-        var track = await unitOfWork.GetRepo<Track, int>().GetAsync(spec);
-        if (track == null)
-            throw new NotFoundException("This No Track Match This Id !!");
-
+        var track = await unitOfWork.GetRepo<Track, int>().GetAsync(spec) ?? throw new NotFoundException("This No Track Match This Id !!");
         return new APIResponse<TrackFullDTO>()
         {
             StatusCode = HttpStatusCode.OK,
@@ -164,11 +146,7 @@ public class AdministrationService(
             throw new BadRequestException("invalid track details");
 
         var spec = new TrackWithFullStructureSpecification(trackDto.Id);
-        var existingTrack = await unitOfWork.GetRepo<Track, int>().GetAsync(spec);
-
-        if (existingTrack == null)
-            throw new NotFoundException("Track not found");
-
+        var existingTrack = await unitOfWork.GetRepo<Track, int>().GetAsync(spec) ?? throw new NotFoundException("Track not found");
         mapper.Map(trackDto, existingTrack);
 
         if (trackDto.Sections != null)
@@ -183,8 +161,7 @@ public class AdministrationService(
                         newSection.Choices = mapper.Map<ICollection<TrackChoice>>(sectionDto.Choices);
                     }
 
-                    if (existingTrack.Sections == null)
-                        existingTrack.Sections = new List<TrackSection>();
+                    existingTrack.Sections ??= [];
 
                     existingTrack.Sections.Add(newSection);
                 }
@@ -202,7 +179,7 @@ public class AdministrationService(
                                 if (choiceDto.Id == 0)
                                 {
                                     var newChoice = mapper.Map<TrackChoice>(choiceDto);
-                                    if (existingSection.Choices == null) existingSection.Choices = new List<TrackChoice>();
+                                    existingSection.Choices ??= [];
                                     existingSection.Choices.Add(newChoice);
                                 }
                                 else if (choiceDto.Id > 0)
@@ -237,10 +214,7 @@ public class AdministrationService(
             throw new BadRequestException("invalid track id");
 
         var spec = new TrackByIdSpecification(id);
-        var track = await unitOfWork.GetRepo<Track, int>().GetAsync(spec);
-        if (track == null)
-            throw new NotFoundException("This No Track Match This Id !!");
-
+        var track = await unitOfWork.GetRepo<Track, int>().GetAsync(spec) ?? throw new NotFoundException("This No Track Match This Id !!");
         await unitOfWork.GetRepo<Track, int>().DeleteAsync(track);
         await unitOfWork.SaveChangesAsync();
         return new APIResponse()
@@ -256,11 +230,7 @@ public class AdministrationService(
 
         var section = new TrackSectionByIdSpecification(id);
         var existingSection = await unitOfWork
-            .GetRepo<TrackSection, int>().GetAsync(section);
-
-        if (existingSection == null)
-            throw new NotFoundException("Section not found");
-
+            .GetRepo<TrackSection, int>().GetAsync(section) ?? throw new NotFoundException("Section not found");
         await unitOfWork.GetRepo<TrackSection, int>().DeleteAsync(existingSection);
         await unitOfWork.SaveChangesAsync();
 
@@ -277,11 +247,7 @@ public class AdministrationService(
 
         var choice = new TrackChoiceByIdSpecification(id);
         var existingChoice = await unitOfWork
-            .GetRepo<TrackChoice, int>().GetAsync(choice);
-
-        if (existingChoice == null)
-            throw new NotFoundException("Choice not found");
-
+            .GetRepo<TrackChoice, int>().GetAsync(choice) ?? throw new NotFoundException("Choice not found");
         await unitOfWork.GetRepo<TrackChoice, int>().DeleteAsync(existingChoice);
         await unitOfWork.SaveChangesAsync();
 

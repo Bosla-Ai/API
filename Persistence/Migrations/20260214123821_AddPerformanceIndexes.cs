@@ -33,12 +33,12 @@ namespace Persistence.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_Roadmap_CustomerId_CreatedAt",
                 table: "Roadmap",
-                columns: new[] { "CustomerId", "CreatedAt" });
+                columns: ["CustomerId", "CreatedAt"]);
 
             migrationBuilder.CreateIndex(
                 name: "IX_Courses_Language_Platform",
                 table: "Courses",
-                columns: new[] { "Language", "Platform" });
+                columns: ["Language", "Platform"]);
         }
 
         /// <inheritdoc />

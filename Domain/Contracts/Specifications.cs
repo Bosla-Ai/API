@@ -2,18 +2,12 @@ using System.Linq.Expressions;
 
 namespace Domain.Contracts;
 
-public abstract class Specifications<TEntity>
+public abstract class Specifications<TEntity>(Expression<Func<TEntity, bool>> criteria)
 {
-    public Expression<Func<TEntity, bool>> Criteria { get; }
-    public List<Expression<Func<TEntity, object>>> Includes { get; }
+    public Expression<Func<TEntity, bool>> Criteria { get; } = criteria;
+    public List<Expression<Func<TEntity, object>>> Includes { get; } = [];
 
-    public Specifications(Expression<Func<TEntity, bool>> criteria)
-    {
-        Criteria = criteria;
-        Includes = new List<Expression<Func<TEntity, object>>>();
-    }
-
-    public List<string> IncludeStrings { get; } = new List<string>();
+    public List<string> IncludeStrings { get; } = [];
 
     public void AddInclude(Expression<Func<TEntity, object>> includeExpression)
     {

@@ -3,10 +3,6 @@ using Domain.Entities;
 
 namespace Domain.ModelsSpecifications.Administration.DomainSpecifications;
 
-public class DomainsIsActiveSpecifications : Specifications<Domains>
+public class DomainsIsActiveSpecifications(bool isActive) : Specifications<Domains>(d => d.IsActive == isActive)
 {
-    public DomainsIsActiveSpecifications(bool isActive)
-        : base(d => d.IsActive == isActive)
-    {
-    }
 }

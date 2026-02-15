@@ -3,10 +3,6 @@ using Domain.Entities;
 
 namespace Domain.ModelsSpecifications.Administration.TrackChoiceSpecifications;
 
-public class TrackChoiceByIdSpecification : Specifications<TrackChoice>
+public class TrackChoiceByIdSpecification(int id) : Specifications<TrackChoice>(tc => tc.Id == id)
 {
-    public TrackChoiceByIdSpecification(int id)
-        : base(tc => tc.Id == id)
-    {
-    }
 }

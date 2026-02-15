@@ -64,7 +64,7 @@ public class ExternalAuthenticationController(
         {
             return StatusCode(StatusCodes.Status500InternalServerError
                 , new APIResponse<string>(HttpStatusCode.InternalServerError, null,
-                    new List<string> { ex.Message }));
+                    [ex.Message]));
         }
     }
 
@@ -113,7 +113,7 @@ public class ExternalAuthenticationController(
         {
             return StatusCode(StatusCodes.Status500InternalServerError
                 , new APIResponse<string>(HttpStatusCode.InternalServerError, null,
-                    new List<string> { ex.Message }));
+                    [ex.Message]));
         }
     }
 

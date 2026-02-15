@@ -23,6 +23,6 @@ public sealed class Course
     public DateTime RetrievedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation properties
-    public ICollection<RoadmapCourse> RoadmapCourses { get; set; } = new List<RoadmapCourse>();
-    public ICollection<CourseTag> CourseTags { get; set; } = new List<CourseTag>();
+    public ICollection<RoadmapCourse> RoadmapCourses { get; set; } = [];
+    public ICollection<CourseTag> CourseTags { get; set; } = [];
 }

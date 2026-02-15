@@ -53,7 +53,7 @@ public class ChatHistoryServiceTests
         // Arrange
         _chatRepoMock
             .Setup(r => r.GetAllUserMessagesAsync("u1"))
-            .ReturnsAsync(new List<ChatMessageEntity>());
+            .ReturnsAsync([]);
 
         // Act
         var response = await _sut.GetUserChatSessionsAsync("u1");
@@ -93,7 +93,7 @@ public class ChatHistoryServiceTests
         // Arrange
         _chatRepoMock
             .Setup(r => r.GetMessagesAsync("u1", "none", 100))
-            .ReturnsAsync(new List<ChatMessageEntity>());
+            .ReturnsAsync([]);
 
         // Act
         Func<Task> act = async () => await _sut.GetSessionMessagesAsync("u1", "none");

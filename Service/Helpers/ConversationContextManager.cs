@@ -5,22 +5,15 @@ using Shared.DTOs;
 
 namespace Service.Helpers;
 
-public class ConversationContextManager
+public class ConversationContextManager(IMemoryCache cache, IChatRepository chatRepository, CustomerHelper customerHelper)
 {
-    private readonly IMemoryCache _cache;
-    private readonly IChatRepository _chatRepository;
-    private readonly CustomerHelper _customerHelper;
+    private readonly IMemoryCache _cache = cache;
+    private readonly IChatRepository _chatRepository = chatRepository;
+    private readonly CustomerHelper _customerHelper = customerHelper;
     private readonly TimeSpan _hotCacheExpiration = TimeSpan.FromMinutes(5);
     private const int SummarizationThreshold = 50;
 
     public Action<string, object>? OnSseEvent { get; set; }
-
-    public ConversationContextManager(IMemoryCache cache, IChatRepository chatRepository, CustomerHelper customerHelper)
-    {
-        _cache = cache;
-        _chatRepository = chatRepository;
-        _customerHelper = customerHelper;
-    }
 
     public async Task AddMessageToContextAsync(string userId, string sessionId, string message, string role = "user")
     {

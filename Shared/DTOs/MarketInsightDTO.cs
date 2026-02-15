@@ -2,9 +2,9 @@ namespace Shared.DTOs;
 
 public class MarketInsightDTO
 {
-    public string[] TopRequiredSkills { get; set; } = Array.Empty<string>();
-    public string[] CommonJobTitles { get; set; } = Array.Empty<string>();
-    public Dictionary<string, int> SkillFrequency { get; set; } = new();
+    public string[] TopRequiredSkills { get; set; } = [];
+    public string[] CommonJobTitles { get; set; } = [];
+    public Dictionary<string, int> SkillFrequency { get; set; } = [];
     public SalaryRange? Salary { get; set; }
     public int TotalJobsAnalyzed { get; set; }
     public string Region { get; set; } = string.Empty;

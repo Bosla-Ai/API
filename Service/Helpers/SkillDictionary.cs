@@ -114,8 +114,8 @@ public static class SkillDictionary
         "TOGAF", "ITIL", "Six Sigma"
     };
 
-    public static readonly IReadOnlyList<(string Category, HashSet<string> Skills)> AllCategories = new[]
-    {
+    public static readonly IReadOnlyList<(string Category, HashSet<string> Skills)> AllCategories =
+    [
         ("Language", Languages),
         ("Framework", Frameworks),
         ("Cloud", Cloud),
@@ -124,12 +124,12 @@ public static class SkillDictionary
         ("Practice", Practices),
         ("Tool", Tools),
         ("Certification", Certifications)
-    };
+    ];
 
     public static Dictionary<string, string> ExtractSkills(string description)
     {
         if (string.IsNullOrWhiteSpace(description))
-            return new();
+            return [];
 
         var results = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 

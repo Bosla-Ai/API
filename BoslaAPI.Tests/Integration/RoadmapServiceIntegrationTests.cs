@@ -72,7 +72,7 @@ public class RoadmapServiceIntegrationTests : IDisposable
                             Score = 4.8
                         }
                     },
-                    Coursera = new Dictionary<string, RoadmapItemDTO>()
+                    Coursera = []
                 }
             }
         };

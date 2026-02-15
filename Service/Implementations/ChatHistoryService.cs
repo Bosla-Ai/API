@@ -44,7 +44,7 @@ public class ChatHistoryService(
             return new APIResponse<List<ChatSessionSummaryDTO>>
             {
                 StatusCode = HttpStatusCode.OK,
-                Data = new List<ChatSessionSummaryDTO>()
+                Data = []
             };
         }
 
@@ -102,14 +102,13 @@ public class ChatHistoryService(
             Data = new ChatSessionMessagesDTO
             {
                 SessionId = sessionId,
-                Messages = messages
+                Messages = [.. messages
                     .Select(m => new ChatMessageDTO
                     {
                         Role = m.Role,
                         Message = m.Message,
                         CreatedAt = m.CreatedAt
-                    })
-                    .ToList()
+                    })]
             }
         };
     }

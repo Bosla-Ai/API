@@ -32,8 +32,8 @@ public class ApplicationUserServiceTests
         // Arrange
         var users = new List<ApplicationUser>
         {
-            new ApplicationUser { Id = "1", Email = "user1@test.com" },
-            new ApplicationUser { Id = "2", Email = "user2@test.com" }
+            new() { Id = "1", Email = "user1@test.com" },
+            new() { Id = "2", Email = "user2@test.com" }
         };
 
         _userRepoMock

@@ -7,7 +7,7 @@ public sealed class DashboardDomainDTO
     public string Description { get; set; } = "";
     public string IconUrl { get; set; } = "";
     public bool IsActive { get; set; }
-    public List<DashboardTrackDTO> Tracks { get; set; } = new();
+    public List<DashboardTrackDTO> Tracks { get; set; } = [];
 }
 
 public sealed class DashboardTrackDTO
@@ -18,7 +18,7 @@ public sealed class DashboardTrackDTO
     public string IconUrl { get; set; } = "";
     public bool IsActive { get; set; }
     public string FixedTagsPayload { get; set; } = "";
-    public List<DashboardTrackSectionDTO> Sections { get; set; } = new();
+    public List<DashboardTrackSectionDTO> Sections { get; set; } = [];
 }
 
 public sealed class DashboardTrackSectionDTO
@@ -27,7 +27,7 @@ public sealed class DashboardTrackSectionDTO
     public string Title { get; set; } = "";
     public bool IsMultiSelect { get; set; }
     public int OrderIndex { get; set; }
-    public List<DashboardTrackChoiceDTO> Choices { get; set; } = new();
+    public List<DashboardTrackChoiceDTO> Choices { get; set; } = [];
 }
 
 public sealed class DashboardTrackChoiceDTO

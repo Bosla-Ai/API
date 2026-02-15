@@ -97,45 +97,45 @@ public class AdministrationServiceTests
         var existingTrack = new Track
         {
             Id = trackId,
-            Sections = new List<TrackSection>
-            {
+            Sections =
+            [
                 new TrackSection
                 {
                     Id = 10,
                     Title = "Old Section",
-                    Choices = new List<TrackChoice>
-                    {
+                    Choices =
+                    [
                         new TrackChoice { Id = 100, Label = "Old Choice" }
-                    }
+                    ]
                 }
-            }
+            ]
         };
 
         var updateDto = new TrackUpdateFullDTO
         {
             Id = trackId,
             Title = "Updated Track",
-            Sections = new List<TrackSectionUpdateFullDTO>
-            {
+            Sections =
+            [
                 // 1. Create (Id = 0)
                 new TrackSectionUpdateFullDTO
                 {
                     Id = 0,
                     Title = "New Section",
-                    Choices = new List<TrackChoiceUpdateDTO>
-                    {
+                    Choices =
+                    [
                         new TrackChoiceUpdateDTO { Id = 0, Title = "New Choice" }
-                    }
+                    ]
                 },
                 // 2. Update (Id = 10)
                 new TrackSectionUpdateFullDTO
                 {
                     Id = 10,
                     Title = "Updated Section",
-                    Choices = new List<TrackChoiceUpdateDTO>
-                    {
+                    Choices =
+                    [
                         new TrackChoiceUpdateDTO { Id = 100, Title = "Updated Choice" }
-                    }
+                    ]
                 },
                 // 3. Ignore (Id = null)
                 new TrackSectionUpdateFullDTO
@@ -143,7 +143,7 @@ public class AdministrationServiceTests
                     Id = null,
                     Title = "Ignored Section"
                 }
-            }
+            ]
         };
 
         _mockTrackRepo.Setup(r => r.GetAsync(It.IsAny<TrackWithFullStructureSpecification>()))
@@ -155,11 +155,11 @@ public class AdministrationServiceTests
 
         // Mock Create Section Map
         _mockMapper.Setup(m => m.Map<TrackSection>(It.Is<TrackSectionUpdateFullDTO>(s => s.Id == 0)))
-            .Returns((TrackSectionUpdateFullDTO s) => new TrackSection { Title = s.Title, Choices = new List<TrackChoice>() });
+            .Returns((TrackSectionUpdateFullDTO s) => new TrackSection { Title = s.Title, Choices = [] });
 
         // Mock Create Choice Map (Nested in New Section)
         _mockMapper.Setup(m => m.Map<ICollection<TrackChoice>>(It.IsAny<ICollection<TrackChoiceUpdateDTO>>()))
-            .Returns((ICollection<TrackChoiceUpdateDTO> source) => source.Select(c => new TrackChoice { Label = c.Title }).ToList());
+            .Returns((ICollection<TrackChoiceUpdateDTO> source) => [.. source.Select(c => new TrackChoice { Label = c.Title })]);
 
         // Mock Update Section Map
         _mockMapper.Setup(m => m.Map(It.Is<TrackSectionUpdateFullDTO>(s => s.Id == 10), It.IsAny<TrackSection>()))

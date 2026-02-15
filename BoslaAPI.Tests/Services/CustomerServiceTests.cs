@@ -39,9 +39,9 @@ public class CustomerServiceTests
         // Arrange
         var customers = new List<Customer>
         {
-            new Customer { ApplicationUserId = "1" },
-            new Customer { ApplicationUserId = "2" },
-            new Customer { ApplicationUserId = "3" }
+            new() { ApplicationUserId = "1" },
+            new() { ApplicationUserId = "2" },
+            new() { ApplicationUserId = "3" }
         };
 
         _customerRepoMock

@@ -4,14 +4,9 @@ using Service.Abstraction;
 
 namespace Service.Implementations;
 
-public sealed class ApplicationUserService : IApplicationUserService
+public sealed class ApplicationUserService(IUnitOfWork unitOfWork) : IApplicationUserService
 {
-    private readonly IUnitOfWork _unitOfWork;
-
-    public ApplicationUserService(IUnitOfWork unitOfWork)
-    {
-        _unitOfWork = unitOfWork;
-    }
+    private readonly IUnitOfWork _unitOfWork = unitOfWork;
 
     public async Task<IEnumerable<ApplicationUser>> GetAllAsync()
     {
