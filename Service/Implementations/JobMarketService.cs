@@ -325,16 +325,14 @@ public class JobMarketService(
 
         return new MarketInsightDTO
         {
-            TopRequiredSkills = mergedSkills
+            TopRequiredSkills = [.. mergedSkills
                 .OrderByDescending(kv => kv.Value)
                 .Take(15)
-                .Select(kv => kv.Key)
-                .ToArray(),
-            CommonJobTitles = mergedTitles
+                .Select(kv => kv.Key)],
+            CommonJobTitles = [.. mergedTitles
                 .OrderByDescending(kv => kv.Value)
                 .Take(5)
-                .Select(kv => kv.Key)
-                .ToArray(),
+                .Select(kv => kv.Key)],
             SkillFrequency = mergedSkills
                 .OrderByDescending(kv => kv.Value)
                 .Take(20)
