@@ -239,7 +239,9 @@ public class CustomerService(
             try
             {
                 var roleKeywords = new[] { targetRole }.Concat(marketKeywords).Distinct().Take(5).ToArray();
-                fetchedMarketInsight = await jobMarketService.GetMarketInsightsAsync(roleKeywords); cancellationToken.ThrowIfCancellationRequested(); if (fetchedMarketInsight is not null)
+                fetchedMarketInsight = await jobMarketService.GetMarketInsightsAsync(roleKeywords);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (fetchedMarketInsight is not null)
                 {
                     marketContext = fetchedMarketInsight.ToPromptContext();
                     var topSkillsSummary = string.Join(", ", fetchedMarketInsight.TopRequiredSkills.Take(5));
@@ -280,7 +282,7 @@ public class CustomerService(
             {
                 var pipelineVideoSearchUrl = options.CurrentValue.PipelineApi.VideoSearchUrl;
                 using var client = httpClientFactory.CreateClient();
-                client.Timeout = TimeSpan.FromSeconds(15);
+                client.Timeout = TimeSpan.FromMinutes(5);
 
                 var encodedQuery = Uri.EscapeDataString(searchTerm);
                 var url = $"{pipelineVideoSearchUrl}?q={encodedQuery}&lang=en";
