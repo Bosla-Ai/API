@@ -158,7 +158,7 @@ public class ApiResponseMiddleware(RequestDelegate next, ILogger<ApiResponseMidd
         context.Response.ContentType = "application/json";
         context.Response.StatusCode = (int)statusCode;
 
-        var response = new APIResponse<object>((HttpStatusCode)statusCode, null, new List<string> { message });
+        var response = new APIResponse<object>((HttpStatusCode)statusCode, null, [message]);
 
         var json = JsonSerializer.Serialize(response, _jsonOptions);
         context.Response.ContentLength = Encoding.UTF8.GetByteCount(json);
@@ -172,7 +172,7 @@ public class ApiResponseMiddleware(RequestDelegate next, ILogger<ApiResponseMidd
         var response = new APIResponse()
         {
             StatusCode = (HttpStatusCode)StatusCodes.Status404NotFound,
-            ErrorMessages = new List<string>() { $"This End Point {httpContext.Request.Path} was not found." }
+            ErrorMessages = [$"This End Point {httpContext.Request.Path} was not found."]
         };
         await httpContext.Response.WriteAsync(JsonSerializer.Serialize(response));
     }

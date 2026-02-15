@@ -59,8 +59,8 @@ builder.Services
     {
         var settings = builder.Configuration.GetSection("CookieSettings");
         var sameSite = Enum.TryParse<SameSiteMode>(settings["SameSite"], out var mode) ? mode : SameSiteMode.None;
-        var isSecure = bool.TryParse(settings["Secure"], out var s) ? s : true;
-        var isPartitioned = bool.TryParse(settings["Partitioned"], out var p) ? p : false;
+        var isSecure = !bool.TryParse(settings["Secure"], out var s) || s;
+        var isPartitioned = bool.TryParse(settings["Partitioned"], out var p) && p;
 
         // cookie.Cookie.Domain = "bosla.me";
         cookie.Cookie.SameSite = sameSite;

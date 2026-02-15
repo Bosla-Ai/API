@@ -19,5 +19,5 @@ public sealed class TrackCreateFullDTO
 
     public string FixedTagsPayload { get; set; } = "";
 
-    public ICollection<TrackSectionCreateFullDTO> Sections { get; set; } = new List<TrackSectionCreateFullDTO>();
+    public ICollection<TrackSectionCreateFullDTO> Sections { get; set; } = [];
 }

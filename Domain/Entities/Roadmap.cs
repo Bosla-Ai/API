@@ -14,7 +14,7 @@ public sealed class Roadmap
     // relationships
     public string CustomerId { get; set; }
     public Customer? Customer { get; set; }
-    public ICollection<RoadmapCourse> RoadmapCourses { get; set; } = new List<RoadmapCourse>();
+    public ICollection<RoadmapCourse> RoadmapCourses { get; set; } = [];
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public bool IsArchived { get; set; } = false;
 }

@@ -28,7 +28,7 @@ public class AuthenticationController(
         var response = await authTicketStore.RetrieveTicketAsync(request.Ticket);
         if (response == null)
         {
-            return BadRequest(new APIResponse<string>(HttpStatusCode.BadRequest, null, new List<string> { "Invalid or expired ticket." }));
+            return BadRequest(new APIResponse<string>(HttpStatusCode.BadRequest, null, ["Invalid or expired ticket."]));
         }
 
         ClearAuthCookies();
@@ -118,7 +118,7 @@ public class AuthenticationController(
     public async Task<ActionResult<APIResponse<LoginClientResponse>>> Refresh()
     {
         var refreshToken = Request.Cookies[StaticData.RefreshToken];
-        var accessToken = Request.Cookies[StaticData.AccessToken];
+        _ = Request.Cookies[StaticData.AccessToken];
         var deviceId = Request.Cookies[StaticData.DeviceId];
 
         var refreshRequest = new RefreshRequest()

@@ -13,21 +13,14 @@ using Shared.Options;
 
 namespace Service.Implementations;
 
-public class RoadmapService : IRoadmapService
+public class RoadmapService(
+    IHttpClientFactory httpClientFactory,
+    IUnitOfWork unitOfWork,
+    IOptions<AiOptions> options) : IRoadmapService
 {
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IUnitOfWork _unitOfWork;
-    private readonly string _pythonApiUrl;
-
-    public RoadmapService(
-        IHttpClientFactory httpClientFactory,
-        IUnitOfWork unitOfWork,
-        IOptions<AiOptions> options)
-    {
-        _httpClientFactory = httpClientFactory;
-        _unitOfWork = unitOfWork;
-        _pythonApiUrl = options.Value.PipelineApi.BaseUrl;
-    }
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly IUnitOfWork _unitOfWork = unitOfWork;
+    private readonly string _pythonApiUrl = options.Value.PipelineApi.BaseUrl;
 
     public async Task<APIResponse<RoadmapGenerationDTO>> GenerateRoadmapAsync(string[] tags, string language, bool preferPaid)
     {
@@ -66,7 +59,7 @@ public class RoadmapService : IRoadmapService
             var requestPayload = new
             {
                 tags = missingTags,
-                language = language,
+                language,
                 prefer_paid = preferPaid,
                 job_id = jobId
             };
@@ -82,11 +75,7 @@ public class RoadmapService : IRoadmapService
                 if (!response.IsSuccessStatusCode)
                     throw new InternalServerErrorException($"Python Scraper failed with status {response.StatusCode}: {response.ReasonPhrase}");
 
-                var roadmapResponse = await response.Content.ReadFromJsonAsync<RoadmapGenerationDTO>();
-
-                if (roadmapResponse == null)
-                    throw new InternalServerErrorException("Received empty data from Python Microservice.");
-
+                var roadmapResponse = await response.Content.ReadFromJsonAsync<RoadmapGenerationDTO>() ?? throw new InternalServerErrorException("Received empty data from Python Microservice.");
                 roadmapData = roadmapResponse;
             }
             catch (HttpRequestException ex)
@@ -166,7 +155,7 @@ public class RoadmapService : IRoadmapService
             TargetJobRole = request.TargetJobRole,
             CreatedAt = DateTime.UtcNow,
             IsArchived = false,
-            RoadmapCourses = new List<RoadmapCourse>()
+            RoadmapCourses = []
         };
 
         await _unitOfWork.GetRepo<Roadmap, int>().CreateAsync(roadmap);
@@ -248,11 +237,7 @@ public class RoadmapService : IRoadmapService
     public async Task<APIResponse> DeleteRoadmapAsync(int roadmapId, string userId)
     {
         var repo = _unitOfWork.GetRepo<Roadmap, int>();
-        var roadmap = await repo.GetIdAsync(roadmapId);
-
-        if (roadmap == null)
-            throw new NotFoundException("Roadmap not found.");
-
+        var roadmap = await repo.GetIdAsync(roadmapId) ?? throw new NotFoundException("Roadmap not found.");
         if (roadmap.CustomerId != userId)
             throw new UnauthorizedException("User is not authorized to delete this roadmap.");
 

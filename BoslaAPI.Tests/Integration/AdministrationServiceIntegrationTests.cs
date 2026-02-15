@@ -53,18 +53,18 @@ public class AdministrationServiceIntegrationTests : IDisposable
             Id = 1,
             Title = "Original Track",
             Description = "Original Desc",
-            Sections = new List<TrackSection>
-            {
+            Sections =
+            [
                 new TrackSection
                 {
                     Id = 10,
                     Title = "Original Section",
-                    Choices = new List<TrackChoice>
-                    {
+                    Choices =
+                    [
                         new TrackChoice { Id = 100, Label = "Original Choice", SectionId = 10 }
-                    }
+                    ]
                 }
-            }
+            ]
         };
         _dbContext.Set<Track>().Add(track);
         await _dbContext.SaveChangesAsync();
@@ -77,8 +77,8 @@ public class AdministrationServiceIntegrationTests : IDisposable
             Description = "Updated Desc",
             IconUrl = "http://example.com/icon.png",
             FixedTagsPayload = "tag1",
-            Sections = new List<TrackSectionUpdateFullDTO>
-            {
+            Sections =
+            [
                 // Modification: Update existing Section 10
                 new TrackSectionUpdateFullDTO
                 {
@@ -86,8 +86,8 @@ public class AdministrationServiceIntegrationTests : IDisposable
                     TrackId = 1,
                     Title = "Updated Section",
                     OrderIndex = 1,
-                    Choices = new List<TrackChoiceUpdateDTO>
-                    {
+                    Choices =
+                    [
                         // Modification: Update existing Choice 100
                         new TrackChoiceUpdateDTO
                         {
@@ -104,7 +104,7 @@ public class AdministrationServiceIntegrationTests : IDisposable
                             Title = "New Choice In Old Section",
                             IsDefault = false
                         }
-                    }
+                    ]
                 },
                 // Addition: Add New Section
                 new TrackSectionUpdateFullDTO
@@ -113,17 +113,17 @@ public class AdministrationServiceIntegrationTests : IDisposable
                     TrackId = 1,
                     Title = "New Section",
                     OrderIndex = 2,
-                    Choices = new List<TrackChoiceUpdateDTO>
-                    {
+                    Choices =
+                    [
                         new TrackChoiceUpdateDTO
                         {
                             Id = 0,
                             Title = "New Choice In New Section",
                             IsDefault = true
                         }
-                    }
+                    ]
                 }
-            }
+            ]
         };
 
         // Act

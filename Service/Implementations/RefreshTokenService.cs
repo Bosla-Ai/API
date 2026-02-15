@@ -6,14 +6,10 @@ using Shared.Parameters;
 
 namespace Service.Implementations;
 
-public class RefreshTokenService : IRefreshTokenService
+public class RefreshTokenService(IUnitOfWork unitOfWork) : IRefreshTokenService
 {
-    private readonly IUnitOfWork _unitOfWork;
+    private readonly IUnitOfWork _unitOfWork = unitOfWork;
 
-    public RefreshTokenService(IUnitOfWork unitOfWork)
-    {
-        _unitOfWork = unitOfWork;
-    }
     public async Task<IEnumerable<RefreshToken>>
         GetAllForUserDeviceNotRevokedAsync(RefreshTokenParameters refreshTokenParameters)
     {

@@ -9,23 +9,16 @@ using Shared.Options;
 
 namespace Service.Implementations;
 
-public class JobMarketService : IJobMarketService
+public class JobMarketService(
+    IHttpClientFactory httpClientFactory,
+    IOptionsMonitor<JobMarketOptions> options,
+    ILogger<JobMarketService> logger) : IJobMarketService
 {
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IOptionsMonitor<JobMarketOptions> _options;
-    private readonly ILogger<JobMarketService> _logger;
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly IOptionsMonitor<JobMarketOptions> _options = options;
+    private readonly ILogger<JobMarketService> _logger = logger;
 
     private static readonly ConcurrentDictionary<string, (DateTime ExpiresAt, MarketInsightDTO Data)> _cache = new();
-
-    public JobMarketService(
-        IHttpClientFactory httpClientFactory,
-        IOptionsMonitor<JobMarketOptions> options,
-        ILogger<JobMarketService> logger)
-    {
-        _httpClientFactory = httpClientFactory;
-        _options = options;
-        _logger = logger;
-    }
 
     public async Task<MarketInsightDTO?> GetMarketInsightsAsync(string[] tags, string? region = null)
     {
@@ -126,8 +119,8 @@ public class JobMarketService : IJobMarketService
         {
             ReadinessScore = score,
             ReadinessLevel = level,
-            MatchedSkills = matched.ToArray(),
-            TopGaps = gaps.OrderByDescending(g => g.DemandPercent).Take(5).ToArray(),
+            MatchedSkills = [.. matched],
+            TopGaps = [.. gaps.OrderByDescending(g => g.DemandPercent).Take(5)],
             Insight = insight,
             TargetRole = marketInsight.SearchQuery,
             JobsAnalyzed = marketInsight.TotalJobsAnalyzed

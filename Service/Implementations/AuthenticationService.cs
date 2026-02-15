@@ -225,11 +225,7 @@ public class AuthenticationService(
             .GetWithDeviceIdNotRevokedAsync(new RefreshTokenParameters()
             {
                 DeviceId = logoutRequest.DeviceId
-            });
-
-        if (token == null)
-            throw new UnauthorizedException("Invalid Logout request.");
-
+            }) ?? throw new UnauthorizedException("Invalid Logout request.");
         token.IsRevoked = true;
         token.RevokedAt = DateTime.UtcNow;
         token.RevokedReason = "User logged out";
@@ -248,11 +244,7 @@ public class AuthenticationService(
             .GetWithDeviceIdNotRevokedAsync(new RefreshTokenParameters()
             {
                 DeviceId = logoutRequest.DeviceId
-            });
-
-        if (token == null)
-            throw new UnauthorizedException("No Active Tokens Founded");
-
+            }) ?? throw new UnauthorizedException("No Active Tokens Founded");
         var tokens = await refreshTokenService
             .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
             {
@@ -328,10 +320,7 @@ public class AuthenticationService(
         if (validToken.IsRevoked || validToken.ExpiresAt < DateTime.UtcNow)
             throw new UnauthorizedException("Invalid Refresh Token");
 
-        var user = await GetUserByIdAsync(validToken.UserId);
-        if (user == null)
-            throw new NotFoundException("User not found");
-
+        var user = await GetUserByIdAsync(validToken.UserId) ?? throw new NotFoundException("User not found");
         var loginServerResponse = await accountHelper
             .GenerateAndStoreTokensAsync(user, Guid.NewGuid());
 
@@ -346,10 +335,7 @@ public class AuthenticationService(
 
     public async Task<APIResponse<ApplicationUserDTO>> GetMeAsync(string userId)
     {
-        var user = await GetUserByIdAsync(userId);
-        if (user == null)
-            throw new NotFoundException("User not found");
-
+        var user = await GetUserByIdAsync(userId) ?? throw new NotFoundException("User not found");
         var roles = await userManager.GetRolesAsync(user);
         var userDto = mapper.Map<ApplicationUserDTO>(user);
         userDto.Role = roles.FirstOrDefault() ?? "";

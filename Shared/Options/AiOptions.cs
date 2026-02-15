@@ -25,7 +25,7 @@ public class PipelineApiOptions
 
 public class GeminiOptions
 {
-    public List<string> ApiKeys { get; set; } = new();
+    public List<string> ApiKeys { get; set; } = [];
     public string Model { get; set; } = "gemini-3-flash-preview";
     public string ApiUrl { get; set; } = string.Empty;
     public bool IncludeThoughts { get; set; } = true;

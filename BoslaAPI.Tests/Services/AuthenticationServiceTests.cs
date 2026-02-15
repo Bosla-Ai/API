@@ -250,7 +250,7 @@ public class AuthenticationServiceTests
         var refreshTokenServiceMock = new Mock<IRefreshTokenService>();
         var customerServiceMock = new Mock<ICustomerService>();
         var unitOfWorkMock = new Mock<Domain.Contracts.IUnitOfWork>();
-        var configurationMock = new Mock<Microsoft.Extensions.Configuration.IConfiguration>();
+        _ = new Mock<Microsoft.Extensions.Configuration.IConfiguration>();
         var roleStoreMock = new Mock<IRoleStore<IdentityRole>>();
         var roleManagerMock = new Mock<RoleManager<IdentityRole>>(
             roleStoreMock.Object, null!, null!, null!, null!);

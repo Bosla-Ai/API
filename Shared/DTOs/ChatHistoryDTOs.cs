@@ -19,5 +19,5 @@ public class ChatMessageDTO
 public class ChatSessionMessagesDTO
 {
     public string SessionId { get; set; } = string.Empty;
-    public List<ChatMessageDTO> Messages { get; set; } = new();
+    public List<ChatMessageDTO> Messages { get; set; } = [];
 }

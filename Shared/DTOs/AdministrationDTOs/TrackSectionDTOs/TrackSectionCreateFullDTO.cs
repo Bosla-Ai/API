@@ -14,5 +14,5 @@ public sealed class TrackSectionCreateFullDTO
     [Required(ErrorMessage = "OrderIndex is required")]
     public int OrderIndex { get; set; }
 
-    public ICollection<TrackChoiceCreateDTO> Choices { get; set; } = new List<TrackChoiceCreateDTO>();
+    public ICollection<TrackChoiceCreateDTO> Choices { get; set; } = [];
 }

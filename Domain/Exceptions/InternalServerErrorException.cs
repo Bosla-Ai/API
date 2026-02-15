@@ -1,8 +1,5 @@
 namespace Domain.Exceptions;
 
-public class InternalServerErrorException : Exception
+public class InternalServerErrorException(string message) : Exception(message)
 {
-    public InternalServerErrorException(string message) : base(message)
-    {
-    }
 }

@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AutoMapper;
@@ -7,7 +9,6 @@ using Domain.Entities;
 using Domain.Exceptions;
 using Domain.ModelsSpecifications;
 using Domain.Responses;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Service.Abstraction;
@@ -68,7 +69,7 @@ public class CustomerService(
 
         var actualSessionId = !string.IsNullOrEmpty(sessionId) ? sessionId : GenerateSessionId(userId);
 
-        var pendingSseEvents = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var pendingSseEvents = new ConcurrentQueue<string>();
         conversationContextManager.OnSseEvent = (eventName, data) =>
         {
             pendingSseEvents.Enqueue(FormatSse(eventName, data));
@@ -170,17 +171,17 @@ public class CustomerService(
         {
             if (chunk.StartsWith("__FALLBACK__:"))
             {
-                var provider = chunk.Substring(13).Trim();
+                var provider = chunk[13..].Trim();
                 yield return FormatSse("fallback", new { provider, message = "Switched to backup AI model" });
             }
             else if (chunk.StartsWith("__MODEL__:"))
             {
-                detectionModel = chunk.Substring(10).Trim();
+                detectionModel = chunk[10..].Trim();
                 yield return FormatSse("model", new { name = detectionModel });
             }
             else if (chunk.StartsWith("__THINKING_CONTENT__:"))
             {
-                var content = chunk.Substring(21);
+                var content = chunk[21..];
                 thinkingLog += content;
 
                 // Title Extraction Logic: First line is title, rest is debug log
@@ -189,14 +190,14 @@ public class CustomerService(
                     if (thinkingLog.Contains("\n"))
                     {
                         var firstNewLineIndex = thinkingLog.IndexOf('\n');
-                        thinkingTitle = thinkingLog.Substring(0, firstNewLineIndex).Trim('*', ' ', '#'); // Clean md formatting
+                        thinkingTitle = thinkingLog[..firstNewLineIndex].Trim('*', ' ', '#'); // Clean md formatting
                         titleExtracted = true;
 
                         // Emit title
                         yield return FormatSse("thinking", new { title = thinkingTitle, debug = "" });
 
                         // Emit remainder as debug
-                        var remainder = thinkingLog.Substring(firstNewLineIndex + 1);
+                        var remainder = thinkingLog[(firstNewLineIndex + 1)..];
                         if (!string.IsNullOrEmpty(remainder))
                         {
                             yield return FormatSse("thinking", new { title = thinkingTitle, debug = remainder });
@@ -258,9 +259,9 @@ public class CustomerService(
         yield return FormatSse("intent", new
         {
             name = interactionType.ToString(),
-            confidence = confidence,
+            confidence,
             tags = toolArguments?.Tags,
-            targetRole = targetRole,
+            targetRole,
         });
 
         if (interactionType == LLMInteractionType.TopicPreview && !string.IsNullOrEmpty(videoUrl))
@@ -284,7 +285,7 @@ public class CustomerService(
                 {
                     if (chunk.StartsWith("__FALLBACK__:"))
                     {
-                        var provider = chunk.Substring(13).Trim();
+                        var provider = chunk[13..].Trim();
                         yield return FormatSse("fallback", new { provider, message = "Switched to backup AI model" });
                     }
                     else if (!chunk.StartsWith("__STATUS__") && !chunk.StartsWith("__MODEL__") && !chunk.StartsWith("__THINKING_CONTENT__"))
@@ -544,11 +545,10 @@ public class CustomerService(
             string[]? followUpSuggestions = null;
             if (root.TryGetProperty("follow_up_suggestions", out var sugProp) && sugProp.ValueKind == JsonValueKind.Array)
             {
-                followUpSuggestions = sugProp.EnumerateArray()
+                followUpSuggestions = [.. sugProp.EnumerateArray()
                     .Where(e => e.ValueKind == JsonValueKind.String)
                     .Select(e => e.GetString()!)
-                    .Take(3)
-                    .ToArray();
+                    .Take(3)];
             }
 
             var videoUrl = root.TryGetProperty("video_url", out var videoProp) && videoProp.ValueKind == JsonValueKind.String
@@ -608,8 +608,8 @@ public class CustomerService(
     private string GenerateSessionId(string userId)
     {
         var input = $"{userId}_{DateTime.UtcNow:yyyyMMddHHmmss}";
-        using var sha256 = System.Security.Cryptography.SHA256.Create();
-        var hash = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(input));
+        using var sha256 = SHA256.Create();
+        var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(input));
         return BitConverter.ToString(hash).Replace("-", "").ToLower()[..16];
     }
 
@@ -618,11 +618,7 @@ public class CustomerService(
         if (string.IsNullOrEmpty(customerId))
             throw new BadRequestException("Customer Id cannot be null or empty");
 
-        var customer = await GetALlCustomerDetailsAsync(customerId);
-
-        if (customer == null)
-            throw new NotFoundException("Customer not found");
-
+        var customer = await GetALlCustomerDetailsAsync(customerId) ?? throw new NotFoundException("Customer not found");
         return new APIResponse<CustomerDTO>()
         {
             StatusCode = HttpStatusCode.OK,
@@ -691,11 +687,8 @@ public class CustomerService(
         if (string.IsNullOrWhiteSpace(requestId))
             throw new BadRequestException("RequestId is required");
 
-        var stored = aiRequestStore.GetAndRemove(requestId);
-        if (stored == null)
-            throw new NotFoundException("Request not found or expired");
-
-        return stored.Value;
+        var stored = aiRequestStore.GetAndRemove(requestId) ?? throw new NotFoundException("Request not found or expired");
+        return stored;
     }
 
     private string FormatSse(string eventName, object data)
@@ -707,9 +700,9 @@ public class CustomerService(
     private static string[] ExtractKeywordsFromQuery(string query)
     {
         if (string.IsNullOrWhiteSpace(query) || query.Length < 10)
-            return Array.Empty<string>();
+            return [];
 
-        var words = query.Split(new[] { ' ', ',', '.', '!', '?', '\n', '\r', '\t' },
+        var words = query.Split([' ', ',', '.', '!', '?', '\n', '\r', '\t'],
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         var keywords = new List<string>();
@@ -735,6 +728,6 @@ public class CustomerService(
                 keywords.Add(skill);
         }
 
-        return keywords.Distinct(StringComparer.OrdinalIgnoreCase).Take(5).ToArray();
+        return [.. keywords.Distinct(StringComparer.OrdinalIgnoreCase).Take(5)];
     }
 }

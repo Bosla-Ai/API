@@ -3,44 +3,30 @@ using Service.Abstraction;
 
 namespace Service.Implementations;
 
-public class ServiceManager : IServiceManager
+public class ServiceManager(
+    IUnitOfWork unitOfWork,
+    IAuthenticationService authentication,
+    ICustomerService customer,
+    IRoadmapService roadmap,
+    IAdministrationService administration,
+    IDashboardService dashboard,
+    IRefreshTokenService refreshToken,
+    IUserService user,
+    IJobMarketService jobMarket,
+    IChatHistoryService chatHistory) : IServiceManager
 {
-    private readonly IUnitOfWork _unitOfWork;
+    private readonly IUnitOfWork _unitOfWork = unitOfWork;
 
-    public IAuthenticationService Authentication { get; private set; }
-    public ICustomerService Customer { get; private set; }
-    public IRoadmapService Roadmap { get; private set; }
-    public IAdministrationService Administration { get; private set; }
-    public IDashboardService Dashboard { get; private set; }
-    public IRefreshTokenService RefreshToken { get; }
-    public IUserService User { get; private set; }
-    public IJobMarketService JobMarket { get; private set; }
-    public IChatHistoryService ChatHistory { get; private set; }
+    public IAuthenticationService Authentication { get; private set; } = authentication;
+    public ICustomerService Customer { get; private set; } = customer;
+    public IRoadmapService Roadmap { get; private set; } = roadmap;
+    public IAdministrationService Administration { get; private set; } = administration;
+    public IDashboardService Dashboard { get; private set; } = dashboard;
+    public IRefreshTokenService RefreshToken { get; } = refreshToken;
+    public IUserService User { get; private set; } = user;
+    public IJobMarketService JobMarket { get; private set; } = jobMarket;
+    public IChatHistoryService ChatHistory { get; private set; } = chatHistory;
 
-
-    public ServiceManager(
-        IUnitOfWork unitOfWork,
-        IAuthenticationService authentication,
-        ICustomerService customer,
-        IRoadmapService roadmap,
-        IAdministrationService administration,
-        IDashboardService dashboard,
-        IRefreshTokenService refreshToken,
-        IUserService user,
-        IJobMarketService jobMarket,
-        IChatHistoryService chatHistory)
-    {
-        _unitOfWork = unitOfWork;
-        Authentication = authentication;
-        Customer = customer;
-        Roadmap = roadmap;
-        Administration = administration;
-        Dashboard = dashboard;
-        RefreshToken = refreshToken;
-        User = user;
-        JobMarket = jobMarket;
-        ChatHistory = chatHistory;
-    }
     public async Task SaveChangesAsync()
     {
         await _unitOfWork.SaveChangesAsync();

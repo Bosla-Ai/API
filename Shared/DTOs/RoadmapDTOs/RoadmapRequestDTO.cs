@@ -8,7 +8,7 @@ public class RoadmapRequestDTO
     [JsonPropertyName("tags")]
     [Required(ErrorMessage = "At least one tag is required.")]
     [MaxLength(10, ErrorMessage = "Maximum 10 tags allowed.")]
-    public string[] Tags { get; set; } = Array.Empty<string>();
+    public string[] Tags { get; set; } = [];
 
     [JsonPropertyName("prefer_paid")]
     public bool PreferPaid { get; set; } = false;

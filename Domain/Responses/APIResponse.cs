@@ -10,7 +10,7 @@ public class APIResponse
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsSuccess => ((int)StatusCode >= 200 && (int)StatusCode < 300);
 
-    public List<string> ErrorMessages { get; set; } = new();
+    public List<string> ErrorMessages { get; set; } = [];
 }
 
 public sealed class APIResponse<T> : APIResponse
@@ -23,6 +23,6 @@ public sealed class APIResponse<T> : APIResponse
     {
         StatusCode = statusCode;
         Data = data!;
-        ErrorMessages = errors ?? new List<string>();
+        ErrorMessages = errors ?? [];
     }
 }

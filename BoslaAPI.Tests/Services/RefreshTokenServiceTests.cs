@@ -35,8 +35,8 @@ public class RefreshTokenServiceTests
         var parameters = new RefreshTokenParameters { UserId = "user-123" };
         var tokens = new List<RefreshToken>
         {
-            new RefreshToken { Id = 1, UserId = "user-123" },
-            new RefreshToken { Id = 2, UserId = "user-123" }
+            new() { Id = 1, UserId = "user-123" },
+            new() { Id = 2, UserId = "user-123" }
         };
 
         _refreshTokenRepoMock
