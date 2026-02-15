@@ -22,9 +22,7 @@ public class PipelineApiOptions
 {
     public string BaseUrl { get; set; } = "http://localhost:7860/generate-roadmap";
 
-    /// <summary>
-    /// Derives VideoSearchUrl from BaseUrl by replacing the path with /search-embeddable-video.
-    /// </summary>
+ 
     public string VideoSearchUrl
     {
         get
