@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# Get list of staged .cs files
+staged_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.cs$')
+
+if [ -z "$staged_files" ]; then
+    exit 0
+fi
+
+echo "[Bosla] Running dotnet format on staged files..."
+
+# Run dotnet format using the rules in .editorconfig
+# We use --include to only format staged files for better performance
+dotnet format --include $staged_files
+
+# Check if dotnet format succeeded
+if [ $? -ne 0 ]; then
+    echo "[Bosla] dotnet format failed. Please check the errors above."
+    exit 1
+fi
+
+# Re-add the formatted files to the staging area
+echo "$staged_files" | xargs git add
+
+echo "[Bosla] Formatting complete. Proceeding with commit."
+exit 0
