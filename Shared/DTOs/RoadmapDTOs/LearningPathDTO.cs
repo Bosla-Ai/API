@@ -8,7 +8,7 @@ public class LearningPathDTO
     public string Domain { get; set; } = "";
 
     [JsonPropertyName("phases")]
-    public List<LearningPhaseDTO> Phases { get; set; } = new();
+    public List<LearningPhaseDTO> Phases { get; set; } = [];
 
     [JsonPropertyName("total_estimated_hours")]
     public double TotalEstimatedHours { get; set; }
@@ -38,7 +38,7 @@ public class LearningPhaseDTO
     public string Difficulty { get; set; } = "";
 
     [JsonPropertyName("tags")]
-    public List<LearningTagDTO> Tags { get; set; } = new();
+    public List<LearningTagDTO> Tags { get; set; } = [];
 
     [JsonPropertyName("estimated_hours")]
     public double EstimatedHours { get; set; }

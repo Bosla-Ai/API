@@ -264,7 +264,7 @@ public class RoadmapService(
         LearningPathDTO? learningPath)
     {
         if (learningPath?.Phases == null || learningPath.Phases.Count == 0)
-            return allItems.Select(x => (x.Item, x.Platform)).ToList();
+            return [.. allItems.Select(x => (x.Item, x.Platform))];
 
         // Build tag→position from the learning path's sorted phases
         var tagOrder = new Dictionary<string, (int Order, string PhaseName)>(StringComparer.OrdinalIgnoreCase);
@@ -280,7 +280,7 @@ public class RoadmapService(
 
         int fallbackOrder = position;
 
-        return allItems
+        return [.. allItems
             .Select(x =>
             {
                 string sectionName = x.Platform;
@@ -296,7 +296,6 @@ public class RoadmapService(
                 return (x.Item, SectionName: sectionName, Order: order);
             })
             .OrderBy(x => x.Order)
-            .Select(x => (x.Item, x.SectionName))
-            .ToList();
+            .Select(x => (x.Item, x.SectionName))];
     }
 }
