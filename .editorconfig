@@ -1,0 +1,36 @@
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+end_of_line = lf
+charset = utf-8
+
+[*.cs]
+# Organize usings
+dotnet_separate_import_directive_groups = false
+dotnet_sort_system_usings_first = true
+
+# Style rules
+dotnet_style_qualification_for_field = false:silent
+dotnet_style_qualification_for_property = false:silent
+dotnet_style_qualification_for_method = false:silent
+dotnet_style_qualification_for_event = false:silent
+
+# Language rules
+dotnet_style_object_initializer = true:suggestion
+dotnet_style_collection_initializer = true:suggestion
+dotnet_style_coalesce_expression = true:suggestion
+dotnet_style_null_propagation = true:suggestion
+dotnet_style_explicit_tuple_names = true:suggestion
+
+# Cleanup rules (The magic part)
+# IDE0005: Remove unused import directives
+dotnet_diagnostic.IDE0005.severity = info
+# IDE0001: Simplify name (removes redundant qualifiers)
+dotnet_diagnostic.IDE0001.severity = info
+
+[*.{json,yml,yaml}]
+indent_size = 2
