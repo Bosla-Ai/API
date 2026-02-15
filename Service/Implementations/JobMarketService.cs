@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -165,7 +166,7 @@ public class JobMarketService(
             return null;
         }
 
-        var json = System.Text.Encoding.UTF8.GetString(await response.Content.ReadAsByteArrayAsync());
+        var json = Encoding.UTF8.GetString(await response.Content.ReadAsByteArrayAsync());
         var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
