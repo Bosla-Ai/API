@@ -21,7 +21,18 @@ public class AiOptions
 public class PipelineApiOptions
 {
     public string BaseUrl { get; set; } = "http://localhost:7860/generate-roadmap";
-    public string VideoSearchUrl { get; set; } = "http://localhost:7860/search-embeddable-video";
+
+    /// <summary>
+    /// Derives VideoSearchUrl from BaseUrl by replacing the path with /search-embeddable-video.
+    /// </summary>
+    public string VideoSearchUrl
+    {
+        get
+        {
+            var uri = new Uri(BaseUrl);
+            return $"{uri.Scheme}://{uri.Authority}/search-embeddable-video";
+        }
+    }
 }
 
 public class GeminiOptions
