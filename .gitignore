@@ -3,6 +3,10 @@
 **/obj\\Debug/
 **/bin\\Release/
 **/obj\\Release/
+
+# Copilot instructions (local only)
+.github/copilot-instructions.md
+
 secrets.json
 appsettings.Local.json
 appsettings.Production.json
