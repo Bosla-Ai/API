@@ -1,11 +1,11 @@
 using Domain.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Shared;
 using Shared.DTOs.AdministrationDTOs.DomainDTOs;
 using Shared.DTOs.AdministrationDTOs.TrackDTOs;
-using Microsoft.Extensions.Options;
 using Shared.Options;
 
 namespace Presentation.Controllers;
@@ -111,4 +111,14 @@ public class AdministrationController(
             .Administration.DeleteChoice(id);
         return response;
     }
+
+    [HttpGet("GetAdmins")]
+    public async Task<ActionResult<APIResponse>> GetAdmins(string? role)
+    {
+        var response = await serviceManager
+            .Administration.GetAllAdminsAsync(role!);
+
+        return response;
+    }
+
 }
