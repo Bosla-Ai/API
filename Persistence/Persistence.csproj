@@ -28,8 +28,4 @@
       <PackageReference Include="Microsoft.Identity.Client" Version="4.80.0" />
     </ItemGroup>
 
-    <ItemGroup>
-      <Folder Include="Migrations\" />
-    </ItemGroup>
-
 </Project>

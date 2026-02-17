@@ -1,9 +1,7 @@
-using Domain.Entities;
 using Domain.Responses;
-using Shared.DTOs.AdministrationDTOs.TrackDTOs;
+using Shared.DTOs.AdministrationDTOs.AdminDTOs;
 using Shared.DTOs.AdministrationDTOs.DomainDTOs;
-using Shared.DTOs.AdministrationDTOs.TrackChoiceDTOs;
-using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
+using Shared.DTOs.AdministrationDTOs.TrackDTOs;
 
 namespace Service.Abstraction;
 
@@ -22,4 +20,5 @@ public interface IAdministrationService
     Task<APIResponse> DeleteTrack(int id);
     Task<APIResponse> DeleteSection(int id);
     Task<APIResponse> DeleteChoice(int id);
+    Task<APIResponse<IEnumerable<AdminDTO>>> GetAllAdminsAsync(string role);
 }

@@ -12,8 +12,8 @@ using Persistence.Data.Contexts;
 namespace Persistence.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260118163304_RemoveRoleColumnFromApplicationUser")]
-    partial class RemoveRoleColumnFromApplicationUser
+    [Migration("20260217183051_InitialProduction")]
+    partial class InitialProduction
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -80,6 +80,9 @@ namespace Persistence.Migrations
                     b.Property<bool>("PhoneNumberConfirmed")
                         .HasColumnType("bit");
 
+                    b.Property<string>("ProfilePictureUrl")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("SecurityStamp")
                         .HasColumnType("nvarchar(max)");
 
@@ -103,6 +106,21 @@ namespace Persistence.Migrations
                     b.ToTable("AspNetUsers", (string)null);
                 });
 
+            modelBuilder.Entity("Domain.Entities.ApplicationUserRole", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("RoleId")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("UserId", "RoleId");
+
+                    b.HasIndex("RoleId");
+
+                    b.ToTable("AspNetUserRoles", (string)null);
+                });
+
             modelBuilder.Entity("Domain.Entities.Course", b =>
                 {
                     b.Property<int>("Id")
@@ -118,10 +136,6 @@ namespace Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
-                    b.Property<string>("Difficulty")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("Duration")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -136,11 +150,11 @@ namespace Persistence.Migrations
 
                     b.Property<string>("Language")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("Platform")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<double>("Rating")
                         .ValueGeneratedOnAdd()
@@ -167,6 +181,8 @@ namespace Persistence.Migrations
 
                     b.HasIndex("Url")
                         .IsUnique();
+
+                    b.HasIndex("Language", "Platform");
 
                     b.ToTable("Courses");
                 });
@@ -350,7 +366,7 @@ namespace Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CustomerId");
+                    b.HasIndex("CustomerId", "CreatedAt");
 
                     b.ToTable("Roadmap");
                 });
@@ -604,21 +620,6 @@ namespace Persistence.Migrations
                     b.ToTable("AspNetUserLogins", (string)null);
                 });
 
-            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserRole<string>", b =>
-                {
-                    b.Property<string>("UserId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("RoleId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.HasKey("UserId", "RoleId");
-
-                    b.HasIndex("RoleId");
-
-                    b.ToTable("AspNetUserRoles", (string)null);
-                });
-
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserToken<string>", b =>
                 {
                     b.Property<string>("UserId")
@@ -636,6 +637,92 @@ namespace Persistence.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("Shared.DTOs.DashboardDTOs.DashboardFlatResult", b =>
+                {
+                    b.Property<int?>("ChoiceId")
+                        .HasColumnType("int");
+
+                    b.Property<bool?>("ChoiceIsDefault")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ChoiceLabel")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ChoiceTagsPayload")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("DomainDescription")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("DomainIconUrl")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("DomainId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("DomainIsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("DomainTitle")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FixedTagsPayload")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool?>("IsMultiSelect")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("OrderIndex")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SectionId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SectionTitle")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("TrackDescription")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("TrackIconUrl")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("TrackId")
+                        .HasColumnType("int");
+
+                    b.Property<bool?>("TrackIsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("TrackTitle")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.ToTable((string)null);
+
+                    b.ToView(null, (string)null);
+                });
+
+            modelBuilder.Entity("Domain.Entities.ApplicationUserRole", b =>
+                {
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", "Role")
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Domain.Entities.ApplicationUser", "User")
+                        .WithMany("UserRoles")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Role");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Domain.Entities.CourseTag", b =>
@@ -769,21 +856,6 @@ namespace Persistence.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserRole<string>", b =>
-                {
-                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
-                        .WithMany()
-                        .HasForeignKey("RoleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Domain.Entities.ApplicationUser", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserToken<string>", b =>
                 {
                     b.HasOne("Domain.Entities.ApplicationUser", null)
@@ -798,6 +870,8 @@ namespace Persistence.Migrations
                     b.Navigation("CustomerProfile");
 
                     b.Navigation("RefreshTokens");
+
+                    b.Navigation("UserRoles");
                 });
 
             modelBuilder.Entity("Domain.Entities.Course", b =>

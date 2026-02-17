@@ -1,28 +1,26 @@
 using System.Reflection;
 using Domain.Entities;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using Microsoft.EntityFrameworkCore.Metadata.Internal;
-using Persistence.Data.Configurations;
 using Shared.DTOs.DashboardDTOs;
 
 namespace Persistence.Data.Contexts;
 
 
-public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> context) : IdentityDbContext<ApplicationUser>(context)
+public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> context) : IdentityDbContext<ApplicationUser, IdentityRole, string, IdentityUserClaim<string>, ApplicationUserRole, IdentityUserLogin<string>, IdentityRoleClaim<string>, IdentityUserToken<string>>(context)
 {
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
+
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
 
         // Configure keyless entity for stored procedure result - no backing table
         modelBuilder.Entity<DashboardFlatResult>()
             .HasNoKey()
             .ToView(null);
-
-        base.OnModelCreating(modelBuilder);
     }
 
 

@@ -1,9 +1,10 @@
 using AutoMapper;
 using Domain.Entities;
-using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
+using Shared.DTOs.AdministrationDTOs.AdminDTOs;
 using Shared.DTOs.AdministrationDTOs.DomainDTOs;
-using Shared.DTOs.AdministrationDTOs.TrackDTOs;
 using Shared.DTOs.AdministrationDTOs.TrackChoiceDTOs;
+using Shared.DTOs.AdministrationDTOs.TrackDTOs;
+using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
 
 namespace Service.MappingProfiles;
 
@@ -53,5 +54,9 @@ public class AdministrationMapping : Profile
             .ForMember(dest => dest.Choices, opt => opt.MapFrom(src => src.Choices));
         CreateMap<Track, TrackFullDTO>()
             .ForMember(dest => dest.Sections, opt => opt.MapFrom(src => src.Sections));
+
+        CreateMap<ApplicationUser, AdminDTO>()
+            .ForMember(dest => dest.Role, opt => opt.MapFrom(src => src.UserRoles.FirstOrDefault().Role.Name))
+            .ReverseMap();
     }
 }

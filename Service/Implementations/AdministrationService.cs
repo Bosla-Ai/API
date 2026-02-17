@@ -1,18 +1,19 @@
 using System.Net;
 using AutoMapper;
 using Domain.Contracts;
-using Domain.Exceptions;
-using Domain.ModelsSpecifications.Administration.DomainSpecifications;
-using Domain.ModelsSpecifications.Administration.TrackSpecifications;
-using Domain.Responses;
 using Domain.Entities;
+using Domain.Exceptions;
+using Domain.ModelsSpecifications.Administration.AdminsSpecifications;
+using Domain.ModelsSpecifications.Administration.DomainSpecifications;
 using Domain.ModelsSpecifications.Administration.TrackChoiceSpecifications;
 using Domain.ModelsSpecifications.Administration.TrackSectionSpecifications;
+using Domain.ModelsSpecifications.Administration.TrackSpecifications;
+using Domain.Responses;
 using Service.Abstraction;
+using Shared;
+using Shared.DTOs.AdministrationDTOs.AdminDTOs;
 using Shared.DTOs.AdministrationDTOs.DomainDTOs;
-using Shared.DTOs.AdministrationDTOs.TrackChoiceDTOs;
 using Shared.DTOs.AdministrationDTOs.TrackDTOs;
-using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
 
 namespace Service.Implementations;
 
@@ -254,6 +255,28 @@ public class AdministrationService(
         return new APIResponse()
         {
             StatusCode = HttpStatusCode.OK,
+        };
+    }
+
+    public async Task<APIResponse<IEnumerable<AdminDTO>>> GetAllAdminsAsync(string role)
+    {
+        if (!string.IsNullOrEmpty(role) && (string.Compare(role, StaticData.AdminRoleName, StringComparison.OrdinalIgnoreCase) != 0
+           && string.Compare(role, StaticData.SuperAdminRoleName, StringComparison.OrdinalIgnoreCase) != 0))
+            throw new BadRequestException("Invalid Role");
+
+        var spec = new GetAdminsByRoleSpecification(role);
+
+        var admins = await unitOfWork.GetRepo<ApplicationUser, int>().GetAllAsync(spec);
+
+        if (admins == null || !admins.Any())
+            throw new NotFoundException("No Admins Found");
+
+        var adminsDto = mapper.Map<IEnumerable<AdminDTO>>(admins);
+
+        return new APIResponse<IEnumerable<AdminDTO>>()
+        {
+            StatusCode = HttpStatusCode.OK,
+            Data = adminsDto
         };
     }
 }
