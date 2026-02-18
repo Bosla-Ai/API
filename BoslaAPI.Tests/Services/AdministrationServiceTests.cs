@@ -4,12 +4,13 @@ using Domain.Contracts;
 using Domain.Entities;
 using Domain.Exceptions;
 using Domain.ModelsSpecifications.Administration.TrackSpecifications;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Moq;
 using Service.Implementations;
+using Shared.DTOs.AdministrationDTOs.TrackChoiceDTOs;
 using Shared.DTOs.AdministrationDTOs.TrackDTOs;
 using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
-using Shared.DTOs.AdministrationDTOs.TrackChoiceDTOs;
-using Xunit;
 
 namespace BoslaAPI.Tests.Services;
 
@@ -19,6 +20,8 @@ public class AdministrationServiceTests
     private readonly Mock<IMapper> _mockMapper;
     private readonly Mock<IGenericRepository<Track, int>> _mockTrackRepo;
     private readonly Mock<IGenericRepository<Domains, int>> _mockDomainsRepo;
+    private readonly Mock<UserManager<ApplicationUser>> _mockUserManager;
+    private readonly Mock<IHttpContextAccessor> _mockHttpContextAccessor;
     private readonly AdministrationService _administrationService;
 
     public AdministrationServiceTests()
@@ -28,10 +31,14 @@ public class AdministrationServiceTests
         _mockTrackRepo = new Mock<IGenericRepository<Track, int>>();
         _mockDomainsRepo = new Mock<IGenericRepository<Domains, int>>();
 
+        var userStore = new Mock<IUserStore<ApplicationUser>>();
+        _mockUserManager = new Mock<UserManager<ApplicationUser>>(userStore.Object, null, null, null, null, null, null, null, null);
+        _mockHttpContextAccessor = new Mock<IHttpContextAccessor>();
+
         _mockUnitOfWork.Setup(u => u.GetRepo<Track, int>()).Returns(_mockTrackRepo.Object);
         _mockUnitOfWork.Setup(u => u.GetRepo<Domains, int>()).Returns(_mockDomainsRepo.Object);
 
-        _administrationService = new AdministrationService(_mockUnitOfWork.Object, _mockMapper.Object);
+        _administrationService = new AdministrationService(_mockUnitOfWork.Object, _mockMapper.Object, _mockUserManager.Object, _mockHttpContextAccessor.Object);
     }
 
     [Fact]
