@@ -323,9 +323,69 @@ public class AdministrationService(
         };
     }
 
-    public Task<APIResponse<AdminUpdateDTO>> UpdateAdminAsync(AdminUpdateDTO adminUpdateDto)
+    public async Task<APIResponse<AdminUpdateDTO>> UpdateAdminAsync(AdminUpdateDTO adminUpdateDto)
     {
-        throw new NotImplementedException();
+        if (adminUpdateDto == null || string.IsNullOrEmpty(adminUpdateDto.Id))
+            throw new BadRequestException("Invalid admin details or ID");
+
+        string newRole = adminUpdateDto.Role!;
+        if (!string.IsNullOrEmpty(newRole) &&
+            !string.Equals(newRole, StaticData.AdminRoleName, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(newRole, StaticData.SuperAdminRoleName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new BadRequestException("Invalid Role specified");
+        }
+
+        var user = await userManager.FindByIdAsync(adminUpdateDto.Id) ?? throw new NotFoundException("Admin not found");
+        string currentEmail = user.Email!;
+
+        mapper.Map(adminUpdateDto, user);
+
+        if (!string.Equals(currentEmail, adminUpdateDto.Email, StringComparison.OrdinalIgnoreCase))
+        {
+            var emailResult = await userManager.SetEmailAsync(user, adminUpdateDto.Email);
+            if (!emailResult.Succeeded)
+            {
+                var errors = string.Join(", ", emailResult.Errors.Select(e => e.Description));
+                throw new BadRequestException($"Email Update Failed: {errors}");
+            }
+
+            var userResult = await userManager.SetUserNameAsync(user, adminUpdateDto.Email);
+            if (!userResult.Succeeded)
+            {
+                var errors = string.Join(", ", userResult.Errors.Select(e => e.Description));
+                throw new BadRequestException($"UserName Update Failed: {errors}");
+            }
+        }
+
+        var updateResult = await userManager.UpdateAsync(user);
+        if (!updateResult.Succeeded)
+        {
+            var errors = string.Join(", ", updateResult.Errors.Select(e => e.Description));
+            throw new BadRequestException($"Failed to update admin profile: {errors}");
+        }
+
+        if (!string.IsNullOrEmpty(newRole))
+        {
+            var currentRoles = await userManager.GetRolesAsync(user);
+
+            if (!currentRoles.Contains(newRole, StringComparer.OrdinalIgnoreCase))
+            {
+                var removeResult = await userManager.RemoveFromRolesAsync(user, currentRoles);
+                if (!removeResult.Succeeded)
+                    throw new InternalServerErrorException("Failed to remove old roles");
+
+                var addResult = await userManager.AddToRoleAsync(user, newRole);
+                if (!addResult.Succeeded)
+                    throw new InternalServerErrorException("Failed to add new role");
+            }
+        }
+
+        return new APIResponse<AdminUpdateDTO>()
+        {
+            StatusCode = HttpStatusCode.OK,
+            Data = adminUpdateDto
+        };
     }
 
     public Task<APIResponse> DeleteAdmin(int id)
