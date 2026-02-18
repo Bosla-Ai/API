@@ -9,6 +9,7 @@ using Domain.ModelsSpecifications.Administration.TrackChoiceSpecifications;
 using Domain.ModelsSpecifications.Administration.TrackSectionSpecifications;
 using Domain.ModelsSpecifications.Administration.TrackSpecifications;
 using Domain.Responses;
+using Microsoft.AspNetCore.Identity;
 using Service.Abstraction;
 using Shared;
 using Shared.DTOs.AdministrationDTOs.AdminDTOs;
@@ -19,7 +20,8 @@ namespace Service.Implementations;
 
 public class AdministrationService(
     IUnitOfWork unitOfWork,
-    IMapper mapper) : IAdministrationService
+    IMapper mapper,
+    UserManager<ApplicationUser> userManager) : IAdministrationService
 {
     public async Task<APIResponse<IEnumerable<DomainsDTO>>> GetDomainsAsync(bool isActive)
     {
@@ -278,5 +280,55 @@ public class AdministrationService(
             StatusCode = HttpStatusCode.OK,
             Data = adminsDto
         };
+    }
+
+    public async Task<APIResponse<AdminCreateDTO>> AddAdminAsync(AdminCreateDTO adminCreateDto)
+    {
+        if (adminCreateDto == null)
+            throw new BadRequestException("invalid admin details");
+
+        string role = adminCreateDto.Role;
+        if (string.IsNullOrEmpty(role) ||
+            (!string.Equals(role, StaticData.AdminRoleName, StringComparison.OrdinalIgnoreCase) &&
+             !string.Equals(role, StaticData.SuperAdminRoleName, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new BadRequestException($"Role must be either '{StaticData.AdminRoleName}' or '{StaticData.SuperAdminRoleName}'");
+        }
+
+        role = string.Equals(role, StaticData.AdminRoleName, StringComparison.OrdinalIgnoreCase)
+            ? StaticData.AdminRoleName
+            : StaticData.SuperAdminRoleName;
+
+        var admin = mapper.Map<ApplicationUser>(adminCreateDto);
+
+        var createResult = await userManager.CreateAsync(admin, adminCreateDto.Password);
+        if (!createResult.Succeeded)
+        {
+            var errors = string.Join(", ", createResult.Errors.Select(e => e.Description));
+            throw new BadRequestException($"Failed to create admin: {errors}");
+        }
+
+        var roleResult = await userManager.AddToRoleAsync(admin, role);
+        if (!roleResult.Succeeded)
+        {
+            await userManager.DeleteAsync(admin);
+            throw new InternalServerErrorException("Failed to assign role. User creation rolled back.");
+        }
+
+        return new APIResponse<AdminCreateDTO>()
+        {
+            StatusCode = HttpStatusCode.Created,
+            Data = adminCreateDto
+        };
+    }
+
+    public Task<APIResponse<AdminUpdateDTO>> UpdateAdminAsync(AdminUpdateDTO adminUpdateDto)
+    {
+        throw new NotImplementedException();
+    }
+
+    public Task<APIResponse> DeleteAdmin(int id)
+    {
+        throw new NotImplementedException();
     }
 }

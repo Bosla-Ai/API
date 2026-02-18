@@ -58,5 +58,8 @@ public class AdministrationMapping : Profile
         CreateMap<ApplicationUser, AdminDTO>()
             .ForMember(dest => dest.Role, opt => opt.MapFrom(src => src.UserRoles.FirstOrDefault().Role.Name))
             .ReverseMap();
+
+        CreateMap<ApplicationUser, AdminCreateDTO>().ReverseMap();
+        CreateMap<ApplicationUser, AdminUpdateDTO>().ReverseMap();
     }
 }
