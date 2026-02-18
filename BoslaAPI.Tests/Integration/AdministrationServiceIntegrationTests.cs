@@ -1,7 +1,10 @@
 using AutoMapper;
 using Domain.Entities;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Persistence.Data.Contexts;
 using Persistence.Repositories;
 using Service.Implementations;
@@ -9,7 +12,6 @@ using Service.MappingProfiles;
 using Shared.DTOs.AdministrationDTOs.TrackChoiceDTOs;
 using Shared.DTOs.AdministrationDTOs.TrackDTOs;
 using Shared.DTOs.AdministrationDTOs.TrackSectionDTOs;
-using Xunit;
 
 namespace BoslaAPI.Tests.Integration;
 
@@ -35,7 +37,7 @@ public class AdministrationServiceIntegrationTests : IDisposable
         var provider = services.BuildServiceProvider();
         _mapper = provider.GetRequiredService<IMapper>();
 
-        _service = new AdministrationService(_unitOfWork, _mapper);
+        _service = new AdministrationService(_unitOfWork, _mapper, new Mock<UserManager<ApplicationUser>>(new Mock<IUserStore<ApplicationUser>>().Object, null, null, null, null, null, null, null, null).Object, new Mock<IHttpContextAccessor>().Object);
     }
 
     public void Dispose()

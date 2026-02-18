@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Claims;
 using AutoMapper;
 using Domain.Contracts;
 using Domain.Entities;
@@ -9,6 +10,7 @@ using Domain.ModelsSpecifications.Administration.TrackChoiceSpecifications;
 using Domain.ModelsSpecifications.Administration.TrackSectionSpecifications;
 using Domain.ModelsSpecifications.Administration.TrackSpecifications;
 using Domain.Responses;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Service.Abstraction;
 using Shared;
@@ -21,7 +23,8 @@ namespace Service.Implementations;
 public class AdministrationService(
     IUnitOfWork unitOfWork,
     IMapper mapper,
-    UserManager<ApplicationUser> userManager) : IAdministrationService
+    UserManager<ApplicationUser> userManager,
+    IHttpContextAccessor httpContextAccessor) : IAdministrationService
 {
     public async Task<APIResponse<IEnumerable<DomainsDTO>>> GetDomainsAsync(bool isActive)
     {
@@ -36,7 +39,7 @@ public class AdministrationService(
 
     public async Task<APIResponse<DomainsDTO>> GetDomainAsync(int id)
     {
-        if (id <= 0 || id == null)
+        if (id <= 0)
             throw new BadRequestException("invalid domain id");
 
         var spec = new DomainByIdSpecifications(id);
@@ -81,7 +84,7 @@ public class AdministrationService(
 
     public async Task<APIResponse> DeleteDomain(int id)
     {
-        if (id <= 0 || id == null)
+        if (id <= 0)
             throw new BadRequestException("invalid domain id");
 
         var spec = new DomainByIdSpecifications(id);
@@ -213,7 +216,7 @@ public class AdministrationService(
 
     public async Task<APIResponse> DeleteTrack(int id)
     {
-        if (id <= 0 || id == null)
+        if (id <= 0)
             throw new BadRequestException("invalid track id");
 
         var spec = new TrackByIdSpecification(id);
@@ -228,7 +231,7 @@ public class AdministrationService(
 
     public async Task<APIResponse> DeleteSection(int id)
     {
-        if (id <= 0 || id == null)
+        if (id <= 0)
             throw new BadRequestException("invalid section id");
 
         var section = new TrackSectionByIdSpecification(id);
@@ -245,7 +248,7 @@ public class AdministrationService(
 
     public async Task<APIResponse> DeleteChoice(int id)
     {
-        if (id <= 0 || id == null)
+        if (id <= 0)
             throw new BadRequestException("id is 0 or null");
 
         var choice = new TrackChoiceByIdSpecification(id);
@@ -388,8 +391,27 @@ public class AdministrationService(
         };
     }
 
-    public Task<APIResponse> DeleteAdmin(int id)
+    public async Task<APIResponse> DeleteAdmin(string id)
     {
-        throw new NotImplementedException();
+        if (string.IsNullOrEmpty(id))
+            throw new BadRequestException("Invalid ID");
+
+        var user = await userManager.FindByIdAsync(id) ?? throw new NotFoundException("Admin not found");
+        var currentUserId = httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (currentUserId == id)
+            throw new BadRequestException("You cannot delete your own account.");
+
+        if (await userManager.IsInRoleAsync(user, StaticData.SuperAdminRoleName))
+            throw new BadRequestException("Cannot delete a SuperAdmin.");
+
+        var result = await userManager.DeleteAsync(user);
+
+        if (!result.Succeeded)
+            throw new InternalServerErrorException($"Failed to delete admin: {string.Join(", ", result.Errors.Select(e => e.Description))}");
+
+        return new APIResponse()
+        {
+            StatusCode = HttpStatusCode.OK,
+        };
     }
 }

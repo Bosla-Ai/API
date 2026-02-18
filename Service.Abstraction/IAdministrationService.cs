@@ -23,5 +23,5 @@ public interface IAdministrationService
     Task<APIResponse<IEnumerable<AdminDTO>>> GetAllAdminsAsync(string role);
     Task<APIResponse<AdminCreateDTO>> AddAdminAsync(AdminCreateDTO adminCreateDto);
     Task<APIResponse<AdminUpdateDTO>> UpdateAdminAsync(AdminUpdateDTO adminUpdateDto);
-    Task<APIResponse> DeleteAdmin(int id);
+    Task<APIResponse> DeleteAdmin(string id);
 }

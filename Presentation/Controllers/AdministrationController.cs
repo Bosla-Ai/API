@@ -137,8 +137,8 @@ public class AdministrationController(
         return response;
     }
 
-    [HttpDelete("DeleteAdmin/{id:int}")]
-    public async Task<ActionResult<APIResponse>> DeleteAdmin(int id)
+    [HttpDelete("DeleteAdmin/{id:guid}")]
+    public async Task<ActionResult<APIResponse>> DeleteAdmin(string id)
     {
         var response = await serviceManager
             .Administration.DeleteAdmin(id);

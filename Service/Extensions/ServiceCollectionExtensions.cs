@@ -63,6 +63,8 @@ public static class ServiceCollectionExtensions
             services.AddScoped<IChatRepository, NullChatRepository>();
         }
 
+        services.AddHttpContextAccessor();
+
         // Register services
         services.AddScoped<IAuthenticationService, AuthenticationService>();
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
