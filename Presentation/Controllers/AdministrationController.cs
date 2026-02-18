@@ -12,11 +12,11 @@ using Shared.Options;
 namespace Presentation.Controllers;
 
 
-[Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
 public class AdministrationController(
     IOptions<CookieSettingsOptions> cookieOptions,
     IServiceManager serviceManager) : ApiController(cookieOptions)
 {
+    [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
     [HttpGet("GetDomains")]
     public async Task<ActionResult<APIResponse>> GetDomains([FromQuery] bool isActive = true)
     {
@@ -25,6 +25,7 @@ public class AdministrationController(
         return domains;
     }
 
+    [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
     [HttpGet("GetDomain/{id:int}")]
     public async Task<ActionResult<APIResponse>> GetDomain(int id)
     {
@@ -33,6 +34,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
     [HttpPost("AddDomain")]
     public async Task<ActionResult<APIResponse>> AddDomain([FromBody] DomainCreateDTO domainsDto)
     {
@@ -41,6 +43,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
     [HttpPut("UpdateDomain")]
     public async Task<ActionResult<APIResponse>> UpdateDomain([FromBody] DomainUpdateDTO domainsDto)
     {
@@ -49,6 +52,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
     [HttpDelete("DeleteDomain/{id:int}")]
     public async Task<ActionResult<APIResponse>> DeleteDomain(int id)
     {
@@ -57,6 +61,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
     [HttpGet("GetTracks/{domainId:int}")]
     public async Task<ActionResult<APIResponse>> GetTracks(int domainId)
     {
@@ -65,6 +70,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
     [HttpGet("GetTrack/{id:int}")]
     public async Task<ActionResult<APIResponse>> GetTrack(int id)
     {
@@ -73,6 +79,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
     [HttpPost("AddTrack")]
     public async Task<ActionResult<APIResponse>> AddTrack([FromBody] TrackCreateFullDTO trackCreateDto)
     {
@@ -81,6 +88,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
     [HttpPut("UpdateTrack")]
     public async Task<ActionResult<APIResponse>> UpdateTrack([FromBody] TrackUpdateFullDTO trackUpdateDto)
     {
@@ -89,6 +97,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
     [HttpDelete("DeleteTrack/{id:int}")]
     public async Task<ActionResult<APIResponse>> DeleteTrack(int id)
     {
@@ -97,6 +106,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
     [HttpDelete("DeleteSection/{id:int}")]
     public async Task<ActionResult<APIResponse>> DeleteSection(int id)
     {
@@ -105,6 +115,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = $"{StaticData.AdminRoleName},{StaticData.SuperAdminRoleName}")]
     [HttpDelete("DeleteChoice/{id:int}")]
     public async Task<ActionResult<APIResponse>> DeleteChoice(int id)
     {
@@ -113,6 +124,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = StaticData.SuperAdminRoleName)]
     [HttpGet("GetAdmins")]
     public async Task<ActionResult<APIResponse>> GetAdmins(string? role)
     {
@@ -121,6 +133,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = StaticData.SuperAdminRoleName)]
     [HttpPost("AddAdmin")]
     public async Task<ActionResult<APIResponse>> AddAdmin([FromBody] AdminCreateDTO adminCreateDto)
     {
@@ -129,6 +142,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = StaticData.SuperAdminRoleName)]
     [HttpPut("UpdateAdmin")]
     public async Task<ActionResult<APIResponse>> UpdateAdmin([FromBody] AdminUpdateDTO adminUpdateDto)
     {
@@ -137,6 +151,7 @@ public class AdministrationController(
         return response;
     }
 
+    [Authorize(Roles = StaticData.SuperAdminRoleName)]
     [HttpDelete("DeleteAdmin/{id:guid}")]
     public async Task<ActionResult<APIResponse>> DeleteAdmin(string id)
     {
