@@ -481,7 +481,6 @@ public class AdministrationServiceTests
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, result.StatusCode);
-        Assert.Equal(createDto, result.Data);
         _mockUserManager.Verify(u => u.CreateAsync(user, createDto.Password), Times.Once);
         _mockUserManager.Verify(u => u.AddToRoleAsync(user, StaticData.AdminRoleName), Times.Once);
     }

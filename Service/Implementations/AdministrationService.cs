@@ -286,7 +286,7 @@ public class AdministrationService(
         };
     }
 
-    public async Task<APIResponse<AdminCreateDTO>> AddAdminAsync(AdminCreateDTO adminCreateDto)
+    public async Task<APIResponse> AddAdminAsync(AdminCreateDTO adminCreateDto)
     {
         if (adminCreateDto == null)
             throw new BadRequestException("invalid admin details");
@@ -319,14 +319,13 @@ public class AdministrationService(
             throw new InternalServerErrorException("Failed to assign role. User creation rolled back.");
         }
 
-        return new APIResponse<AdminCreateDTO>()
+        return new APIResponse()
         {
             StatusCode = HttpStatusCode.Created,
-            Data = adminCreateDto
         };
     }
 
-    public async Task<APIResponse<AdminUpdateDTO>> UpdateAdminAsync(AdminUpdateDTO adminUpdateDto)
+    public async Task<APIResponse> UpdateAdminAsync(AdminUpdateDTO adminUpdateDto)
     {
         if (adminUpdateDto == null || string.IsNullOrEmpty(adminUpdateDto.Id))
             throw new BadRequestException("Invalid admin details or ID");
@@ -384,10 +383,9 @@ public class AdministrationService(
             }
         }
 
-        return new APIResponse<AdminUpdateDTO>()
+        return new APIResponse()
         {
             StatusCode = HttpStatusCode.OK,
-            Data = adminUpdateDto
         };
     }
 
