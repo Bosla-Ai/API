@@ -262,8 +262,9 @@ public class AdministrationService(
 
     public async Task<APIResponse<IEnumerable<AdminDTO>>> GetAllAdminsAsync(string role)
     {
-        if (!string.IsNullOrEmpty(role) && (string.Compare(role, StaticData.AdminRoleName, StringComparison.OrdinalIgnoreCase) != 0
-           && string.Compare(role, StaticData.SuperAdminRoleName, StringComparison.OrdinalIgnoreCase) != 0))
+        if (!string.IsNullOrEmpty(role)
+            && (!string.Equals(role, StaticData.AdminRoleName, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(role, StaticData.SuperAdminRoleName, StringComparison.OrdinalIgnoreCase)))
             throw new BadRequestException("Invalid Role");
 
         var spec = new GetAdminsByRoleSpecification(role);
