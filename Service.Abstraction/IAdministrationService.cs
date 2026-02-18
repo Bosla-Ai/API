@@ -21,4 +21,7 @@ public interface IAdministrationService
     Task<APIResponse> DeleteSection(int id);
     Task<APIResponse> DeleteChoice(int id);
     Task<APIResponse<IEnumerable<AdminDTO>>> GetAllAdminsAsync(string role);
+    Task<APIResponse<AdminCreateDTO>> AddAdminAsync(AdminCreateDTO adminCreateDto);
+    Task<APIResponse<AdminUpdateDTO>> UpdateAdminAsync(AdminUpdateDTO adminUpdateDto);
+    Task<APIResponse> DeleteAdmin(int id);
 }

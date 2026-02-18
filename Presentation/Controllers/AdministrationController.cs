@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Shared;
+using Shared.DTOs.AdministrationDTOs.AdminDTOs;
 using Shared.DTOs.AdministrationDTOs.DomainDTOs;
 using Shared.DTOs.AdministrationDTOs.TrackDTOs;
 using Shared.Options;
@@ -117,8 +118,30 @@ public class AdministrationController(
     {
         var response = await serviceManager
             .Administration.GetAllAdminsAsync(role!);
-
         return response;
     }
 
+    [HttpPost("AddAdmin")]
+    public async Task<ActionResult<APIResponse>> AddAdmin([FromBody] AdminCreateDTO adminCreateDto)
+    {
+        var response = await serviceManager
+            .Administration.AddAdminAsync(adminCreateDto);
+        return response;
+    }
+
+    [HttpPut("UpdateAdmin")]
+    public async Task<ActionResult<APIResponse>> UpdateAdmin([FromBody] AdminUpdateDTO adminUpdateDto)
+    {
+        var response = await serviceManager
+            .Administration.UpdateAdminAsync(adminUpdateDto);
+        return response;
+    }
+
+    [HttpDelete("DeleteAdmin/{id:int}")]
+    public async Task<ActionResult<APIResponse>> DeleteAdmin(int id)
+    {
+        var response = await serviceManager
+            .Administration.DeleteAdmin(id);
+        return response;
+    }
 }
