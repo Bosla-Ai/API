@@ -47,6 +47,7 @@ public class RoadmapGeneratorController(
     }
 
     [HttpPost("save")]
+    [Authorize]
     public async Task<IActionResult> SaveRoadmap([FromBody] RoadmapDTO request)
     {
         var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
@@ -61,6 +62,7 @@ public class RoadmapGeneratorController(
     }
 
     [HttpGet("list")]
+    [Authorize]
     public async Task<IActionResult> GetAllRoadmaps()
     {
         var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
@@ -74,6 +76,7 @@ public class RoadmapGeneratorController(
     }
 
     [HttpGet("{id:int}")]
+    [Authorize]
     public async Task<IActionResult> GetRoadmapDetails(int id)
     {
         var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
