@@ -1,14 +1,12 @@
 using System.Net;
 using System.Security.Claims;
 using AutoMapper;
-using DocumentFormat.OpenXml.Drawing.Charts;
-using Domain.Entities;
 using Domain.Contracts;
+using Domain.Entities;
 using Domain.Exceptions;
 using Domain.Requests;
 using Domain.Responses;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
 using Service.Helpers;
 using Shared;
@@ -128,7 +126,7 @@ public class AuthenticationService(
         var email = principal?.FindFirst(ClaimTypes.Email)?.Value;
         var name = principal?.FindFirst(ClaimTypes.Name)?.Value ??
                    principal?.FindFirst("urn:github:login")?.Value;
-        var pictureUrl = principal?.FindFirst("urn:github:avatar")?.Value;
+        var pictureUrl = principal?.FindFirst("urn:github:avatar")?.Value ?? principal?.Claims.FirstOrDefault(c => c.Type.Contains("avatar", StringComparison.OrdinalIgnoreCase) || c.Type.Contains("picture", StringComparison.OrdinalIgnoreCase) || c.Type.Contains("image", StringComparison.OrdinalIgnoreCase))?.Value;
 
         if (string.IsNullOrWhiteSpace(externalId))
             throw new BadRequestException("GitHub did not return an identifier.");
@@ -430,7 +428,7 @@ public class AuthenticationService(
         var firstName = principal?.FindFirst(ClaimTypes.GivenName)?.Value;
         var lastName = principal?.FindFirst(ClaimTypes.Surname)?.Value;
         var name = principal?.FindFirst(ClaimTypes.Name)?.Value;
-        var pictureUrl = principal?.FindFirst("picture")?.Value;
+        var pictureUrl = principal?.FindFirst("picture")?.Value ?? principal?.Claims.FirstOrDefault(c => c.Type.Contains("picture", StringComparison.OrdinalIgnoreCase) || c.Type.Contains("image", StringComparison.OrdinalIgnoreCase) || c.Type.Contains("avatar", StringComparison.OrdinalIgnoreCase))?.Value;
 
         if (string.IsNullOrWhiteSpace(externalId))
             throw new BadRequestException("Provider did not return an identifier.");
