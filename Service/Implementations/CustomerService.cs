@@ -427,6 +427,13 @@ public class CustomerService(
                 }
 
                 yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "end", summary = "Roadmap generated" });
+
+                // Emit LLM text response alongside roadmap result
+                if (!string.IsNullOrEmpty(aiResponse))
+                {
+                    yield return FormatSse("text", new { delta = aiResponse });
+                }
+
                 yield return FormatSse("result", new { status = "success", data = resultData });
             }
             else if (interactionType == LLMInteractionType.ChooseTrack)
@@ -630,7 +637,7 @@ public class CustomerService(
         string apiUrl = options.CurrentValue.PipelineApi.BaseUrl;
 
         using var client = httpClientFactory.CreateClient();
-        client.Timeout = TimeSpan.FromMinutes(5);
+        client.Timeout = TimeSpan.FromMinutes(8);
 
         var jsonContent = JsonSerializer.Serialize(requestData);
         var httpContent = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
