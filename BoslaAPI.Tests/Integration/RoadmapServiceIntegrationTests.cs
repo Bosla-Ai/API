@@ -190,4 +190,62 @@ public class RoadmapServiceIntegrationTests : IDisposable
         await Assert.ThrowsAsync<Domain.Exceptions.NotFoundException>(() =>
             _service.GetRoadmapDetailsAsync(archivedRoadmap.Id, customerId));
     }
+
+    [Fact]
+    public async Task E2E_RoadmapLifecycle_Succeeds()
+    {
+        // Arrange
+        var customerId = "cust-e2e-regression";
+        var roadmapReq = new RoadmapDTO
+        {
+            Title = "E2E Integration Path",
+            RoadmapData = new RoadmapGenerationDTO
+            {
+                Data = new RoadmapSourcesDTO
+                {
+                    Udemy = new Dictionary<string, RoadmapItemDTO>
+                    {
+                        ["k1"] = new RoadmapItemDTO
+                        {
+                            Title = "E2E Course",
+                            Url = "https://udemy.com/e2e",
+                            Platform = "Udemy"
+                        }
+                    }
+                }
+            }
+        };
+
+        // 1. SAVE:
+        var saveResult = await _service.SaveRoadmapAsync(customerId, roadmapReq);
+        Assert.Equal(System.Net.HttpStatusCode.Created, saveResult.StatusCode);
+        var roadmapId = saveResult.Data;
+        Assert.True(roadmapId > 0);
+
+        // 2. LIST:
+        var listResult = await _service.GetAllUserRoadmapsAsync(customerId);
+        Assert.Equal(System.Net.HttpStatusCode.OK, listResult.StatusCode);
+        var roadmaps = listResult.Data.ToList();
+        Assert.Single(roadmaps);
+        Assert.Equal("E2E Integration Path", roadmaps[0].Title);
+
+        // 3. DETAILS:
+        var detailsResult = await _service.GetRoadmapDetailsAsync(roadmapId, customerId);
+        Assert.Equal(System.Net.HttpStatusCode.OK, detailsResult.StatusCode);
+        Assert.Equal("E2E Integration Path", detailsResult.Data.Title);
+        Assert.Single(detailsResult.Data.Courses);
+        Assert.Equal("E2E Course", detailsResult.Data.Courses.First().Title);
+
+        // 4. DELETE (Soft-Delete):
+        var deleteResult = await _service.DeleteRoadmapAsync(roadmapId, customerId);
+        Assert.Equal(System.Net.HttpStatusCode.OK, deleteResult.StatusCode);
+
+        // 5. LIST AGAIN (Should be empty due to IsArchived):
+        var finalListResult = await _service.GetAllUserRoadmapsAsync(customerId);
+        Assert.Empty(finalListResult.Data);
+
+        // 6. DETAILS AGAIN (Should throw NotFound)
+        await Assert.ThrowsAsync<Domain.Exceptions.NotFoundException>(() =>
+            _service.GetRoadmapDetailsAsync(roadmapId, customerId));
+    }
 }
