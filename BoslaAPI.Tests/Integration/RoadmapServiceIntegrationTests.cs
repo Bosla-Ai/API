@@ -1,5 +1,6 @@
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Moq;
 using Persistence.Data.Contexts;
 using Persistence.Repositories;
@@ -7,7 +8,6 @@ using Service.Implementations;
 using Shared.DTOs.RoadmapDTOs;
 using Shared.Enums;
 using Shared.Options;
-using Microsoft.Extensions.Options;
 
 namespace BoslaAPI.Tests.Integration;
 
@@ -78,12 +78,11 @@ public class RoadmapServiceIntegrationTests : IDisposable
         };
 
         // Act
-        var response = await _service.SaveRoadmapAsync(customerId, roadmapReq);
+        var result = await _service.SaveRoadmapAsync(customerId, roadmapReq);
 
         // Assert
-        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
-
-        // Verify Roadmap saved
+        Assert.Equal(System.Net.HttpStatusCode.Created, result.StatusCode);
+        var createdRoadmapId = result.Data;
         var savedRoadmap = await _dbContext.Set<Roadmap>()
             .Include(r => r.RoadmapCourses)
             .ThenInclude(rc => rc.Course)
