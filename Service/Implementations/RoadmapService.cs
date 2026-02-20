@@ -146,9 +146,6 @@ public class RoadmapService(
 
     public async Task<APIResponse<int>> SaveRoadmapAsync(string customerId, RoadmapDTO request)
     {
-        if (request == null || request.RoadmapData == null)
-            throw new BadRequestException("Invalid Roadmap Generation Payload.");
-
         var customerRepo = _unitOfWork.GetRepo<Customer, string>();
         var existingCustomer = await customerRepo.GetIdAsync(customerId);
         if (existingCustomer == null)
@@ -181,11 +178,10 @@ public class RoadmapService(
         var allItems = CollectAllItems(request.RoadmapData);
         var orderedItems = OrderByLearningPath(allItems, request.RoadmapData.LearningPath);
 
+        int orderCounter = 1;
+        var processedCourses = new Dictionary<string, Course>(StringComparer.OrdinalIgnoreCase);
         var addedCourseUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var processedCourses = new Dictionary<string, Course>(StringComparer.OrdinalIgnoreCase);
-
-        int index = 1;
         foreach (var (dto, sName) in orderedItems)
         {
             var url = dto.Url?.Trim();
@@ -212,34 +208,27 @@ public class RoadmapService(
                     courseToLink = new Course
                     {
                         Title = string.IsNullOrWhiteSpace(dto.Title) ? "Unknown" : (dto.Title.Length > 500 ? dto.Title[..500] : dto.Title),
-                        Description = dto.Description?.Length > 1000 ? dto.Description[..1000] : dto.Description,
                         Url = url,
-                        Instructor = null,
+                        Description = dto.Description?.Length > 1000 ? dto.Description[..1000] : dto.Description,
                         ImageUrl = dto.ImageUrl?.Length > 1000 ? dto.ImageUrl[..1000] : dto.ImageUrl,
                         Duration = dto.Duration?.Length > 50 ? dto.Duration[..50] : dto.Duration,
                         Rating = dto.Score > 5 ? 5.0 : dto.Score,
-                        ReviewCount = 0,
                         Platform = platformEnum,
                         Language = ResourceLanguage.en,
-                        CourseBudget = string.Equals(dto.Price, "Paid", StringComparison.OrdinalIgnoreCase)
-                            ? BudgetPreference.Paid
-                            : BudgetPreference.Free,
                         RetrievedAt = DateTime.UtcNow
                     };
 
                     await _unitOfWork.GetRepo<Course, int>().CreateAsync(courseToLink);
                 }
-                processedCourses[url] = courseToLink; // Add specifically to track freshly added courses
-                await _unitOfWork.SaveChangesAsync(); // save immediately per course
+
+                processedCourses[url] = courseToLink;
             }
 
             var safeSectionName = sName?.Length > 200 ? sName[..200] : sName;
             var roadmapCourse = new RoadmapCourse
             {
-                RoadmapId = roadmap.Id,
-                CourseId = courseToLink.Id,
                 Course = courseToLink,
-                Order = index++,
+                Order = orderCounter++,
                 SectionName = safeSectionName,
                 IsCompleted = false
             };
@@ -247,12 +236,11 @@ public class RoadmapService(
             roadmap.RoadmapCourses.Add(roadmapCourse);
         }
 
-        await _unitOfWork.GetRepo<Roadmap, int>().UpdateAsync(roadmap);
         await _unitOfWork.SaveChangesAsync();
 
-        return new APIResponse<int>
+        return new APIResponse<int>()
         {
-            StatusCode = HttpStatusCode.Created,
+            StatusCode = HttpStatusCode.OK,
             Data = roadmap.Id
         };
     }
@@ -264,8 +252,7 @@ public class RoadmapService(
         if (roadmap.CustomerId != userId)
             throw new UnauthorizedException("User is not authorized to delete this roadmap.");
 
-        roadmap.IsArchived = true;
-        await repo.UpdateAsync(roadmap);
+        await repo.DeleteAsync(roadmap);
         await _unitOfWork.SaveChangesAsync();
         return new APIResponse
         {
@@ -307,24 +294,24 @@ public class RoadmapService(
             SourceType = roadmap.SourceType,
             TargetJobRole = roadmap.TargetJobRole,
             CreatedAt = roadmap.CreatedAt,
-            Courses = roadmap.RoadmapCourses?.OrderBy(rc => rc.Order).Select(rc => new RoadmapCourseResponseDTO
+            Courses = [.. roadmap.RoadmapCourses.OrderBy(rc => rc.Order).Select(rc => new RoadmapCourseResponseDTO
             {
                 CourseId = rc.CourseId,
-                Title = rc.Course?.Title ?? "Unknown",
-                Description = rc.Course?.Description,
-                Url = rc.Course?.Url ?? string.Empty,
-                Instructor = rc.Course?.Instructor,
-                Platform = rc.Course?.Platform ?? Platforms.Youtube,
-                ImageUrl = rc.Course?.ImageUrl,
-                Duration = rc.Course?.Duration,
-                Rating = rc.Course?.Rating ?? 0,
-                Language = rc.Course?.Language ?? ResourceLanguage.en,
-                CourseBudget = rc.Course?.CourseBudget,
+                Title = rc.Course!.Title,
+                Description = rc.Course.Description,
+                Url = rc.Course.Url,
+                Instructor = rc.Course.Instructor,
+                Platform = rc.Course.Platform,
+                ImageUrl = rc.Course.ImageUrl,
+                Duration = rc.Course.Duration,
+                Rating = rc.Course.Rating,
+                Language = rc.Course.Language,
+                CourseBudget = rc.Course.CourseBudget,
                 Order = rc.Order,
                 SectionName = rc.SectionName,
                 IsCompleted = rc.IsCompleted,
                 CompletedAt = rc.CompletedAt
-            }).ToList() ?? []
+            })]
         };
 
         return new APIResponse<RoadmapDetailsResponseDTO>

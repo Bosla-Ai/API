@@ -77,7 +77,7 @@ public class RoadmapServiceTests
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, result.StatusCode);
-        _mockRoadmapRepo.Verify(r => r.UpdateAsync(It.Is<Roadmap>(x => x.IsArchived == true)), Times.Once);
+        _mockRoadmapRepo.Verify(r => r.DeleteAsync(roadmap), Times.Once);
         _mockUnitOfWork.Verify(u => u.SaveChangesAsync(), Times.Once);
     }
 
