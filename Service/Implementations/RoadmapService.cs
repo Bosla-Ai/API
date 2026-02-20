@@ -260,67 +260,6 @@ public class RoadmapService(
         };
     }
 
-    public async Task<APIResponse<IEnumerable<RoadmapListResponseDTO>>> GetAllUserRoadmapsAsync(string userId)
-    {
-        var spec = new RoadmapsByCustomerSpecification(userId);
-        var roadmaps = await _unitOfWork.GetRepo<Roadmap, int>().GetAllAsync(spec);
-
-        var result = roadmaps.OrderByDescending(r => r.CreatedAt).Select(r => new RoadmapListResponseDTO
-        {
-            Id = r.Id,
-            Title = r.Title,
-            Description = r.Description,
-            SourceType = r.SourceType,
-            TargetJobRole = r.TargetJobRole,
-            CreatedAt = r.CreatedAt
-        });
-
-        return new APIResponse<IEnumerable<RoadmapListResponseDTO>>
-        {
-            StatusCode = HttpStatusCode.OK,
-            Data = result
-        };
-    }
-
-    public async Task<APIResponse<RoadmapDetailsResponseDTO>> GetRoadmapDetailsAsync(int roadmapId, string userId)
-    {
-        var spec = new RoadmapsByCustomerSpecification(roadmapId, userId);
-        var roadmap = await _unitOfWork.GetRepo<Roadmap, int>().GetAsync(spec) ?? throw new NotFoundException("Roadmap not found.");
-        var details = new RoadmapDetailsResponseDTO
-        {
-            Id = roadmap.Id,
-            Title = roadmap.Title,
-            Description = roadmap.Description,
-            SourceType = roadmap.SourceType,
-            TargetJobRole = roadmap.TargetJobRole,
-            CreatedAt = roadmap.CreatedAt,
-            Courses = [.. roadmap.RoadmapCourses.OrderBy(rc => rc.Order).Select(rc => new RoadmapCourseResponseDTO
-            {
-                CourseId = rc.CourseId,
-                Title = rc.Course!.Title,
-                Description = rc.Course.Description,
-                Url = rc.Course.Url,
-                Instructor = rc.Course.Instructor,
-                Platform = rc.Course.Platform,
-                ImageUrl = rc.Course.ImageUrl,
-                Duration = rc.Course.Duration,
-                Rating = rc.Course.Rating,
-                Language = rc.Course.Language,
-                CourseBudget = rc.Course.CourseBudget,
-                Order = rc.Order,
-                SectionName = rc.SectionName,
-                IsCompleted = rc.IsCompleted,
-                CompletedAt = rc.CompletedAt
-            })]
-        };
-
-        return new APIResponse<RoadmapDetailsResponseDTO>
-        {
-            StatusCode = HttpStatusCode.OK,
-            Data = details
-        };
-    }
-
     private static List<(RoadmapItemDTO Item, string Platform, string TagKey)> CollectAllItems(RoadmapGenerationDTO roadmapData)
     {
         var items = new List<(RoadmapItemDTO, string, string)>();
