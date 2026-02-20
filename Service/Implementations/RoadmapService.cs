@@ -144,15 +144,30 @@ public class RoadmapService(
         };
     }
 
-    public async Task<APIResponse> SaveRoadmapAsync(string customerId, RoadmapDTO request)
+    public async Task<APIResponse<int>> SaveRoadmapAsync(string customerId, RoadmapDTO request)
     {
+        var customerRepo = _unitOfWork.GetRepo<Customer, string>();
+        var existingCustomer = await customerRepo.GetIdAsync(customerId);
+        if (existingCustomer == null)
+        {
+            // Auto-create customer profile if it doesn't exist for this ApplicationUser
+            existingCustomer = new Customer
+            {
+                ApplicationUserId = customerId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            await customerRepo.CreateAsync(existingCustomer);
+            await _unitOfWork.SaveChangesAsync(); // Ensure FK is available for Roadmap
+        }
+
         var roadmap = new Roadmap
         {
             CustomerId = customerId,
-            Title = request.Title,
-            Description = request.Description,
+            Title = string.IsNullOrWhiteSpace(request.Title) ? "Roadmap" : (request.Title.Length > 200 ? request.Title[..200] : request.Title),
+            Description = request.Description?.Length > 1000 ? request.Description[..1000] : request.Description,
             SourceType = request.SourceType,
-            TargetJobRole = request.TargetJobRole,
+            TargetJobRole = request.TargetJobRole?.Length > 200 ? request.TargetJobRole[..200] : request.TargetJobRole,
             CreatedAt = DateTime.UtcNow,
             IsArchived = false,
             RoadmapCourses = []
@@ -164,13 +179,21 @@ public class RoadmapService(
         var orderedItems = OrderByLearningPath(allItems, request.RoadmapData.LearningPath);
 
         int orderCounter = 1;
-        var processedCourses = new Dictionary<string, Course>();
+        var processedCourses = new Dictionary<string, Course>(StringComparer.OrdinalIgnoreCase);
+        var addedCourseUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (dto, sectionName) in orderedItems)
+        foreach (var (dto, sName) in orderedItems)
         {
-            if (!processedCourses.TryGetValue(dto.Url, out var courseToLink))
+            var url = dto.Url?.Trim();
+            if (string.IsNullOrWhiteSpace(url) || !addedCourseUrls.Add(url))
             {
-                var spec = new CourseByUrlSpecification(dto.Url);
+                continue; // Skip duplicate or invalid courses to prevent tracking exception
+            }
+            if (url.Length > 1000) url = url[..1000];
+
+            if (!processedCourses.TryGetValue(url, out var courseToLink))
+            {
+                var spec = new CourseByUrlSpecification(url);
                 var existingCourse = await _unitOfWork.GetRepo<Course, int>().GetAsync(spec);
 
                 if (existingCourse != null)
@@ -179,15 +202,16 @@ public class RoadmapService(
                 }
                 else
                 {
+                    var sectionName = sName?.Trim();
                     Enum.TryParse<Platforms>(dto.Platform ?? sectionName, true, out var platformEnum);
 
                     courseToLink = new Course
                     {
-                        Title = dto.Title,
-                        Url = dto.Url,
-                        Description = dto.Description,
-                        ImageUrl = dto.ImageUrl,
-                        Duration = dto.Duration,
+                        Title = string.IsNullOrWhiteSpace(dto.Title) ? "Unknown" : (dto.Title.Length > 500 ? dto.Title[..500] : dto.Title),
+                        Url = url,
+                        Description = dto.Description?.Length > 1000 ? dto.Description[..1000] : dto.Description,
+                        ImageUrl = dto.ImageUrl?.Length > 1000 ? dto.ImageUrl[..1000] : dto.ImageUrl,
+                        Duration = dto.Duration?.Length > 50 ? dto.Duration[..50] : dto.Duration,
                         Rating = dto.Score > 5 ? 5.0 : dto.Score,
                         Platform = platformEnum,
                         Language = ResourceLanguage.en,
@@ -197,14 +221,15 @@ public class RoadmapService(
                     await _unitOfWork.GetRepo<Course, int>().CreateAsync(courseToLink);
                 }
 
-                processedCourses[dto.Url] = courseToLink;
+                processedCourses[url] = courseToLink;
             }
 
+            var safeSectionName = sName?.Length > 200 ? sName[..200] : sName;
             var roadmapCourse = new RoadmapCourse
             {
                 Course = courseToLink,
                 Order = orderCounter++,
-                SectionName = sectionName,
+                SectionName = safeSectionName,
                 IsCompleted = false
             };
 
@@ -213,9 +238,10 @@ public class RoadmapService(
 
         await _unitOfWork.SaveChangesAsync();
 
-        return new APIResponse
+        return new APIResponse<int>()
         {
             StatusCode = HttpStatusCode.OK,
+            Data = roadmap.Id
         };
     }
 
