@@ -198,4 +198,21 @@ public class RoadmapServiceTests
         // Act & Assert
         await Assert.ThrowsAsync<NotFoundException>(() => _service.GetRoadmapDetailsAsync(99, "unknown-user"));
     }
+
+    [Fact]
+    public async Task SaveRoadmapAsync_ThrowsBadRequest_IfRequestIsNull()
+    {
+        // Act & Assert
+        await Assert.ThrowsAsync<BadRequestException>(() => _service.SaveRoadmapAsync("cust-1", null!));
+    }
+
+    [Fact]
+    public async Task SaveRoadmapAsync_ThrowsBadRequest_IfRoadmapDataIsNull()
+    {
+        // Arrange
+        var request = new RoadmapDTO { Title = "Test", RoadmapData = null! };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<BadRequestException>(() => _service.SaveRoadmapAsync("cust-1", request));
+    }
 }
