@@ -8,4 +8,6 @@ public interface IRoadmapService
     Task<APIResponse<RoadmapGenerationDTO>> GenerateRoadmapAsync(string[] tags, string language, bool preferPaid);
     Task<APIResponse<int>> SaveRoadmapAsync(string customerId, RoadmapDTO request);
     Task<APIResponse> DeleteRoadmapAsync(int roadmapId, string userId);
+    Task<APIResponse<IEnumerable<RoadmapListResponseDTO>>> GetAllUserRoadmapsAsync(string userId);
+    Task<APIResponse<RoadmapDetailsResponseDTO>> GetRoadmapDetailsAsync(int roadmapId, string userId);
 }
