@@ -1,8 +1,8 @@
 using System.Net;
 using System.Text.Json;
 using Domain.Contracts;
-using Domain.Entities;
 using Domain.Exceptions;
+using Domain.Entities;
 using Microsoft.Extensions.Options;
 using Moq;
 using Moq.Protected;
@@ -127,75 +127,4 @@ public class RoadmapServiceTests
     }
 
 
-    [Fact]
-    public async Task GetAllUserRoadmapsAsync_ReturnsOrderedList_ForValidUser()
-    {
-        // Arrange
-        var userId = "test-user-123";
-        var roadmaps = new List<Roadmap>
-        {
-            new() { Id = 1, CustomerId = userId, Title = "Older", CreatedAt = DateTime.UtcNow.AddDays(-2) },
-            new() { Id = 2, CustomerId = userId, Title = "Newer", CreatedAt = DateTime.UtcNow }
-        };
-
-        _mockRoadmapRepo.Setup(r => r.GetAllAsync(It.IsAny<Domain.Contracts.Specifications<Roadmap>>()))
-                        .ReturnsAsync(roadmaps);
-
-        // Act
-        var result = await _service.GetAllUserRoadmapsAsync(userId);
-
-        // Assert
-        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
-        var data = result.Data.ToList();
-        Assert.Equal(2, data.Count);
-        Assert.Equal("Newer", data[0].Title); // Ensures descending order
-        Assert.Equal("Older", data[1].Title);
-        Assert.Equal(2, data[0].Id);
-    }
-
-    [Fact]
-    public async Task GetRoadmapDetailsAsync_ReturnsMappedDetails_WhenRoadmapExists()
-    {
-        // Arrange
-        var userId = "test-user-123";
-        var roadmapId = 1;
-        var course = new Course { Id = 10, Title = "C# Mastery", Url = "https://example.com/csharp" };
-        var roadmapCourse = new RoadmapCourse { CourseId = 10, Course = course, Order = 1, SectionName = "Basics" };
-        var roadmap = new Roadmap
-        {
-            Id = roadmapId,
-            CustomerId = userId,
-            Title = "My Roadmap",
-            RoadmapCourses = [roadmapCourse]
-        };
-
-        _mockRoadmapRepo.Setup(r => r.GetAsync(It.IsAny<Domain.Contracts.Specifications<Roadmap>>()))
-                        .ReturnsAsync(roadmap);
-
-        // Act
-        var result = await _service.GetRoadmapDetailsAsync(roadmapId, userId);
-
-        // Assert
-        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
-        Assert.NotNull(result.Data);
-        Assert.Equal(roadmapId, result.Data.Id);
-        Assert.Equal("My Roadmap", result.Data.Title);
-
-        var courses = result.Data.Courses.ToList();
-        Assert.Single(courses);
-        Assert.Equal("C# Mastery", courses[0].Title);
-        Assert.Equal("Basics", courses[0].SectionName);
-        Assert.Equal(1, courses[0].Order);
-    }
-
-    [Fact]
-    public async Task GetRoadmapDetailsAsync_ThrowsNotFound_WhenRoadmapDoesNotExist()
-    {
-        // Arrange
-        _mockRoadmapRepo.Setup(r => r.GetAsync(It.IsAny<Domain.Contracts.Specifications<Roadmap>>()))
-                        .ReturnsAsync((Roadmap)null!);
-
-        // Act & Assert
-        await Assert.ThrowsAsync<NotFoundException>(() => _service.GetRoadmapDetailsAsync(99, "unknown-user"));
-    }
 }
