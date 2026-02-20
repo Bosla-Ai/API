@@ -79,6 +79,7 @@ builder.Services
         options.ClientSecret = authOptions.Google.ClientSecret;
         options.CallbackPath = "/api/ExternalAuthentication/signin-google";
         options.ClaimActions.MapJsonKey("urn:google:email_verified", "email_verified");
+        options.ClaimActions.MapJsonKey("picture", "picture");
         options.UsePkce = true;
     })
     .AddGitHub("Github", options =>
