@@ -154,4 +154,40 @@ public class RoadmapServiceIntegrationTests : IDisposable
         Assert.Single(savedRoadmap.RoadmapCourses);
         Assert.Equal(existingCourse.Id, savedRoadmap.RoadmapCourses.First().Course.Id);
     }
+
+    [Fact]
+    public async Task GetAllUserRoadmapsAsync_ExcludesArchivedRoadmaps_Successfully()
+    {
+        // Arrange
+        var customerId = "cust-archived-test";
+        var activeRoadmap = new Roadmap { CustomerId = customerId, Title = "Active", IsArchived = false };
+        var archivedRoadmap = new Roadmap { CustomerId = customerId, Title = "Archived", IsArchived = true };
+
+        _dbContext.Set<Roadmap>().AddRange(activeRoadmap, archivedRoadmap);
+        await _dbContext.SaveChangesAsync();
+
+        // Act
+        var result = await _service.GetAllUserRoadmapsAsync(customerId);
+
+        // Assert
+        Assert.Equal(System.Net.HttpStatusCode.OK, result.StatusCode);
+
+        var roadmaps = result.Data.ToList();
+        Assert.Single(roadmaps);
+        Assert.Equal("Active", roadmaps[0].Title);
+    }
+
+    [Fact]
+    public async Task GetRoadmapDetailsAsync_ThrowsNotFound_WhenArchived_Successfully()
+    {
+        // Arrange
+        var customerId = "cust-details-archived";
+        var archivedRoadmap = new Roadmap { CustomerId = customerId, Title = "Archived Details", IsArchived = true };
+        _dbContext.Set<Roadmap>().Add(archivedRoadmap);
+        await _dbContext.SaveChangesAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<Domain.Exceptions.NotFoundException>(() =>
+            _service.GetRoadmapDetailsAsync(archivedRoadmap.Id, customerId));
+    }
 }
