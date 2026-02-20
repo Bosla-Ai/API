@@ -1,13 +1,9 @@
-using System.Net;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.Authorization;
+using Domain.Responses;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
 using Service.Abstraction;
 using Shared.DTOs.RoadmapDTOs;
-using Domain.Exceptions;
-using Domain.Responses;
 
 namespace Presentation.Controllers;
 
@@ -49,7 +45,6 @@ public class RoadmapGeneratorController(
     }
 
     [HttpPost("save")]
-    [Authorize]
     public async Task<IActionResult> SaveRoadmap([FromBody] RoadmapDTO request)
     {
         var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
@@ -63,8 +58,33 @@ public class RoadmapGeneratorController(
         return Ok(success);
     }
 
+    [HttpGet("list")]
+    public async Task<IActionResult> GetAllRoadmaps()
+    {
+        var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
+                     ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized("User ID not found in token.");
+
+        var result = await serviceManager.Roadmap.GetAllUserRoadmapsAsync(userId);
+        return Ok(result);
+    }
+
+    [HttpGet("{id:int}")]
+    public async Task<IActionResult> GetRoadmapDetails(int id)
+    {
+        var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
+                     ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized("User ID not found in token.");
+
+        var result = await serviceManager.Roadmap.GetRoadmapDetailsAsync(id, userId);
+        return Ok(result);
+    }
+
     [HttpDelete("delete/{id:int}")]
-    [Authorize]
     public async Task<ActionResult<APIResponse>> DeleteRoadmap(int id)
     {
         var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
