@@ -184,6 +184,16 @@ public class RoadmapService(
         var addedCourseUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var processedCourses = new Dictionary<string, Course>(StringComparer.OrdinalIgnoreCase);
+        if (orderedItems.Count != 0)
+        {
+            var urls = orderedItems.Select(x => x.Item.Url?.Trim()).Where(u => !string.IsNullOrEmpty(u)).ToList();
+            if (urls.Count > 0)
+            {
+                var spec = new CourseByUrlSpecification(urls);
+                var coursesInDb = await _unitOfWork.GetRepo<Course, int>().GetAllAsync(spec);
+                processedCourses = coursesInDb.ToDictionary(c => c.Url, c => c, StringComparer.OrdinalIgnoreCase);
+            }
+        }
 
         int index = 1;
         foreach (var (dto, sName) in orderedItems)
@@ -197,38 +207,28 @@ public class RoadmapService(
 
             if (!processedCourses.TryGetValue(url, out var courseToLink))
             {
-                var spec = new CourseByUrlSpecification(url);
-                var existingCourse = await _unitOfWork.GetRepo<Course, int>().GetAsync(spec);
+                var sectionName = sName?.Trim();
+                Enum.TryParse<Platforms>(dto.Platform ?? sectionName, true, out var platformEnum);
 
-                if (existingCourse != null)
+                courseToLink = new Course
                 {
-                    courseToLink = existingCourse;
-                }
-                else
-                {
-                    var sectionName = sName?.Trim();
-                    Enum.TryParse<Platforms>(dto.Platform ?? sectionName, true, out var platformEnum);
+                    Title = string.IsNullOrWhiteSpace(dto.Title) ? "Unknown" : (dto.Title.Length > 500 ? dto.Title[..500] : dto.Title),
+                    Description = dto.Description?.Length > 1000 ? dto.Description[..1000] : dto.Description,
+                    Url = url,
+                    Instructor = null,
+                    ImageUrl = dto.ImageUrl?.Length > 1000 ? dto.ImageUrl[..1000] : dto.ImageUrl,
+                    Duration = dto.Duration?.Length > 50 ? dto.Duration[..50] : dto.Duration,
+                    Rating = dto.Score > 5 ? 5.0 : dto.Score,
+                    ReviewCount = 0,
+                    Platform = platformEnum,
+                    Language = ResourceLanguage.en,
+                    CourseBudget = string.Equals(dto.Price, "Paid", StringComparison.OrdinalIgnoreCase)
+                        ? BudgetPreference.Paid
+                        : BudgetPreference.Free,
+                    RetrievedAt = DateTime.UtcNow
+                };
 
-                    courseToLink = new Course
-                    {
-                        Title = string.IsNullOrWhiteSpace(dto.Title) ? "Unknown" : (dto.Title.Length > 500 ? dto.Title[..500] : dto.Title),
-                        Description = dto.Description?.Length > 1000 ? dto.Description[..1000] : dto.Description,
-                        Url = url,
-                        Instructor = null,
-                        ImageUrl = dto.ImageUrl?.Length > 1000 ? dto.ImageUrl[..1000] : dto.ImageUrl,
-                        Duration = dto.Duration?.Length > 50 ? dto.Duration[..50] : dto.Duration,
-                        Rating = dto.Score > 5 ? 5.0 : dto.Score,
-                        ReviewCount = 0,
-                        Platform = platformEnum,
-                        Language = ResourceLanguage.en,
-                        CourseBudget = string.Equals(dto.Price, "Paid", StringComparison.OrdinalIgnoreCase)
-                            ? BudgetPreference.Paid
-                            : BudgetPreference.Free,
-                        RetrievedAt = DateTime.UtcNow
-                    };
-
-                    await _unitOfWork.GetRepo<Course, int>().CreateAsync(courseToLink);
-                }
+                await _unitOfWork.GetRepo<Course, int>().CreateAsync(courseToLink);
                 processedCourses[url] = courseToLink; // Add specifically to track freshly added courses
                 await _unitOfWork.SaveChangesAsync(); // save immediately per course
             }
@@ -238,7 +238,6 @@ public class RoadmapService(
             {
                 RoadmapId = roadmap.Id,
                 CourseId = courseToLink.Id,
-                Course = courseToLink,
                 Order = index++,
                 SectionName = safeSectionName,
                 IsCompleted = false
@@ -247,7 +246,6 @@ public class RoadmapService(
             roadmap.RoadmapCourses.Add(roadmapCourse);
         }
 
-        await _unitOfWork.GetRepo<Roadmap, int>().UpdateAsync(roadmap);
         await _unitOfWork.SaveChangesAsync();
 
         return new APIResponse<int>

@@ -1,9 +1,15 @@
-using System.Linq.Expressions;
 using Domain.Contracts;
 using Domain.Entities;
 
 namespace Domain.ModelsSpecifications;
 
-public class CourseByUrlSpecification(string url) : Specifications<Course>(c => c.Url == url)
+public class CourseByUrlSpecification : Specifications<Course>
 {
+    public CourseByUrlSpecification(string url) : base(c => c.Url == url)
+    {
+    }
+
+    public CourseByUrlSpecification(IEnumerable<string> urls) : base(c => urls.Contains(c.Url))
+    {
+    }
 }
