@@ -9,5 +9,6 @@ public class RoadmapListResponseDTO
     public string? Description { get; set; }
     public RoadmapSourceType SourceType { get; set; }
     public string? TargetJobRole { get; set; }
+    public string? GenerationId { get; set; }
     public DateTime CreatedAt { get; set; }
 }

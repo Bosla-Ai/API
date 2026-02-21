@@ -14,6 +14,8 @@ public class RoadmapDTO
 
     public string? TargetJobRole { get; set; }
 
+    public string? GenerationId { get; set; }
+
     [Required]
     public RoadmapGenerationDTO RoadmapData { get; set; } = null!;
 }
