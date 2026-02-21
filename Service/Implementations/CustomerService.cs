@@ -406,7 +406,9 @@ public class CustomerService(
                 yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "processing" });
 
                 var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments!, cancellationToken);
-                finalResponse = $"[SYSTEM]: Roadmap generated successfully.\nDetails: {apiResponse}";
+
+                // Generate a stable ID that links the Cosmos chat message to a saved roadmap
+                var generationId = Guid.NewGuid().ToString();
 
                 object? resultData = null;
                 try
@@ -425,6 +427,27 @@ public class CustomerService(
                 {
                     resultData = apiResponse;
                 }
+
+                // Inject generationId into result data so it's stored in Cosmos and sent via SSE
+                string resultJsonString;
+                try
+                {
+                    var rawJson = resultData is JsonElement je2 ? je2.GetRawText() : JsonSerializer.Serialize(resultData);
+                    var node = System.Text.Json.Nodes.JsonNode.Parse(rawJson);
+                    if (node is System.Text.Json.Nodes.JsonObject obj)
+                    {
+                        obj["generationId"] = generationId;
+                    }
+                    resultJsonString = node?.ToJsonString() ?? rawJson;
+                    resultData = JsonSerializer.Deserialize<JsonElement>(resultJsonString);
+                }
+                catch
+                {
+                    resultJsonString = JsonSerializer.Serialize(new { data = resultData, generationId }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                    resultData = JsonSerializer.Deserialize<JsonElement>(resultJsonString);
+                }
+
+                finalResponse = $"[SYSTEM]: Roadmap generated successfully.\nDetails: {resultJsonString}";
 
                 yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "end", summary = "Roadmap generated" });
 
