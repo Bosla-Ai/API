@@ -10,6 +10,7 @@ public sealed class Roadmap
 
     public RoadmapSourceType SourceType { get; set; }
     public string? TargetJobRole { get; set; }
+    public string? GenerationId { get; set; }
 
     // relationships
     public string CustomerId { get; set; }
