@@ -171,6 +171,7 @@ public class RoadmapService(
             Description = request.Description?.Length > 1000 ? request.Description[..1000] : request.Description,
             SourceType = request.SourceType,
             TargetJobRole = request.TargetJobRole?.Length > 200 ? request.TargetJobRole[..200] : request.TargetJobRole,
+            GenerationId = request.GenerationId,
             CreatedAt = DateTime.UtcNow,
             IsArchived = false,
             RoadmapCourses = []
@@ -283,6 +284,7 @@ public class RoadmapService(
             Description = r.Description,
             SourceType = r.SourceType,
             TargetJobRole = r.TargetJobRole,
+            GenerationId = r.GenerationId,
             CreatedAt = r.CreatedAt
         });
 
