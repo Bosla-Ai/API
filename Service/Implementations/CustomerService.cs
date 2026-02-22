@@ -433,12 +433,7 @@ public class CustomerService(
                 try
                 {
                     var rawJson = resultData is JsonElement je2 ? je2.GetRawText() : JsonSerializer.Serialize(resultData);
-                    var node = System.Text.Json.Nodes.JsonNode.Parse(rawJson);
-                    if (node is System.Text.Json.Nodes.JsonObject obj)
-                    {
-                        obj["generationId"] = generationId;
-                    }
-                    resultJsonString = node?.ToJsonString() ?? rawJson;
+                    resultJsonString = InjectGenerationId(rawJson, generationId);
                     resultData = JsonSerializer.Deserialize<JsonElement>(resultJsonString);
                 }
                 catch
@@ -814,5 +809,15 @@ public class CustomerService(
         }
 
         return [.. keywords.Distinct(StringComparer.OrdinalIgnoreCase).Take(5)];
+    }
+
+    private static string InjectGenerationId(string json, string generationId)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(json);
+        if (node is System.Text.Json.Nodes.JsonObject obj)
+        {
+            obj["generationId"] = generationId;
+        }
+        return node?.ToJsonString() ?? json;
     }
 }
