@@ -231,6 +231,7 @@ public class CustomerService(
         var followUpSuggestions = parsed?.followUpSuggestions;
         var videoUrl = parsed?.videoUrl;
         var videoSearchQuery = parsed?.videoSearchQuery;
+        var questions = parsed?.questions;
 
         // If we didn't get market data yet but now have a target role, try again
         if (fetchedMarketInsight is null && !string.IsNullOrEmpty(targetRole))
@@ -268,6 +269,27 @@ public class CustomerService(
             tags = toolArguments?.Tags,
             targetRole,
         });
+
+        // If the AI decided to ask the user questions, emit ask_user and stop
+        if (questions is { Length: > 0 })
+        {
+            // Emit the response text first (introduces the questions)
+            if (!string.IsNullOrEmpty(aiResponse))
+                yield return FormatSse("text", new { delta = aiResponse });
+
+            yield return FormatSse("ask_user", new { questions });
+
+            if (followUpSuggestions is { Length: > 0 })
+                yield return FormatSse("suggestions", new { items = followUpSuggestions });
+
+            yield return FormatSse("done", new { message = "Questions sent" });
+
+            // Save conversation context
+            await conversationContextManager.AddMessageToContextAsync(
+                userId, actualSessionId, aiResponse ?? "Asked clarification questions", "assistant");
+
+            yield break;
+        }
 
         if (interactionType == LLMInteractionType.TopicPreview)
         {
@@ -399,6 +421,16 @@ public class CustomerService(
 
                 yield return FormatSse("pipeline_job", new { jobId });
 
+                if (toolArguments.PreferPaid || (toolArguments.Sources?.Any(s => s.Equals("udemy", StringComparison.OrdinalIgnoreCase)) ?? false))
+                {
+                    yield return FormatSse("udemy_source_warning", new
+                    {
+                        message = "This feature is still in development ",
+                        source = "udemy",
+                        estimatedTimeSeconds = 60
+                    });
+                }
+
                 yield return FormatSse("status", new { message = "Running Bosla Education Pipeline...", step = "tool_execution" });
                 if (toolArguments?.Tags != null)
                     yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "start", summary = $"Detected Interests: {string.Join(", ", toolArguments.Tags)}" });
@@ -496,7 +528,7 @@ public class CustomerService(
             await Task.WhenAll(contextTask, addMessageTask);
             var conversationContext = await contextTask;
 
-            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery) = await DetectIntentAsync(query, conversationContext.ToString());
+            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, _) = await DetectIntentAsync(query, conversationContext.ToString());
 
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
@@ -547,7 +579,7 @@ public class CustomerService(
         }
     }
 
-    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery)> DetectIntentAsync(string query, string conversationContext)
+    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)> DetectIntentAsync(string query, string conversationContext)
     {
         var prompts = options.CurrentValue.Prompts;
         var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
@@ -559,13 +591,13 @@ public class CustomerService(
             var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestToGemini(detectionPrompt, useThinking: true);
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
-                return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName, thinkingContent, parsed.Value.targetRole, parsed.Value.followUpSuggestions, parsed.Value.videoUrl, parsed.Value.videoSearchQuery);
+                return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName, thinkingContent, parsed.Value.targetRole, parsed.Value.followUpSuggestions, parsed.Value.videoUrl, parsed.Value.videoSearchQuery, parsed.Value.questions);
 
-            return (LLMInteractionType.ChatWithAI, 0, null, null, modelName, thinkingContent, null, null, null, null);
+            return (LLMInteractionType.ChatWithAI, 0, null, null, modelName, thinkingContent, null, null, null, null, null);
         }
         catch
         {
-            return (LLMInteractionType.ChatWithAI, 0, null, null, "Unknown", null, null, null, null, null);
+            return (LLMInteractionType.ChatWithAI, 0, null, null, "Unknown", null, null, null, null, null, null);
         }
     }
 
@@ -577,7 +609,7 @@ public class CustomerService(
             query);
     }
 
-    private (LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery)? ParseCombinedResponse(string? responseText)
+    private (LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)? ParseCombinedResponse(string? responseText)
     {
         if (string.IsNullOrWhiteSpace(responseText))
             return null;
@@ -635,9 +667,15 @@ public class CustomerService(
                 ? vsqProp.GetString()
                 : null;
 
+            AskUserQuestion[]? questions = null;
+            if (root.TryGetProperty("questions", out var qProp) && qProp.ValueKind == JsonValueKind.Array)
+            {
+                questions = JsonSerializer.Deserialize<AskUserQuestion[]>(qProp.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            }
+
             if (!string.IsNullOrEmpty(intentStr) && Enum.TryParse<LLMInteractionType>(intentStr, true, out var intent))
             {
-                return (intent, Math.Clamp(confidence, 0, 100), response, toolArguments, targetRole, followUpSuggestions, videoUrl, videoSearchQuery);
+                return (intent, Math.Clamp(confidence, 0, 100), response, toolArguments, targetRole, followUpSuggestions, videoUrl, videoSearchQuery, questions);
             }
         }
         catch (Exception ex)
