@@ -421,16 +421,6 @@ public class CustomerService(
 
                 yield return FormatSse("pipeline_job", new { jobId });
 
-                if (toolArguments.PreferPaid || (toolArguments.Sources?.Any(s => s.Equals("udemy", StringComparison.OrdinalIgnoreCase)) ?? false))
-                {
-                    yield return FormatSse("udemy_source_warning", new
-                    {
-                        message = "This feature is still in development ",
-                        source = "udemy",
-                        estimatedTimeSeconds = 60
-                    });
-                }
-
                 yield return FormatSse("status", new { message = "Running Bosla Education Pipeline...", step = "tool_execution" });
                 if (toolArguments?.Tags != null)
                     yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "start", summary = $"Detected Interests: {string.Join(", ", toolArguments.Tags)}" });
