@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Domain.Exceptions;
 using Domain.Responses;
 using Microsoft.Extensions.Logging;
@@ -67,7 +68,7 @@ public class ChatHistoryService(
                 return new ChatSessionSummaryDTO
                 {
                     SessionId = group.Key,
-                    Title = TruncatePreview(firstUserMessage?.Message ?? "New Chat"),
+                    Title = TruncatePreview(StripModePrefix(firstUserMessage?.Message ?? "New Chat")),
                     LastMessageAt = latestMessage.CreatedAt,
                     LastMessagePreview = TruncatePreview(previewMessage.Message),
                     MessageCount = messages.Count
@@ -197,5 +198,11 @@ public class ChatHistoryService(
             return message;
 
         return message[..MESSAGE_PREVIEW_LENGTH] + "...";
+    }
+
+    private static string StripModePrefix(string message)
+    {
+        var stripped = Regex.Replace(message, @"^\[Active Mode: [^\]]+\]\n?", "").Trim();
+        return string.IsNullOrEmpty(stripped) ? message : stripped;
     }
 }
