@@ -79,6 +79,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IServiceManager, ServiceManager>(); // for generalization
         services.AddScoped<AuthenticationHelper>();
         services.AddScoped<CustomerHelper>();
+        services.AddSingleton<UserRateLimiter>();
         services.AddScoped<ConversationContextManager>();
 
         services.AddScoped<IAuthTicketStore, AuthTicketStore>();
