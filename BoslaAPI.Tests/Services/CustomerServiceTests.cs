@@ -1,14 +1,9 @@
-using System.Net;
 using AutoMapper;
 using Domain.Contracts;
 using Domain.Entities;
-using Domain.Exceptions;
-using Domain.ModelsSpecifications;
-using Domain.Responses;
 using FluentAssertions;
 using Moq;
 using Service.Implementations;
-using Shared.DTOs.CustomerDTOs;
 
 namespace BoslaAPI.Tests.Services;
 
@@ -65,7 +60,7 @@ public class CustomerServiceTests
         // Arrange
         _customerRepoMock
             .Setup(r => r.GetAllAsync(null))
-            .ReturnsAsync(new List<Customer>());
+            .ReturnsAsync([]);
 
         var mapperMock = new Mock<IMapper>();
         var service = CreateServiceWithMockedDependencies(mapperMock.Object);
@@ -166,6 +161,6 @@ public class CustomerServiceTests
     // so we skip testing methods that require them
     private CustomerService CreateServiceWithMockedDependencies(IMapper mapper)
     {
-        return new CustomerService(_unitOfWorkMock.Object, mapper, null!, null!, null!, null!, null!, null!, null!);
+        return new CustomerService(_unitOfWorkMock.Object, mapper, null!, null!, null!, null!, null!, null!, null!, null!);
     }
 }
