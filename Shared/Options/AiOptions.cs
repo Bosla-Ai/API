@@ -22,7 +22,7 @@ public class PipelineApiOptions
 {
     public string BaseUrl { get; set; } = "http://localhost:7860/generate-roadmap";
 
- 
+
     public string VideoSearchUrl
     {
         get
@@ -36,9 +36,12 @@ public class PipelineApiOptions
 public class GeminiOptions
 {
     public List<string> ApiKeys { get; set; } = [];
-    public string Model { get; set; } = "gemini-3-flash-preview";
+    public string Model { get; set; } = "gemini-3.1-flash-preview";
     public string ApiUrl { get; set; } = string.Empty;
     public bool IncludeThoughts { get; set; } = true;
+
+    // Per-user daily request limit (easy to change via .env or appsettings)
+    public int MaxRequestsPerUserPerDay { get; set; } = 5;
 }
 
 public class LlmOptions
@@ -46,8 +49,13 @@ public class LlmOptions
     public string Provider { get; set; } = "openrouter";
     public string ApiKey { get; set; } = string.Empty;
     public string ApiUrl { get; set; } = "https://openrouter.ai/api/v1/chat/completions";
-    public string Model { get; set; } = "qwen/qwen-2.5-coder-32b-instruct";
+    public string Model { get; set; } = "qwen/qwen3-coder:free";
     public bool IncludeReasoning { get; set; } = false;
+
+    // Task-based model routing
+    public string IntentModel { get; set; } = "qwen/qwen3-coder:free";
+    public string ChatModel { get; set; } = "qwen/qwen3-next-80b-a3b-instruct:free";
+    public string ReasoningModel { get; set; } = "deepseek/deepseek-r1-0528:free";
 }
 
 public class PromptOptions
