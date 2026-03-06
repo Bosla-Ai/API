@@ -10,6 +10,7 @@ using Domain.Entities;
 using Domain.Exceptions;
 using Domain.ModelsSpecifications;
 using Domain.Responses;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Service.Abstraction;
@@ -32,8 +33,14 @@ public class CustomerService(
     , IOptionsMonitor<AiOptions> options
     , IHttpClientFactory httpClientFactory
     , AiRequestStore aiRequestStore
-    , IJobMarketService jobMarketService) : ICustomerService
+    , IJobMarketService jobMarketService
+    , IHttpContextAccessor httpContextAccessor) : ICustomerService
 {
+    private bool IsSuperAdmin()
+    {
+        var user = httpContextAccessor.HttpContext?.User;
+        return user?.IsInRole(StaticData.SuperAdminRoleName) ?? false;
+    }
     public async Task<APIResponse<string>> ProcessUserQueryAsync(string userId, string query, string? sessionId = null)
     {
         if (string.IsNullOrWhiteSpace(userId))
@@ -49,7 +56,7 @@ public class CustomerService(
 
         string aiPrompt = $"Context:\n{conversationContext}\n\nCurrent User Query: {query}\n\nPlease provide a helpful response considering the conversation history if relevant.";
 
-        var (geminiResponse, _, _) = await customerHelper.SendRequestToGemini(aiPrompt, useThinking: false);
+        var (geminiResponse, _, _) = await customerHelper.SendRequestToGemini(aiPrompt, useThinking: false, userId: userId, isSuperAdmin: IsSuperAdmin());
         string responseText = geminiResponse;
 
         await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, responseText, "assistant");
@@ -169,8 +176,8 @@ public class CustomerService(
         string? thinkingTitle = null;
         bool titleExtracted = false;
 
-        // Stream detection to catch thoughts in real-time
-        await foreach (var chunk in customerHelper.SendStreamRequestToGemini(detectionPrompt, useThinking: true, cancellationToken: cancellationToken))
+        // Stream intent detection \u2014 internal task, uses intent model directly
+        await foreach (var chunk in customerHelper.SendStreamRequestWithModel(detectionPrompt, options.CurrentValue.Llm.IntentModel, useThinking: true, cancellationToken: cancellationToken, userId: userId, isSuperAdmin: IsSuperAdmin()))
         {
             if (chunk.StartsWith("__FALLBACK__:"))
             {
@@ -354,7 +361,7 @@ public class CustomerService(
 
             try
             {
-                await foreach (var chunk in customerHelper.SendStreamRequestToGemini(chatPrompt, useThinking: false, cancellationToken: cancellationToken))
+                await foreach (var chunk in customerHelper.SendStreamRequestByTask(chatPrompt, LLMInteractionType.ChatWithAI, useThinking: false, cancellationToken: cancellationToken, userId: userId, isSuperAdmin: IsSuperAdmin()))
                 {
                     if (chunk.StartsWith("__FALLBACK__:"))
                     {
@@ -578,7 +585,7 @@ public class CustomerService(
             query);
         try
         {
-            var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestToGemini(detectionPrompt, useThinking: true);
+            var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestWithModel(detectionPrompt, options.CurrentValue.Llm.IntentModel, useThinking: true);
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
                 return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName, thinkingContent, parsed.Value.targetRole, parsed.Value.followUpSuggestions, parsed.Value.videoUrl, parsed.Value.videoSearchQuery, parsed.Value.questions);
