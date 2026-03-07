@@ -1,16 +1,15 @@
 using System.Security.Claims;
 using Domain.Exceptions;
 using Domain.Responses;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Shared;
-using Shared.Options;
 using Shared.DTOs;
 using Shared.DTOs.DashboardDTOs;
+using Shared.Options;
 
 namespace Presentation.Controllers;
 
@@ -62,7 +61,7 @@ public class UserController(
         try
         {
             await foreach (var chunk in serviceManager.Customer
-                .ProcessUserQueryStreamAsync(userId, request.Query!, request.SessionId, cancellationToken)
+                .ProcessUserQueryStreamAsync(userId, request.Query!, request.SessionId, cancellationToken, request.ChatMode)
                 .WithCancellation(cancellationToken))
             {
                 await Response.WriteAsync($"{chunk}\n\n", cancellationToken);
