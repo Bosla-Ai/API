@@ -795,7 +795,10 @@ public class CustomerHelper
                             throw new InternalServerErrorException($"OpenRouter stream error: {errorMessage}");
                         }
 
-                        var content = chunk?.choices?[0]?.delta?.content?.ToString() ?? string.Empty;
+                        var choices = chunk?.choices;
+                        if (choices == null || choices.Count == 0) continue;
+
+                        var content = (string)(choices[0]?.delta?.content?.ToString() ?? string.Empty);
 
                         if (string.IsNullOrEmpty(content)) continue;
 
