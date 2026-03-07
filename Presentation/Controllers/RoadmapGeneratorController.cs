@@ -14,7 +14,6 @@ using Shared.Options;
 
 [ApiController]
 [Authorize]
-[EnableRateLimiting("RoadmapPolicy")]
 public class RoadmapGeneratorController(
     IServiceManager serviceManager
     , IOptions<CookieSettingsOptions> cookieOptions) : ApiController(cookieOptions)
@@ -23,6 +22,7 @@ public class RoadmapGeneratorController(
     private static readonly Regex SafeTagPattern = new(@"^[\w\s\-\.\#\+]+$", RegexOptions.Compiled);
 
     [HttpPost("generate")]
+    [EnableRateLimiting("RoadmapPolicy")]
     public async Task<IActionResult> Generate([FromBody] RoadmapRequestDTO request)
     {
         if (request.Tags == null || request.Tags.Length == 0)
@@ -49,6 +49,7 @@ public class RoadmapGeneratorController(
     }
 
     [HttpPost("save")]
+    [EnableRateLimiting("GeneralPolicy")]
     public async Task<IActionResult> SaveRoadmap([FromBody] RoadmapDTO request)
     {
         var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
@@ -63,6 +64,7 @@ public class RoadmapGeneratorController(
     }
 
     [HttpGet("list")]
+    [EnableRateLimiting("GeneralPolicy")]
     public async Task<IActionResult> GetAllRoadmaps()
     {
         var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
@@ -76,6 +78,7 @@ public class RoadmapGeneratorController(
     }
 
     [HttpGet("{id:int}")]
+    [EnableRateLimiting("GeneralPolicy")]
     public async Task<IActionResult> GetRoadmapDetails(int id)
     {
         var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
@@ -89,6 +92,7 @@ public class RoadmapGeneratorController(
     }
 
     [HttpDelete("delete/{id:int}")]
+    [EnableRateLimiting("GeneralPolicy")]
     public async Task<ActionResult<APIResponse>> DeleteRoadmap(int id)
     {
         var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
