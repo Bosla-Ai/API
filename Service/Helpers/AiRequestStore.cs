@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Domain.Exceptions;
 using Shared;
 
 namespace Service.Helpers;
@@ -6,10 +7,13 @@ namespace Service.Helpers;
 public class AiRequestStore
 {
     private readonly ConcurrentDictionary<string, RequestEntry> _requests = new();
+    private readonly ConcurrentDictionary<string, object> _userLocks = new();
     private readonly TimeSpan _ttl = TimeSpan.FromSeconds(60);
     private readonly Lock _cleanupLock = new();
     private DateTime _lastCleanup = DateTime.UtcNow;
     private readonly TimeSpan _cleanupInterval = TimeSpan.FromSeconds(30);
+
+    private const int MaxPendingPerUser = 3;
 
     private record RequestEntry(string UserId, AiQueryRequest Request, DateTime CreatedAt);
 
@@ -20,16 +24,29 @@ public class AiRequestStore
         if (request == null)
             throw new ArgumentNullException(nameof(request));
 
-        // Generate secure, unpredictable requestId
-        var requestId = $"req_{Guid.NewGuid():N}";
-        var entry = new RequestEntry(userId, request, DateTime.UtcNow);
+        var userLock = _userLocks.GetOrAdd(userId, _ => new object());
 
-        _requests[requestId] = entry;
+        lock (userLock)
+        {
+            // Enforce per-user concurrency limit (atomic check + insert)
+            var now = DateTime.UtcNow;
+            var userPending = _requests.Values
+                .Count(e => e.UserId == userId && now - e.CreatedAt <= _ttl);
 
-        // Trigger cleanup if needed (non-blocking)
-        TryCleanupExpired();
+            if (userPending >= MaxPendingPerUser)
+                throw new TooManyPendingRequestsException(MaxPendingPerUser);
 
-        return requestId;
+            // Generate secure, unpredictable requestId
+            var requestId = $"req_{Guid.NewGuid():N}";
+            var entry = new RequestEntry(userId, request, now);
+
+            _requests[requestId] = entry;
+
+            // Trigger cleanup if needed (non-blocking)
+            TryCleanupExpired();
+
+            return requestId;
+        }
     }
 
     public (string UserId, AiQueryRequest Request)? GetAndRemove(string requestId)
