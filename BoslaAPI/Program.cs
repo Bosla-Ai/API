@@ -1,8 +1,10 @@
-using System.Security.Claims;
+using System.Net;
+using BoslaAPI.BackgroundServices;
 using BoslaAPI.Extensions;
 using BoslaAPI.Middlewares;
-using DotNetEnv;
 using Domain.Contracts;
+using Domain.Responses;
+using DotNetEnv;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -11,15 +13,10 @@ using Microsoft.EntityFrameworkCore;
 using Persistence.Data.Contexts;
 using Persistence.Data.DataSeeding;
 using Persistence.Repositories;
-using Persistence.Seeder;
-using Service.Abstraction;
 using Service.Extensions;
-using Service.MappingProfiles;
-using System.Net;
-using Domain.Responses;
-using Shared.Options;
 using Service.Helpers;
-using BoslaAPI.BackgroundServices;
+using Service.MappingProfiles;
+using Shared.Options;
 
 // Load environment variables from .env file
 Env.Load("../.env");
@@ -151,9 +148,9 @@ app.UseSwaggerUI();
 
 app.UseMiddleware<ApiResponseMiddleware>();
 app.UseCors("CorsPolicy");
-app.UseRateLimiter();
 app.UseAuthentication();
 app.UseTokenRefresh();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.MapControllers();
 app.MapGet("/api/health", () => Results
