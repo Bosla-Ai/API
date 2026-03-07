@@ -190,7 +190,7 @@ public class CustomerService(
         bool titleExtracted = false;
 
         // Stream intent detection \u2014 internal task, uses intent model directly
-        await foreach (var chunk in customerHelper.SendStreamRequestWithModel(detectionPrompt, options.CurrentValue.Llm.IntentModel, useThinking: true, cancellationToken: cancellationToken, userId: userId, isSuperAdmin: IsSuperAdmin()))
+        await foreach (var chunk in customerHelper.SendStreamRequestWithModel(detectionPrompt, options.CurrentValue.Llm.Model, useThinking: true, cancellationToken: cancellationToken, userId: userId, isSuperAdmin: IsSuperAdmin()))
         {
             if (chunk.StartsWith("__FALLBACK__:"))
             {
@@ -598,7 +598,7 @@ public class CustomerService(
             query);
         try
         {
-            var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestWithModel(detectionPrompt, options.CurrentValue.Llm.IntentModel, useThinking: true);
+            var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestWithModel(detectionPrompt, options.CurrentValue.Llm.Model, useThinking: true);
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
                 return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName, thinkingContent, parsed.Value.targetRole, parsed.Value.followUpSuggestions, parsed.Value.videoUrl, parsed.Value.videoSearchQuery, parsed.Value.questions);
