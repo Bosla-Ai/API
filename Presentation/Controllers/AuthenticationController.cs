@@ -1,7 +1,7 @@
 using System.Net;
 using System.Security.Claims;
-using Domain.Responses;
 using Domain.Requests;
+using Domain.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -22,6 +22,7 @@ public class AuthenticationController(
     IOptions<CookieSettingsOptions> cookieOptions)
     : ApiController(cookieOptions)
 {
+    [EnableRateLimiting("AuthPolicy")]
     [HttpPost("ExchangeToken")]
     public async Task<ActionResult<LoginClientResponse>> ExchangeToken([FromBody] TokenExchangeRequest request)
     {
@@ -140,6 +141,7 @@ public class AuthenticationController(
         return Ok(response);
     }
 
+    [EnableRateLimiting("GeneralPolicy")]
     [HttpGet("Me")]
     [Authorize]
     public async Task<ActionResult<APIResponse<ApplicationUserDTO>>> Me()

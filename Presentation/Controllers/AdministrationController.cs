@@ -1,6 +1,7 @@
 using Domain.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Shared;
@@ -12,6 +13,7 @@ using Shared.Options;
 namespace Presentation.Controllers;
 
 
+[EnableRateLimiting("AdminPolicy")]
 public class AdministrationController(
     IOptions<CookieSettingsOptions> cookieOptions,
     IServiceManager serviceManager) : ApiController(cookieOptions)
