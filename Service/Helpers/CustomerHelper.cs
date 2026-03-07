@@ -34,6 +34,7 @@ public class CustomerHelper
     private readonly string _intentModel;
     private readonly string _chatModel;
     private readonly string _reasoningModel;
+    private readonly List<string> _fallbackModels;
 
     private bool IsReasoningModel(string modelName)
     {
@@ -67,6 +68,7 @@ public class CustomerHelper
         _intentModel = aiOptions.Llm.IntentModel;
         _chatModel = aiOptions.Llm.ChatModel;
         _reasoningModel = aiOptions.Llm.ReasoningModel;
+        _fallbackModels = aiOptions.Llm.FallbackModels ?? [];
 
         if (!_geminiApiKeys.Any() && string.IsNullOrWhiteSpace(_llmApiKey))
         {
@@ -85,6 +87,12 @@ public class CustomerHelper
         _ => _llmModel
     };
 
+    /// <summary>
+    /// Returns the number of remaining Gemini requests for the given user today.
+    /// </summary>
+    public int GetGeminiRemainingQuota(string userId, bool isSuperAdmin)
+        => _rateLimiter.GetRemainingRequests(userId, isSuperAdmin);
+
     public async Task<(string Response, string ModelName, string? ThinkingContent)> SendRequestToGemini(string prompt, bool useThinking = false, string? userId = null, bool isSuperAdmin = false)
     {
         if (_geminiApiKeys.Any())
@@ -101,6 +109,8 @@ public class CustomerHelper
                 }
                 catch (Exception ex)
                 {
+                    // Gemini failed — but quota was already consumed. This is acceptable because
+                    // we need to know intent BEFORE calling, and the attempt still costs us API usage.
                     _logger.LogWarning(ex, "Gemini Primary Provider Failed. Attempting Fallback to {Provider}...", _llmProvider);
                 }
             }
@@ -110,52 +120,59 @@ public class CustomerHelper
             _logger.LogWarning("Gemini keys not configured. Skipping to Fallback provider.");
         }
 
-        if (!string.IsNullOrWhiteSpace(_llmApiKey))
-        {
-            try
-            {
-                return await ExecuteOpenRouterRequest(prompt, useThinking);
-            }
-            catch (Exception ex)
-            {
-                throw new InternalServerErrorException($"Fallback Provider ({_llmProvider}) Failed: {ex.Message}");
-            }
-        }
-
-        throw new InternalServerErrorException("All AI providers failed or are not configured.");
+        // Fallback: loop through fallback models before giving up
+        return await ExecuteOpenRouterWithFallbackChain(prompt, useThinking);
     }
 
     public async Task<(string Response, string ModelName, string? ThinkingContent)> SendRequestByTask(
-        string prompt, LLMInteractionType taskType, bool useThinking = false, string? userId = null, bool isSuperAdmin = false)
+        string prompt, LLMInteractionType taskType, bool useThinking = false,
+        string? userId = null, bool isSuperAdmin = false, ChatMode chatMode = ChatMode.Normal)
     {
         var targetModel = GetModelForTask(taskType);
 
-        // Chat-like tasks prefer Gemini for better Arabic quality
-        if (taskType == LLMInteractionType.ChatWithAI || taskType == LLMInteractionType.ChooseTrack
-            || taskType == LLMInteractionType.ChooseMethod || taskType == LLMInteractionType.TopicPreview)
-            return await SendRequestToGemini(prompt, useThinking, userId, isSuperAdmin);
-
-        // Other tasks route to OpenRouter with task-specific model
-        if (!string.IsNullOrWhiteSpace(_llmApiKey))
+        // Powerful mode: route chat tasks to Gemini
+        if (chatMode == ChatMode.Powerful &&
+            (taskType == LLMInteractionType.ChatWithAI || taskType == LLMInteractionType.ChooseTrack
+             || taskType == LLMInteractionType.ChooseMethod || taskType == LLMInteractionType.TopicPreview))
         {
-            try
-            {
-                return await ExecuteOpenRouterRequest(prompt, useThinking, targetModel);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "OpenRouter ({Model}) failed for {TaskType}. Falling back to Gemini.", targetModel, taskType);
-            }
+            return await SendRequestToGemini(prompt, useThinking, userId, isSuperAdmin);
         }
 
-        // Fallback to Gemini if OpenRouter fails
-        return await SendRequestToGemini(prompt, useThinking, userId, isSuperAdmin);
+        // Reasoning tasks (CV, Roadmap) always use DeepSeek R1 via OpenRouter — even in Powerful mode,
+        // because the reasoning model outperforms Gemini on long-form analytical tasks.
+        if (taskType == LLMInteractionType.RoadmapGeneration || taskType == LLMInteractionType.CVAnalysis)
+        {
+            return await ExecuteOpenRouterWithFallbackChain(prompt, useThinking, targetModel);
+        }
+
+        // Normal mode: route everything through OpenRouter fallback chain
+        return await ExecuteOpenRouterWithFallbackChain(prompt, useThinking, targetModel);
     }
 
     public async Task<(string Response, string ModelName, string? ThinkingContent)> SendRequestWithModel(
         string prompt, string model, bool useThinking = false, string? userId = null, bool isSuperAdmin = false)
     {
-        if (!string.IsNullOrWhiteSpace(_llmApiKey))
+        return await ExecuteOpenRouterWithFallbackChain(prompt, useThinking, model);
+    }
+
+    private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteOpenRouterWithFallbackChain(
+        string prompt, bool useThinking, string? primaryModel = null)
+    {
+        if (string.IsNullOrWhiteSpace(_llmApiKey))
+            throw new InternalServerErrorException("OpenRouter API key is not configured.");
+
+        var modelsToTry = new List<string>();
+        if (!string.IsNullOrWhiteSpace(primaryModel))
+            modelsToTry.Add(primaryModel);
+
+        foreach (var fb in _fallbackModels)
+        {
+            if (!modelsToTry.Contains(fb, StringComparer.OrdinalIgnoreCase))
+                modelsToTry.Add(fb);
+        }
+
+        Exception? lastException = null;
+        foreach (var model in modelsToTry)
         {
             try
             {
@@ -163,11 +180,13 @@ public class CustomerHelper
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "OpenRouter ({Model}) failed. Falling back to Gemini.", model);
+                lastException = ex;
+                _logger.LogWarning(ex, "OpenRouter model {Model} failed. Trying next fallback...", model);
             }
         }
 
-        return await SendRequestToGemini(prompt, useThinking, userId, isSuperAdmin);
+        throw new InternalServerErrorException(
+            $"All OpenRouter models failed. Last error: {lastException?.Message}", lastException);
     }
 
     private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteGeminiRequestWithRotation(string prompt, bool useThinking)
@@ -401,11 +420,11 @@ public class CustomerHelper
             useOpenRouter = true;
         }
 
-        // Fallback to OpenRouter
+        // Fallback to OpenRouter with fallback chain
         if (useOpenRouter && !string.IsNullOrWhiteSpace(_llmApiKey))
         {
             yield return "__FALLBACK__:openrouter";
-            await foreach (var chunk in ExecuteOpenRouterStreamRequest(prompt, useThinking, cancellationToken))
+            await foreach (var chunk in ExecuteOpenRouterStreamWithFallbackChain(prompt, useThinking, cancellationToken))
             {
                 yield return chunk;
             }
@@ -423,60 +442,23 @@ public class CustomerHelper
         bool useThinking = false,
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
         string? userId = null,
-        bool isSuperAdmin = false)
+        bool isSuperAdmin = false,
+        ChatMode chatMode = ChatMode.Normal)
     {
-        // Chat-like tasks prefer Gemini for Arabic quality
-        if (taskType == LLMInteractionType.ChatWithAI || taskType == LLMInteractionType.ChooseTrack
-            || taskType == LLMInteractionType.ChooseMethod || taskType == LLMInteractionType.TopicPreview)
+        // Powerful mode: route chat tasks to Gemini 
+        if (chatMode == ChatMode.Powerful &&
+            (taskType == LLMInteractionType.ChatWithAI || taskType == LLMInteractionType.ChooseTrack
+             || taskType == LLMInteractionType.ChooseMethod || taskType == LLMInteractionType.TopicPreview))
         {
             await foreach (var chunk in SendStreamRequestToGemini(prompt, useThinking, cancellationToken, userId, isSuperAdmin))
                 yield return chunk;
             yield break;
         }
 
-        // Other tasks route to OpenRouter with task-specific model
+        // All tasks route to OpenRouter with task-specific model + fallback chain
         var targetModel = GetModelForTask(taskType);
-        if (!string.IsNullOrWhiteSpace(_llmApiKey))
-        {
-            var channel = Channel.CreateUnbounded<string>();
-            Exception? orException = null;
-
-            var producerTask = Task.Run(async () =>
-            {
-                try
-                {
-                    await foreach (var chunk in ExecuteOpenRouterStreamRequest(prompt, useThinking, cancellationToken, targetModel))
-                        await channel.Writer.WriteAsync(chunk, cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    orException = ex;
-                    _logger.LogWarning(ex, "OpenRouter stream ({Model}) failed for {TaskType}. Falling back to Gemini.", targetModel, taskType);
-                }
-                finally
-                {
-                    channel.Writer.Complete();
-                }
-            }, cancellationToken);
-
-            await foreach (var chunk in channel.Reader.ReadAllAsync(cancellationToken))
-                yield return chunk;
-
-            await producerTask;
-
-            if (orException == null) yield break;
-
-            // Fallback to Gemini
-            yield return "__FALLBACK__:gemini";
-            await foreach (var chunk in SendStreamRequestToGemini(prompt, useThinking, cancellationToken, userId, isSuperAdmin))
-                yield return chunk;
-        }
-        else
-        {
-            // No OpenRouter key, use Gemini
-            await foreach (var chunk in SendStreamRequestToGemini(prompt, useThinking, cancellationToken, userId, isSuperAdmin))
-                yield return chunk;
-        }
+        await foreach (var chunk in ExecuteOpenRouterStreamWithFallbackChain(prompt, useThinking, cancellationToken, targetModel))
+            yield return chunk;
     }
 
     public async IAsyncEnumerable<string> SendStreamRequestWithModel(
@@ -487,10 +469,36 @@ public class CustomerHelper
         string? userId = null,
         bool isSuperAdmin = false)
     {
-        if (!string.IsNullOrWhiteSpace(_llmApiKey))
+        await foreach (var chunk in ExecuteOpenRouterStreamWithFallbackChain(prompt, useThinking, cancellationToken, model))
+            yield return chunk;
+    }
+
+    private async IAsyncEnumerable<string> ExecuteOpenRouterStreamWithFallbackChain(
+        string prompt,
+        bool useThinking,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default,
+        string? primaryModel = null)
+    {
+        if (string.IsNullOrWhiteSpace(_llmApiKey))
+            throw new InternalServerErrorException("OpenRouter API key is not configured.");
+
+        var modelsToTry = new List<string>();
+        if (!string.IsNullOrWhiteSpace(primaryModel))
+            modelsToTry.Add(primaryModel);
+
+        foreach (var fb in _fallbackModels)
+        {
+            if (!modelsToTry.Contains(fb, StringComparer.OrdinalIgnoreCase))
+                modelsToTry.Add(fb);
+        }
+
+        Exception? lastException = null;
+        foreach (var model in modelsToTry)
         {
             var channel = Channel.CreateUnbounded<string>();
-            Exception? orException = null;
+            Exception? modelException = null;
+            bool modelCompleted = false;
+            bool anyChunksYielded = false;
 
             var producerTask = Task.Run(async () =>
             {
@@ -498,11 +506,12 @@ public class CustomerHelper
                 {
                     await foreach (var chunk in ExecuteOpenRouterStreamRequest(prompt, useThinking, cancellationToken, model))
                         await channel.Writer.WriteAsync(chunk, cancellationToken);
+                    modelCompleted = true;
                 }
                 catch (Exception ex)
                 {
-                    orException = ex;
-                    _logger.LogWarning(ex, "OpenRouter stream ({Model}) failed. Falling back to Gemini.", model);
+                    modelException = ex;
+                    _logger.LogWarning(ex, "OpenRouter stream model {Model} failed. Trying next fallback...", model);
                 }
                 finally
                 {
@@ -511,22 +520,28 @@ public class CustomerHelper
             }, cancellationToken);
 
             await foreach (var chunk in channel.Reader.ReadAllAsync(cancellationToken))
+            {
+                anyChunksYielded = true;
                 yield return chunk;
+            }
 
             await producerTask;
 
-            if (orException == null) yield break;
+            if (modelCompleted) yield break;
 
-            // Fallback to Gemini
-            yield return "__FALLBACK__:gemini";
-            await foreach (var chunk in SendStreamRequestToGemini(prompt, useThinking, cancellationToken, userId, isSuperAdmin))
-                yield return chunk;
+            // If partial content was already streamed, don't fall back — it would produce garbled output
+            if (anyChunksYielded)
+            {
+                _logger.LogWarning("Model {Model} failed mid-stream after yielding partial content. Cannot fallback safely.", model);
+                throw new InternalServerErrorException(
+                    $"Model {model} failed mid-stream: {modelException?.Message}");
+            }
+
+            lastException = modelException;
         }
-        else
-        {
-            await foreach (var chunk in SendStreamRequestToGemini(prompt, useThinking, cancellationToken, userId, isSuperAdmin))
-                yield return chunk;
-        }
+
+        throw new InternalServerErrorException(
+            $"All OpenRouter stream models failed. Last error: {lastException?.Message}", lastException);
     }
 
     private async IAsyncEnumerable<string> ExecuteGeminiStreamRequestWithRotation(

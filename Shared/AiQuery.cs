@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using Shared.Enums;
+
 namespace Shared;
 
 public class AiQueryRequest
@@ -5,6 +8,9 @@ public class AiQueryRequest
     public string? Query { get; set; }
 
     public string? SessionId { get; set; }
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public ChatMode ChatMode { get; set; } = ChatMode.Normal;
 }
 
 public class AiQueryResponse
