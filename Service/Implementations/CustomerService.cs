@@ -69,7 +69,8 @@ public class CustomerService(
     }
 
     public async IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default,
+        ChatMode chatMode = ChatMode.Normal)
     {
         if (string.IsNullOrWhiteSpace(userId))
             throw new BadRequestException("User ID is required");
@@ -94,6 +95,18 @@ public class CustomerService(
             yield return sseEvent;
 
         yield return FormatSse("status", new { message = "Analyzing your request...", step = "init" });
+
+        // Emit quota info for Powerful mode
+        if (chatMode == ChatMode.Powerful)
+        {
+            var remaining = customerHelper.GetGeminiRemainingQuota(userId, IsSuperAdmin());
+            yield return FormatSse("quota", new
+            {
+                mode = "powerful",
+                remaining,
+                limit = options.CurrentValue.Gemini.MaxRequestsPerUserPerDay
+            });
+        }
 
         string marketContext = "";
         MarketInsightDTO? fetchedMarketInsight = null;
@@ -361,7 +374,7 @@ public class CustomerService(
 
             try
             {
-                await foreach (var chunk in customerHelper.SendStreamRequestByTask(chatPrompt, LLMInteractionType.ChatWithAI, useThinking: false, cancellationToken: cancellationToken, userId: userId, isSuperAdmin: IsSuperAdmin()))
+                await foreach (var chunk in customerHelper.SendStreamRequestByTask(chatPrompt, LLMInteractionType.ChatWithAI, useThinking: false, cancellationToken: cancellationToken, userId: userId, isSuperAdmin: IsSuperAdmin(), chatMode: chatMode))
                 {
                     if (chunk.StartsWith("__FALLBACK__:"))
                     {

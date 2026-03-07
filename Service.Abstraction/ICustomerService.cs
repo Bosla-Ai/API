@@ -3,13 +3,14 @@ using Domain.Responses;
 using Shared;
 using Shared.DTOs;
 using Shared.DTOs.CustomerDTOs;
+using Shared.Enums;
 
 namespace Service.Abstraction;
 
 public interface ICustomerService
 {
     Task<APIResponse<string>> ProcessUserQueryAsync(string userId, string query, string? sessionId = null);
-    IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null, CancellationToken cancellationToken = default, ChatMode chatMode = ChatMode.Normal);
 
     Task<APIResponse<AiIntentDetectionResponse>> ProcessUserQueryWithIntentDetectionAsync(string userId, string query, string? sessionId = null);
 
