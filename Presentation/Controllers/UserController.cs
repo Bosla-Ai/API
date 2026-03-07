@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using Domain.Exceptions;
 using Domain.Responses;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Service.Abstraction;
@@ -14,7 +16,7 @@ using Shared.Options;
 namespace Presentation.Controllers;
 
 
-//[Authorize]
+[Authorize]
 public class UserController(
     ILogger<UserController> logger,
     IServiceManager serviceManager,
@@ -31,6 +33,8 @@ public class UserController(
         throw new UnauthorizedException("User ID not found in token");
     }
 
+    [EnableRateLimiting("AiPolicy")]
+    [RequestSizeLimit(10_240)]
     [HttpPost("ask-ai")]
     public async Task<ActionResult<APIResponse<string>>> AskAI([FromBody] AiQueryRequest request)
     {
@@ -40,14 +44,29 @@ public class UserController(
         return Ok(response);
     }
 
+    [EnableRateLimiting("AiPolicy")]
+    [RequestSizeLimit(10_240)]
     [HttpPost("ask-ai-with-intent")]
     public ActionResult<AiRequestIdResponse> StartAIQuery([FromBody] AiQueryRequest request)
     {
         var userId = GetUserId(request.SessionId);
-        var requestId = serviceManager.Customer.CreateAiRequest(userId, request);
-        return Ok(new AiRequestIdResponse(requestId));
+        try
+        {
+            var requestId = serviceManager.Customer.CreateAiRequest(userId, request);
+            return Ok(new AiRequestIdResponse(requestId));
+        }
+        catch (TooManyPendingRequestsException ex)
+        {
+            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            {
+                statusCode = 429,
+                isSuccess = false,
+                errorMessages = new[] { ex.Message }
+            });
+        }
     }
 
+    [EnableRateLimiting("StreamPolicy")]
     [HttpGet("ask-ai-with-intent/stream")]
     public async Task StreamAIQuery([FromQuery] string requestId, CancellationToken cancellationToken)
     {
@@ -88,6 +107,7 @@ public class UserController(
         }
     }
 
+    [EnableRateLimiting("GeneralPolicy")]
     [HttpGet("GetCustomerProfile/{customerId:guid}")]
     public async Task<ActionResult<APIResponse>> GetCustomerProfile(string customerId)
     {
@@ -96,6 +116,7 @@ public class UserController(
         return Ok(response);
     }
 
+    [EnableRateLimiting("GeneralPolicy")]
     [HttpGet("dashboard/domains")]
     public async Task<ActionResult<APIResponse<IEnumerable<DashboardDomainDTO>>>> GetAllDomainsWithHierarchy(
         [FromQuery] bool? isActive = null)
@@ -105,6 +126,7 @@ public class UserController(
         return Ok(response);
     }
 
+    [EnableRateLimiting("GeneralPolicy")]
     [HttpPost("start-chat")]
     public async Task<ActionResult<APIResponse<string>>> StartNewChat()
     {
@@ -113,6 +135,7 @@ public class UserController(
         return Ok(response);
     }
 
+    [EnableRateLimiting("GeneralPolicy")]
     [HttpPost("cancel-chat/{sessionId}")]
     public async Task<ActionResult<APIResponse>> CancelChat(string sessionId, [FromBody] CancelChatRequest? request = null)
     {
@@ -121,6 +144,7 @@ public class UserController(
         return Ok(response);
     }
 
+    [EnableRateLimiting("GeneralPolicy")]
     [HttpGet("chat-history")]
     public async Task<ActionResult<APIResponse<List<ChatSessionSummaryDTO>>>> GetChatHistory()
     {
@@ -129,6 +153,7 @@ public class UserController(
         return Ok(response);
     }
 
+    [EnableRateLimiting("GeneralPolicy")]
     [HttpGet("chat-history/{sessionId}")]
     public async Task<ActionResult<APIResponse<ChatSessionMessagesDTO>>> GetChatSession(string sessionId)
     {
@@ -137,6 +162,7 @@ public class UserController(
         return Ok(response);
     }
 
+    [EnableRateLimiting("GeneralPolicy")]
     [HttpDelete("chat-history/{sessionId}")]
     public async Task<ActionResult<APIResponse<int>>> DeleteChatSession(string sessionId)
     {
