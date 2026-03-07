@@ -13,6 +13,9 @@ public class AiOptions
     public LlmOptions Llm { get; set; } = new();
 
     [Required]
+    public GroqOptions Groq { get; set; } = new();
+
+    [Required]
     public PromptOptions Prompts { get; set; } = new();
 
     public PipelineApiOptions PipelineApi { get; set; } = new();
@@ -36,33 +39,28 @@ public class PipelineApiOptions
 public class GeminiOptions
 {
     public List<string> ApiKeys { get; set; } = [];
-    public string Model { get; set; } = "gemini-3.1-flash-preview";
+    public string Model { get; set; } = "gemini-3.1-flash-lite-preview";
+    public List<string> FallbackModels { get; set; } = [];
     public string ApiUrl { get; set; } = string.Empty;
     public bool IncludeThoughts { get; set; } = true;
-
-    // Per-user daily request limit (easy to change via .env or appsettings)
     public int MaxRequestsPerUserPerDay { get; set; } = 5;
 }
 
 public class LlmOptions
 {
-    public string Provider { get; set; } = "openrouter";
-    public string ApiKey { get; set; } = string.Empty;
-    public string ApiUrl { get; set; } = "https://openrouter.ai/api/v1/chat/completions";
-    public string Model { get; set; } = "stepfun/step-3.5-flash:free";
-    public bool IncludeReasoning { get; set; } = false;
+    public string Provider { get; set; } = "cerebras";
+    public List<string> ApiKeys { get; set; } = [];
+    public string ApiUrl { get; set; } = "https://api.cerebras.ai/v1/chat/completions";
+    public string Model { get; set; } = "gpt-oss-120b";
+    public string ChatModel { get; set; } = "gpt-oss-120b";
+    public string ReasoningModel { get; set; } = "gpt-oss-120b";
+}
 
-    // Task-based model routing
-    public string IntentModel { get; set; } = "stepfun/step-3.5-flash:free";
-    public string ChatModel { get; set; } = "stepfun/step-3.5-flash:free";
-    public string ReasoningModel { get; set; } = "deepseek/deepseek-r1-0528:free";
-
-    // Fallback chain — models tried in order before falling back to Gemini
-    public List<string> FallbackModels { get; set; } =
-    [
-        "qwen/qwen3-next-80b-a3b-instruct:free",
-        "openai/gpt-oss-120b:free"
-    ];
+public class GroqOptions
+{
+    public List<string> ApiKeys { get; set; } = [];
+    public string ApiUrl { get; set; } = "https://api.groq.com/openai/v1/chat/completions";
+    public string Model { get; set; } = "openai/gpt-oss-120b";
 }
 
 public class PromptOptions
