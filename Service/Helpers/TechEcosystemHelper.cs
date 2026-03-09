@@ -112,22 +112,30 @@ public class TechEcosystemHelper(
 
         return normalized switch
         {
-            "c#" or "csharp" or "asp.net core" or "entity framework core" or "linq" => "C#",
-            "javascript" or "js" or "react" or "reactjs" or "angular" or "vue" or "vuejs" or "node" or "nodejs" or "node.js" or "express" or "next.js" or "nextjs" => "JavaScript",
+            "c#" or "csharp" or "asp.net core" or "entity framework core" or "linq" or ".net" or ".net core" or "blazor" or "signalr" => "C#",
+            "javascript" or "js" or "react" or "reactjs" or "angular" or "vue" or "vuejs" or "node" or "nodejs" or "node.js" or "express" or "next.js" or "nextjs" or "nuxt" or "gatsby" or "svelte" or "jquery" or "nestjs" or "redux" or "webpack" or "vite" => "JavaScript",
             "typescript" or "ts" => "TypeScript",
             "python" or "django" or "flask" or "fastapi" => "Python",
-            "java" or "spring" or "spring-boot" => "Java",
+            "java" or "spring" or "spring boot" or "spring-boot" => "Java",
             "go" or "golang" => "Go",
             "rust" => "Rust",
             "c++" or "cpp" => "C++",
-            "ruby" or "rails" or "ruby-on-rails" => "Ruby",
+            "c" => "C",
+            "ruby" or "rails" or "ruby on rails" or "ruby-on-rails" => "Ruby",
             "php" or "laravel" => "PHP",
-            "swift" => "Swift",
-            "kotlin" => "Kotlin",
+            "swift" or "swiftui" or "ios" => "Swift",
+            "kotlin" or "android" or "jetpack compose" => "Kotlin",
             "dart" or "flutter" => "Dart",
-            "r" => "R",
+            "r" or "r programming" => "R",
             "scala" => "Scala",
-            "shell" or "bash" => "Shell",
+            "shell" or "bash" or "shell scripting" => "Shell",
+            "elixir" => "Elixir",
+            "haskell" => "Haskell",
+            "lua" => "Lua",
+            "perl" => "Perl",
+            "objective-c" => "Objective-C",
+            "julia" => "Julia",
+            "clojure" => "Clojure",
             _ => null
         };
     }

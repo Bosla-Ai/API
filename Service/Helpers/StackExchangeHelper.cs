@@ -100,34 +100,148 @@ public class StackExchangeHelper(
 
         return normalized switch
         {
+            // .NET Ecosystem
             "c#" or "csharp" => "c#",
+            "asp.net-core" or "aspnet-core" or "asp.net-core-web-api" or ".net-core" or ".net" => "asp.net-core",
+            "entity-framework-core" or "ef-core" => "entity-framework-core",
+            "linq" => "linq",
+            "blazor" => "blazor",
+            "signalr" => "signalr",
+
+            // C/C++
             "c++" or "cpp" => "c++",
+            "c" => "c",
+
+            // JavaScript Ecosystem
             "javascript" or "js" => "javascript",
             "typescript" or "ts" => "typescript",
-            "asp.net-core" or "aspnet-core" or "asp.net-core-web-api" => "asp.net-core",
-            "entity-framework-core" or "ef-core" => "entity-framework-core",
-            "react" or "reactjs" or "react.js" => "reactjs",
+            "react" or "reactjs" or "react.js" or "react-js" => "reactjs",
             "angular" or "angularjs" => "angular",
-            "vue" or "vuejs" or "vue.js" => "vue.js",
-            "node" or "nodejs" or "node.js" => "node.js",
+            "vue" or "vuejs" or "vue.js" or "vue-js" => "vue.js",
+            "svelte" => "svelte",
+            "node" or "nodejs" or "node.js" or "node-js" => "node.js",
+            "express" or "expressjs" or "express.js" => "express",
+            "next.js" or "nextjs" or "next-js" => "next.js",
+            "nuxt" or "nuxt.js" => "nuxt.js",
+            "gatsby" => "gatsby",
+            "nestjs" or "nest.js" => "nestjs",
+            "jquery" => "jquery",
+            "redux" => "redux",
+            "webpack" => "webpack",
+            "vite" => "vite",
+
+            // Python Ecosystem
             "python" => "python",
+            "django" => "django",
+            "flask" => "flask",
+            "fastapi" => "fastapi",
+
+            // Java/JVM Ecosystem
             "java" => "java",
-            "docker" => "docker",
-            "kubernetes" or "k8s" => "kubernetes",
-            "aws" => "amazon-web-services",
-            "azure" => "azure",
+            "spring" or "spring-boot" => "spring-boot",
+            "kotlin" => "kotlin",
+            "scala" => "scala",
+
+            // Other Languages
+            "go" or "golang" => "go",
+            "rust" => "rust",
+            "swift" => "swift",
+            "ruby" or "ruby-on-rails" or "rails" => "ruby-on-rails",
+            "php" or "laravel" => "php",
+            "dart" or "flutter" => "flutter",
+            "elixir" => "elixir",
+            "haskell" => "haskell",
+            "perl" => "perl",
+            "lua" => "lua",
+            "r" or "r-programming" => "r",
+            "objective-c" => "objective-c",
+
+            // Mobile
+            "android" => "android",
+            "ios" => "ios",
+            "react-native" => "react-native",
+            "swiftui" => "swiftui",
+            "jetpack-compose" => "android-jetpack-compose",
+
+            // Databases
             "sql" => "sql",
+            "mysql" => "mysql",
             "postgresql" or "postgres" => "postgresql",
             "mongodb" or "mongo" => "mongodb",
             "redis" => "redis",
+            "elasticsearch" => "elasticsearch",
+            "sqlite" => "sqlite",
+            "cassandra" => "cassandra",
+            "dynamodb" => "amazon-dynamodb",
+            "neo4j" => "neo4j",
+            "graphql" => "graphql",
+
+            // DevOps & Cloud
+            "docker" => "docker",
+            "kubernetes" or "k8s" => "kubernetes",
+            "aws" or "amazon-web-services" => "amazon-web-services",
+            "azure" => "azure",
+            "gcp" or "google-cloud" or "google-cloud-platform" => "google-cloud-platform",
+            "terraform" => "terraform",
+            "ansible" => "ansible",
+            "jenkins" => "jenkins",
+            "github-actions" => "github-actions",
+            "nginx" => "nginx",
+            "helm" => "kubernetes-helm",
+            "prometheus" => "prometheus",
+            "grafana" => "grafana",
+
+            // Version Control & Tools
             "git" => "git",
+            "github" => "github",
+            "gitlab" => "gitlab",
             "linux" => "linux",
-            "django" => "django",
-            "flask" => "flask",
-            "spring" or "spring-boot" => "spring-boot",
+            "bash" or "shell" or "shell-scripting" => "bash",
+
+            // Frontend Basics
+            "html" => "html",
+            "css" => "css",
+            "sass" or "scss" => "sass",
+            "tailwind" or "tailwindcss" => "tailwind-css",
+            "bootstrap" => "twitter-bootstrap",
+
+            // Data Science & AI
             "machine-learning" or "ml" => "machine-learning",
-            "deep-learning" => "deep-learning",
+            "deep-learning" or "dl" => "deep-learning",
             "data-science" => "data-science",
+            "tensorflow" => "tensorflow",
+            "pytorch" => "pytorch",
+            "keras" => "keras",
+            "scikit-learn" => "scikit-learn",
+            "pandas" => "pandas",
+            "numpy" => "numpy",
+            "nlp" or "natural-language-processing" => "nlp",
+            "computer-vision" => "computer-vision",
+            "ai" or "artificial-intelligence" => "artificial-intelligence",
+
+            // Testing
+            "jest" => "jestjs",
+            "pytest" => "pytest",
+            "selenium" => "selenium",
+            "cypress" => "cypress",
+
+            // Architecture & Design
+            "design-patterns" => "design-patterns",
+            "microservices" or "micro-services" => "microservices",
+            "system-design" => "system-design",
+            "rest-api" or "restful-api" or "api-design" => "rest",
+            "oop" or "object-oriented-programming" => "oop",
+
+            // Security
+            "cybersecurity" or "cyber-security" => "cybersecurity",
+            "cryptography" => "cryptography",
+
+            // Other
+            "blockchain" => "blockchain",
+            "web3" => "web3",
+            "firebase" => "firebase",
+            "supabase" => "supabase",
+
             _ => normalized
         };
     }
