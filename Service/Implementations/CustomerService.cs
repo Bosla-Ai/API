@@ -34,6 +34,8 @@ public class CustomerService(
     , IHttpClientFactory httpClientFactory
     , AiRequestStore aiRequestStore
     , IJobMarketService jobMarketService
+    , IStackExchangeService stackExchangeService
+    , ITechEcosystemService techEcosystemService
     , IHttpContextAccessor httpContextAccessor) : ICustomerService
 {
     private bool IsSuperAdmin()
@@ -161,6 +163,48 @@ public class CustomerService(
 
             foreach (var evt in pendingEvents)
                 yield return evt;
+        }
+
+        // Enrich market context with StackExchange tag popularity data
+        if (marketKeywords.Length > 0)
+        {
+            try
+            {
+                // Fetch StackExchange and npm/GitHub data in parallel
+                var tagInsightsTask = stackExchangeService.GetTagInsightsAsync(marketKeywords, cancellationToken);
+                var ecosystemTask = techEcosystemService.GetEcosystemInsightsAsync(marketKeywords, cancellationToken);
+                await Task.WhenAll(tagInsightsTask, ecosystemTask);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var tagInsights = await tagInsightsTask;
+                if (tagInsights is not null)
+                {
+                    var tagContext = tagInsights.ToPromptContext();
+                    if (!string.IsNullOrEmpty(tagContext))
+                    {
+                        marketContext = string.IsNullOrEmpty(marketContext)
+                            ? tagContext
+                            : $"{marketContext}\n\n{tagContext}";
+                    }
+                }
+
+                var ecosystem = await ecosystemTask;
+                if (ecosystem is not null)
+                {
+                    var ecoContext = ecosystem.ToPromptContext();
+                    if (!string.IsNullOrEmpty(ecoContext))
+                    {
+                        marketContext = string.IsNullOrEmpty(marketContext)
+                            ? ecoContext
+                            : $"{marketContext}\n\n{ecoContext}";
+                    }
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Supplementary market enrichment failed");
+            }
         }
 
         // Intent Detection
