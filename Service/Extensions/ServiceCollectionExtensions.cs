@@ -75,8 +75,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IJobMarketService, JobMarketService>();
-        services.AddHttpClient<IStackExchangeService, StackExchangeService>();
-        services.AddHttpClient<ITechEcosystemService, TechEcosystemService>();
+        services.AddHttpClient<StackExchangeHelper>();
+        services.AddHttpClient<TechEcosystemHelper>();
+        services.AddScoped<IStackExchangeService, StackExchangeService>();
+        services.AddScoped<ITechEcosystemService, TechEcosystemService>();
         services.AddScoped<IChatHistoryService, ChatHistoryService>();
 
         services.AddScoped<IServiceManager, ServiceManager>(); // for generalization
