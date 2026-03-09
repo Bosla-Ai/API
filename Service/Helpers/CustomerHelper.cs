@@ -37,6 +37,12 @@ public class CustomerHelper
     private readonly string _groqModel;
     private static volatile int _currentGroqKeyIndex = 0;
 
+    // Mistral (CV Analysis specialist)
+    private readonly List<string> _mistralApiKeys;
+    private readonly string _mistralApiUrl;
+    private readonly string _mistralModel;
+    private static volatile int _currentMistralKeyIndex = 0;
+
     // Task-based model routing
     private readonly string _chatModel;
     private readonly string _reasoningModel;
@@ -77,9 +83,13 @@ public class CustomerHelper
         _groqApiUrl = aiOptions.Groq.ApiUrl;
         _groqModel = aiOptions.Groq.Model;
 
-        if (!_geminiApiKeys.Any() && !_llmApiKeys.Any() && !_groqApiKeys.Any())
+        _mistralApiKeys = aiOptions.Mistral.ApiKeys;
+        _mistralApiUrl = aiOptions.Mistral.ApiUrl;
+        _mistralModel = aiOptions.Mistral.Model;
+
+        if (!_geminiApiKeys.Any() && !_llmApiKeys.Any() && !_groqApiKeys.Any() && !_mistralApiKeys.Any())
         {
-            _logger.LogWarning("No AI providers configured (Gemini, Cerebras, or Groq). Service may fail.");
+            _logger.LogWarning("No AI providers configured (Gemini, Cerebras, Groq, or Mistral). Service may fail.");
         }
     }
 
@@ -139,6 +149,12 @@ public class CustomerHelper
         if (chatMode == ChatMode.Powerful)
         {
             return await SendRequestToGemini(prompt, useThinking, userId, isSuperAdmin);
+        }
+
+        // Normal mode: CVAnalysis → Mistral (specialist) → Cerebras → Groq
+        if (taskType == LLMInteractionType.CVAnalysis)
+        {
+            return await ExecuteMistralRequestWithKeyRotation(prompt, useThinking);
         }
 
         // Normal mode: Cerebras (primary) → Groq (fallback)
@@ -327,6 +343,66 @@ public class CustomerHelper
 
         var text = ExtractTextFromOpenAIResponse(responseContent, out var reasoning);
         return (text, _groqModel, reasoning);
+    }
+
+    // Mistral: single request with a specific key (OpenAI-compatible)
+    private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteMistralRequest(
+        string prompt, bool useThinking, string apiKey)
+    {
+        var requestBody = new { model = _mistralModel, messages = new[] { new { role = "user", content = prompt } } };
+
+        var requestJson = JsonConvert.SerializeObject(requestBody);
+        using var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, _mistralApiUrl);
+        request.Content = requestContent;
+        request.Headers.Add("Authorization", $"Bearer {apiKey}");
+
+        _logger.LogInformation("Sending request to Mistral with model {Model}", _mistralModel);
+
+        using var response = await _httpClient.SendAsync(request);
+        var responseContent = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InternalServerErrorException($"Mistral API Error {response.StatusCode}: {responseContent}");
+        }
+
+        var text = ExtractTextFromOpenAIResponse(responseContent, out var reasoning);
+        return (text, _mistralModel, reasoning);
+    }
+
+    // Mistral: try all API keys with key rotation, falls back to Cerebras→Groq cascade
+    private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteMistralRequestWithKeyRotation(
+        string prompt, bool useThinking)
+    {
+        if (!_mistralApiKeys.Any())
+        {
+            _logger.LogWarning("Mistral API keys not configured. Falling back to {Provider}.", _llmProvider);
+            return await ExecuteLlmRequestWithKeyRotation(prompt, useThinking);
+        }
+
+        for (int i = 0; i < _mistralApiKeys.Count; i++)
+        {
+            var keyIndex = (_currentMistralKeyIndex + i) % _mistralApiKeys.Count;
+            var currentKey = _mistralApiKeys[keyIndex];
+
+            try
+            {
+                var result = await ExecuteMistralRequest(prompt, useThinking, currentKey);
+                _currentMistralKeyIndex = keyIndex;
+                return result;
+            }
+            catch (Exception ex) when (IsRateLimitError(ex))
+            {
+                _logger.LogWarning("Mistral Key {KeyIndex} rate limited. Trying next key...", keyIndex + 1);
+                continue;
+            }
+        }
+
+        // All Mistral keys exhausted, fall back to Cerebras→Groq cascade
+        _logger.LogWarning("All Mistral API keys exhausted. Falling back to {Provider}...", _llmProvider);
+        return await ExecuteLlmRequestWithKeyRotation(prompt, useThinking);
     }
 
     private string ExtractTextFromOpenAIResponse(string json, out string? reasoning)
@@ -519,6 +595,14 @@ public class CustomerHelper
             yield break;
         }
 
+        // Normal mode: CVAnalysis → Mistral (specialist) → Cerebras → Groq
+        if (taskType == LLMInteractionType.CVAnalysis)
+        {
+            await foreach (var chunk in ExecuteMistralStreamWithKeyRotation(prompt, useThinking, cancellationToken))
+                yield return chunk;
+            yield break;
+        }
+
         // Normal mode: Cerebras (primary) → Groq (fallback)
         await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken))
             yield return chunk;
@@ -684,6 +768,148 @@ public class CustomerHelper
         // All Groq keys exhausted — no further fallback
         throw new InternalServerErrorException(
             $"All AI provider stream keys exhausted (Cerebras and Groq). Last error: {lastException?.Message}", lastException);
+    }
+
+    // Streams from Mistral with key rotation — falls back to Cerebras→Groq cascade
+    private async IAsyncEnumerable<string> ExecuteMistralStreamWithKeyRotation(
+        string prompt,
+        bool useThinking,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (!_mistralApiKeys.Any())
+        {
+            _logger.LogWarning("Mistral stream keys not configured. Falling back to {Provider}...", _llmProvider);
+            yield return $"__FALLBACK__:{_llmProvider}";
+            await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken))
+                yield return chunk;
+            yield break;
+        }
+
+        Exception? lastException = null;
+        for (int i = 0; i < _mistralApiKeys.Count; i++)
+        {
+            var keyIndex = (_currentMistralKeyIndex + i) % _mistralApiKeys.Count;
+            var currentKey = _mistralApiKeys[keyIndex];
+
+            var channel = Channel.CreateUnbounded<string>();
+            Exception? keyException = null;
+            bool keyCompleted = false;
+            bool anyChunksYielded = false;
+
+            var producerTask = Task.Run(async () =>
+            {
+                try
+                {
+                    await foreach (var chunk in ExecuteMistralStreamRequest(prompt, useThinking, currentKey, cancellationToken))
+                        await channel.Writer.WriteAsync(chunk, cancellationToken);
+                    keyCompleted = true;
+                }
+                catch (Exception ex)
+                {
+                    keyException = ex;
+                    _logger.LogWarning(ex, "Mistral stream key {KeyIndex} failed. Trying next...", keyIndex + 1);
+                }
+                finally
+                {
+                    channel.Writer.Complete();
+                }
+            }, cancellationToken);
+
+            await foreach (var chunk in channel.Reader.ReadAllAsync(cancellationToken))
+            {
+                if (!chunk.StartsWith("__MODEL__:") && !chunk.StartsWith("__THINKING_CONTENT__:")
+                    && !chunk.StartsWith("__STATUS__:") && !chunk.StartsWith("__FALLBACK__:"))
+                    anyChunksYielded = true;
+                yield return chunk;
+            }
+
+            await producerTask;
+
+            if (keyCompleted)
+            {
+                _currentMistralKeyIndex = keyIndex;
+                yield break;
+            }
+
+            if (anyChunksYielded)
+            {
+                _logger.LogWarning("Mistral key {KeyIndex} failed mid-stream after yielding content.", keyIndex + 1);
+                throw new InternalServerErrorException(
+                    $"Mistral failed mid-stream: {keyException?.Message}");
+            }
+
+            if (keyException != null && !IsRateLimitError(keyException))
+                throw keyException;
+
+            lastException = keyException;
+        }
+
+        // All Mistral keys exhausted, fall back to Cerebras→Groq cascade
+        _logger.LogWarning("All Mistral stream keys exhausted. Falling back to {Provider}...", _llmProvider);
+        yield return $"__FALLBACK__:{_llmProvider}";
+        await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken))
+            yield return chunk;
+    }
+
+    // Streams from Mistral (OpenAI-compatible SSE)
+    private async IAsyncEnumerable<string> ExecuteMistralStreamRequest(
+        string prompt,
+        bool useThinking,
+        string apiKey,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var channel = Channel.CreateUnbounded<string>();
+        Exception? streamException = null;
+
+        var producerTask = Task.Run(async () =>
+        {
+            var lineBuffer = new StringBuilder();
+
+            try
+            {
+                var requestBody = new { model = _mistralModel, messages = new[] { new { role = "user", content = prompt } }, stream = true };
+
+                var requestJson = JsonConvert.SerializeObject(requestBody);
+                using var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
+
+                using var request = new HttpRequestMessage(HttpMethod.Post, _mistralApiUrl);
+                request.Content = requestContent;
+                request.Headers.Add("Authorization", $"Bearer {apiKey}");
+
+                _logger.LogInformation("Sending STREAM request to Mistral with model {Model}", _mistralModel);
+
+                await channel.Writer.WriteAsync($"__MODEL__:{_mistralModel}\n", cancellationToken);
+
+                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                    throw new InternalServerErrorException($"Mistral Stream Error {response.StatusCode}: {errorContent}");
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                using var reader = new StreamReader(stream);
+
+                await ProcessOpenAiSseStream(reader, channel.Writer, lineBuffer, "Mistral", cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                streamException = ex;
+            }
+            finally
+            {
+                channel.Writer.Complete();
+            }
+        }, cancellationToken);
+
+        await foreach (var chunk in channel.Reader.ReadAllAsync(cancellationToken))
+            yield return chunk;
+
+        await producerTask;
+
+        if (streamException != null)
+            throw streamException;
     }
 
     private async IAsyncEnumerable<string> ExecuteGeminiStreamRequestWithRotation(
