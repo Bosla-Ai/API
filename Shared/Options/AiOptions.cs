@@ -15,6 +15,8 @@ public class AiOptions
     [Required]
     public GroqOptions Groq { get; set; } = new();
 
+    public MistralOptions Mistral { get; set; } = new();
+
     [Required]
     public PromptOptions Prompts { get; set; } = new();
 
@@ -61,6 +63,13 @@ public class GroqOptions
     public List<string> ApiKeys { get; set; } = [];
     public string ApiUrl { get; set; } = "https://api.groq.com/openai/v1/chat/completions";
     public string Model { get; set; } = "openai/gpt-oss-120b";
+}
+
+public class MistralOptions
+{
+    public List<string> ApiKeys { get; set; } = [];
+    public string ApiUrl { get; set; } = "https://api.mistral.ai/v1/chat/completions";
+    public string Model { get; set; } = "mistral-small-2506";
 }
 
 public class PromptOptions
