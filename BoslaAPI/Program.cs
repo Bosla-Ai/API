@@ -102,6 +102,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     // Clear proxy whitelist to trust all proxies (required for Docker behind reverse proxy)
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
+    // Only trust one level of forwarding to prevent X-Forwarded-For spoofing
+    options.ForwardLimit = 1;
 });
 
 builder.Services.AddAuthorization();
@@ -113,8 +115,8 @@ builder.Services.AddCors(options =>
         corsPolicyBuilder =>
         {
             corsPolicyBuilder
-                .AllowAnyHeader()
-                .AllowAnyMethod()
+                .WithHeaders("Content-Type", "Authorization", "X-Requested-With", "Accept")
+                .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .AllowCredentials()
                 .WithOrigins(
                     "http://localhost:5173",
@@ -147,6 +149,17 @@ app.UseSwaggerUI();
 // }
 
 app.UseMiddleware<ApiResponseMiddleware>();
+
+// Security headers
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+    await next();
+});
+
 app.UseCors("CorsPolicy");
 app.UseAuthentication();
 app.UseTokenRefresh();
