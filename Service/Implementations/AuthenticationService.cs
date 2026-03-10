@@ -81,6 +81,14 @@ public class AuthenticationService(
         }
         else
         {
+            // Prevent account takeover: only allow linking if this provider is already linked
+            var alreadyLinked = await IsLoginLinkedAsync(user.Id, provider, externalId);
+            if (!alreadyLinked)
+            {
+                throw new BadRequestException(
+                    "An account with this email already exists. Please sign in with your password first, then link your LinkedIn account.");
+            }
+
             // Update profile info from provider if missing
             var updated = false;
             if (string.IsNullOrWhiteSpace(user.FirstName) || user.FirstName == "Unknown" || user.FirstName == "LinkedIn User")
@@ -102,8 +110,8 @@ public class AuthenticationService(
                 await userManager.UpdateAsync(user);
         }
 
-        var alreadyLinked = await IsLoginLinkedAsync(user.Id, provider, externalId);
-        if (!alreadyLinked)
+        var alreadyLinkedFinal = await IsLoginLinkedAsync(user.Id, provider, externalId);
+        if (!alreadyLinkedFinal)
         {
             var addLoginResult = await AddLoginAsync(user, new UserLoginInfo(provider, externalId, provider));
             if (!addLoginResult.Succeeded)
@@ -172,6 +180,16 @@ public class AuthenticationService(
         }
         else
         {
+            // Prevent account takeover: only allow linking if this provider is already linked
+            var alreadyLinked = await IsLoginLinkedAsync(user.Id, provider, externalId);
+            if (!alreadyLinked)
+            {
+                // Require the external login to be linked from an authenticated session,
+                // not automatically on first OAuth sign-in with a matching email
+                throw new BadRequestException(
+                    "An account with this email already exists. Please sign in with your password first, then link your GitHub account.");
+            }
+
             // Update profile info from provider if missing
             var updated = false;
             if (string.IsNullOrWhiteSpace(user.FirstName) || user.FirstName == "Unknown" || user.FirstName == "GitHub User")
@@ -195,10 +213,10 @@ public class AuthenticationService(
 
         var loginInfo = new UserLoginInfo(provider, externalId, provider);
 
-        var alreadyLinked = await
+        var alreadyLinkedFinal = await
             IsLoginLinkedAsync(user.Id, provider, externalId);
 
-        if (!alreadyLinked)
+        if (!alreadyLinkedFinal)
         {
             var addLoginResult = await AddLoginAsync(user, loginInfo);
             if (!addLoginResult.Succeeded)
@@ -478,6 +496,14 @@ public class AuthenticationService(
         }
         else
         {
+            // Prevent account takeover: only allow linking if this provider is already linked
+            var alreadyLinked = await IsLoginLinkedAsync(user.Id, provider, externalId);
+            if (!alreadyLinked)
+            {
+                throw new BadRequestException(
+                    "An account with this email already exists. Please sign in with your password first, then link your Google account.");
+            }
+
             // Update profile info from provider if missing
             var updated = false;
             if (string.IsNullOrWhiteSpace(user.FirstName) || user.FirstName == "Unknown" || user.FirstName == "Google User")
@@ -501,10 +527,10 @@ public class AuthenticationService(
 
         var loginInfo = new UserLoginInfo(provider, externalId, provider);
 
-        var alreadyLinked = await
+        var alreadyLinkedFinal = await
             IsLoginLinkedAsync(user.Id, provider, externalId);
 
-        if (!alreadyLinked)
+        if (!alreadyLinkedFinal)
         {
             var addLoginResult = await AddLoginAsync(user, loginInfo);
             if (!addLoginResult.Succeeded)
