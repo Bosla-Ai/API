@@ -22,20 +22,24 @@ public class ExternalAuthenticationController(
 
     /// <summary>
     /// Validates the returnUrl to prevent Open Redirect attacks.
-    /// Only allows URLs that start with the trusted domains configured in appsettings.
+    /// Only allows URLs whose host exactly matches a trusted domain configured in appsettings.
     /// </summary>
     private string ValidateReturnUrl(string? returnUrl)
     {
         if (string.IsNullOrWhiteSpace(returnUrl))
             return _oauthSettings.DefaultReturnUrl;
 
-        // Prevent open redirect attacks by validating the return URL against all allowed domains
-        var allowed = new[] { _oauthSettings.AllowedDomain, _oauthSettings.AlternateDomain }
+        if (!Uri.TryCreate(returnUrl, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+            return _oauthSettings.DefaultReturnUrl;
+
+        var allowedOrigins = new[] { _oauthSettings.AllowedDomain, _oauthSettings.AlternateDomain }
             .Where(d => !string.IsNullOrEmpty(d));
 
-        foreach (var allowedDomain in allowed)
+        foreach (var origin in allowedOrigins)
         {
-            if (returnUrl.StartsWith(allowedDomain, StringComparison.OrdinalIgnoreCase))
+            if (Uri.TryCreate(origin, UriKind.Absolute, out var allowedUri)
+                && string.Equals(uri.Host, allowedUri.Host, StringComparison.OrdinalIgnoreCase))
                 return returnUrl;
         }
 
