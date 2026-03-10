@@ -7,6 +7,7 @@ using Domain.Exceptions;
 using Domain.Requests;
 using Domain.Responses;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Logging;
 using Service.Abstraction;
 using Service.Helpers;
 using Shared;
@@ -24,7 +25,8 @@ public class AuthenticationService(
     IMapper mapper,
     UserManager<ApplicationUser> userManager,
     RoleManager<IdentityRole> roleManager,
-    AuthenticationHelper accountHelper) : IAuthenticationService
+    AuthenticationHelper accountHelper,
+    ILogger<AuthenticationService> logger) : IAuthenticationService
 {
     public async Task<ApplicationUser?> GetUserByEmailAsync(string email)
     {
@@ -239,7 +241,7 @@ public class AuthenticationService(
 
         var userExists = await GetUserByEmailAsync(customerDTO.Email);
         if (userExists != null)
-            throw new BadRequestException("Customer already exists");
+            throw new BadRequestException("Unable to complete registration. Please try a different email or sign in.");
 
         var customerUser = mapper.Map<ApplicationUser>(customerDTO);
         var customerUserCreationResult = await
@@ -269,24 +271,41 @@ public class AuthenticationService(
     }
 
     public async Task<(APIResponse<LoginClientResponse> apiResponse, LoginServerResponse loginServerResponse)>
-        LoginAsync(LoginDTO loginDto)
+        LoginAsync(LoginDTO loginDto, Guid? deviceId = null)
     {
         if (loginDto == null)
             throw new BadRequestException("Login data is required.");
 
         var user = await userManager.FindByEmailAsync(loginDto.Email);
-        if (user == null || !await userManager
-                .CheckPasswordAsync(user, loginDto.Password))
+
+        // Timing-safe: always perform password check to prevent user enumeration
+        var passwordValid = false;
+        if (user != null)
+        {
+            passwordValid = await userManager.CheckPasswordAsync(user, loginDto.Password);
+        }
+        else
+        {
+            // Perform a dummy hash to equalize timing regardless of user existence
+            var dummy = new ApplicationUser();
+            await userManager.CheckPasswordAsync(dummy, loginDto.Password);
+        }
+
+        if (!passwordValid)
+        {
+            logger.LogWarning("Failed login attempt for email {Email}", loginDto.Email);
             throw new UnauthorizedException("Invalid credentials.");
+        }
 
-        var loginServerResponse = await accountHelper
-            .GenerateAndStoreTokensAsync(user, Guid.NewGuid());
+        // Use existing device ID from cookie, or generate new for first-time login
+        var effectiveDeviceId = deviceId ?? Guid.NewGuid();
 
+        // Revoke any existing tokens for this device before creating new ones
         var existing =
             await refreshTokenService
                 .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
                 {
-                    DeviceId = loginServerResponse.DeviceId,
+                    DeviceId = effectiveDeviceId,
                     UserId = user.Id
                 });
 
@@ -301,6 +320,11 @@ public class AuthenticationService(
             }
         }
 
+        var loginServerResponse = await accountHelper
+            .GenerateAndStoreTokensAsync(user, effectiveDeviceId);
+
+        logger.LogInformation("Successful login for user {UserId}", user.Id);
+
         await unitOfWork.SaveChangesAsync();
         return (new APIResponse<LoginClientResponse>()
         {
@@ -309,13 +333,17 @@ public class AuthenticationService(
         }, loginServerResponse);
     }
 
-    public async Task<APIResponse> LogoutThisDeviceAsync(LogoutRequest logoutRequest)
+    public async Task<APIResponse> LogoutThisDeviceAsync(LogoutRequest logoutRequest, string userId)
     {
         var token = await refreshTokenService
             .GetWithDeviceIdNotRevokedAsync(new RefreshTokenParameters()
             {
                 DeviceId = logoutRequest.DeviceId
             }) ?? throw new UnauthorizedException("Invalid Logout request.");
+
+        if (token.UserId != userId)
+            throw new UnauthorizedException("Invalid Logout request.");
+
         token.IsRevoked = true;
         token.RevokedAt = DateTime.UtcNow;
         token.RevokedReason = "User logged out";
@@ -328,13 +356,17 @@ public class AuthenticationService(
         };
     }
 
-    public async Task<APIResponse> LogoutAllDevicesAsync(LogoutForAllRequest logoutRequest)
+    public async Task<APIResponse> LogoutAllDevicesAsync(LogoutForAllRequest logoutRequest, string userId)
     {
         var token = await refreshTokenService
             .GetWithDeviceIdNotRevokedAsync(new RefreshTokenParameters()
             {
                 DeviceId = logoutRequest.DeviceId
             }) ?? throw new UnauthorizedException("No Active Tokens Founded");
+
+        if (token.UserId != userId)
+            throw new UnauthorizedException("Invalid Logout request.");
+
         var tokens = await refreshTokenService
             .GetAllForUserDeviceNotRevokedAsync(new RefreshTokenParameters()
             {

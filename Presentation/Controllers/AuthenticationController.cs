@@ -61,8 +61,11 @@ public class AuthenticationController(
     [HttpPost("Login")]
     public async Task<ActionResult<LoginClientResponse>> Login([FromBody] LoginDTO loginDto)
     {
+        var cookieDeviceId = Request.Cookies[StaticData.DeviceId];
+        Guid? deviceId = Guid.TryParse(cookieDeviceId, out var parsed) ? parsed : null;
+
         var (response, loginServerResponse) = await serviceManager
-            .Authentication.LoginAsync(loginDto);
+            .Authentication.LoginAsync(loginDto, deviceId);
 
         if (response != null)
         {
@@ -78,6 +81,9 @@ public class AuthenticationController(
     public async Task<ActionResult<APIResponse>> LogoutThisDevice()
     {
         var deviceId = Request.Cookies[StaticData.DeviceId];
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                     ?? User.FindFirst("sub")?.Value
+                     ?? throw new Domain.Exceptions.UnauthorizedException("User ID not found in token");
 
         var logoutRequest = new LogoutRequest()
         {
@@ -85,7 +91,7 @@ public class AuthenticationController(
         };
 
         var response = await serviceManager.Authentication
-            .LogoutThisDeviceAsync(logoutRequest);
+            .LogoutThisDeviceAsync(logoutRequest, userId);
 
         if (response != null)
         {
@@ -100,6 +106,9 @@ public class AuthenticationController(
     public async Task<ActionResult<APIResponse>> LogoutAllDevices()
     {
         var deviceId = Request.Cookies[StaticData.DeviceId];
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                     ?? User.FindFirst("sub")?.Value
+                     ?? throw new Domain.Exceptions.UnauthorizedException("User ID not found in token");
 
         var logoutRequest = new LogoutForAllRequest()
         {
@@ -107,7 +116,7 @@ public class AuthenticationController(
         };
 
         var response = await serviceManager.Authentication
-            .LogoutAllDevicesAsync(logoutRequest);
+            .LogoutAllDevicesAsync(logoutRequest, userId);
         if (response != null)
         {
             ClearAuthCookies();

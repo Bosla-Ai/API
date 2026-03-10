@@ -14,9 +14,9 @@ public interface IAuthenticationService
     Task<ApplicationUser?> GetUserByEmailAsync(string email);
     Task<APIResponse> RegisterCustomerAsync(CustomerRegisterDTO customerDto);
     Task<(APIResponse<LoginClientResponse> apiResponse
-        , LoginServerResponse loginServerResponse)> LoginAsync(LoginDTO loginDto);
-    Task<APIResponse> LogoutThisDeviceAsync(LogoutRequest logoutRequest);
-    Task<APIResponse> LogoutAllDevicesAsync(LogoutForAllRequest logoutRequest);
+        , LoginServerResponse loginServerResponse)> LoginAsync(LoginDTO loginDto, Guid? deviceId = null);
+    Task<APIResponse> LogoutThisDeviceAsync(LogoutRequest logoutRequest, string userId);
+    Task<APIResponse> LogoutAllDevicesAsync(LogoutForAllRequest logoutRequest, string userId);
     Task<(APIResponse<LoginClientResponse> apiResponse
         , LoginServerResponse loginServerResponse)> RefreshAsync(RefreshRequest refreshRequest);
     Task<APIResponse<ApplicationUserDTO>> GetMeAsync(string userId);

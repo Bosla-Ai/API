@@ -114,7 +114,7 @@ public class AuthenticationServiceTests
 
         // Assert
         await act.Should().ThrowAsync<BadRequestException>()
-            .WithMessage("Customer already exists");
+            .WithMessage("Unable to complete registration. Please try a different email or sign in.");
     }
 
     #endregion
@@ -263,6 +263,7 @@ public class AuthenticationServiceTests
 
             _userManagerMock.Object,
             roleManagerMock.Object,
-            null!);  // AuthenticationHelper - skipped for these tests
+            null!,  // AuthenticationHelper - skipped for these tests
+            new Mock<Microsoft.Extensions.Logging.ILogger<AuthenticationService>>().Object);
     }
 }
