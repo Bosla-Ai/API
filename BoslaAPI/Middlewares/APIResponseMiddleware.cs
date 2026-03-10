@@ -31,6 +31,8 @@ public class ApiResponseMiddleware(RequestDelegate next, ILogger<ApiResponseMidd
         await using var buffer = new MemoryStream();
         context.Response.Body = buffer;
 
+        const int maxBufferSize = 10 * 1024 * 1024; // 10 MB guard
+
         try
         {
             await next.Invoke(context);
@@ -38,6 +40,15 @@ public class ApiResponseMiddleware(RequestDelegate next, ILogger<ApiResponseMidd
             {
                 context.Response.Body = originalBody;
                 await HandelNotFoundAsync(context);
+                return;
+            }
+
+            // Guard against memory exhaustion from oversized responses
+            if (buffer.Length > maxBufferSize)
+            {
+                context.Response.Body = originalBody;
+                buffer.Seek(0, SeekOrigin.Begin);
+                await buffer.CopyToAsync(originalBody);
                 return;
             }
 

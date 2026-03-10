@@ -29,6 +29,15 @@ public class UserRateLimiter : IDisposable
         if (isSuperAdmin) return true;
 
         var maxRequests = _options.CurrentValue.Gemini.MaxRequestsPerUserPerDay;
+
+        // Cap dictionary size to prevent memory exhaustion from enumeration attacks
+        if (_trackers.Count > 100_000 && !_trackers.ContainsKey(userId))
+        {
+            PruneStaleEntries();
+            if (_trackers.Count > 100_000)
+                return false;
+        }
+
         var tracker = _trackers.GetOrAdd(userId, _ => new UserRequestTracker(_utcNow));
 
         lock (tracker)
