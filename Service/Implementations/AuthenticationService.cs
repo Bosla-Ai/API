@@ -392,6 +392,12 @@ public class AuthenticationService(
         if (validToken.IsRevoked || validToken.ExpiresAt < DateTime.UtcNow)
             throw new UnauthorizedException("Invalid Refresh Token");
 
+        // Revoke the consumed token (rotation: old token can never be reused)
+        validToken.IsRevoked = true;
+        validToken.RevokedAt = DateTime.UtcNow;
+        validToken.RevokedReason = "Consumed during refresh";
+        await refreshTokenService.UpdateAsync(validToken);
+
         var user = await GetUserByIdAsync(validToken.UserId) ?? throw new NotFoundException("User not found");
         var loginServerResponse = await accountHelper
             .GenerateAndStoreTokensAsync(user, Guid.NewGuid());
