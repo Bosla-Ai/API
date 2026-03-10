@@ -172,7 +172,7 @@ public class ApiResponseMiddleware(RequestDelegate next, ILogger<ApiResponseMidd
         var response = new APIResponse()
         {
             StatusCode = (HttpStatusCode)StatusCodes.Status404NotFound,
-            ErrorMessages = [$"This End Point {httpContext.Request.Path} was not found."]
+            ErrorMessages = ["The requested endpoint was not found."]
         };
         await httpContext.Response.WriteAsync(JsonSerializer.Serialize(response));
     }

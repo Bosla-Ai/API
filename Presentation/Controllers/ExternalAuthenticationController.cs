@@ -64,11 +64,11 @@ public class ExternalAuthenticationController(
             };
             return Challenge(props, "Github");
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return StatusCode(StatusCodes.Status500InternalServerError
                 , new APIResponse<string>(HttpStatusCode.InternalServerError, null,
-                    [ex.Message]));
+                    ["An error occurred during GitHub sign-in. Please try again."]));
         }
     }
 
@@ -113,11 +113,11 @@ public class ExternalAuthenticationController(
             };
             return Challenge(props, GoogleDefaults.AuthenticationScheme);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return StatusCode(StatusCodes.Status500InternalServerError
                 , new APIResponse<string>(HttpStatusCode.InternalServerError, null,
-                    [ex.Message]));
+                    ["An error occurred during Google sign-in. Please try again."]));
         }
     }
 

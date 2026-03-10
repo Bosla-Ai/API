@@ -13,7 +13,8 @@ namespace BoslaAPI.Middlewares;
 public class TokenRefreshMiddleware(
     RequestDelegate next,
     IOptions<JwtOptions> jwtOptions,
-    IOptions<CookieSettingsOptions> cookieOptions)
+    IOptions<CookieSettingsOptions> cookieOptions,
+    ILogger<TokenRefreshMiddleware> logger)
 {
     private readonly JwtOptions _jwtOptions = jwtOptions.Value;
     private readonly CookieSettingsOptions _cookieSettings = cookieOptions.Value;
@@ -63,8 +64,9 @@ public class TokenRefreshMiddleware(
                     }
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                logger.LogWarning(ex, "Silent token refresh failed for device {DeviceId}", deviceIdString);
             }
         }
 
