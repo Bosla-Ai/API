@@ -108,11 +108,12 @@ public class UserController(
     }
 
     [EnableRateLimiting("GeneralPolicy")]
-    [HttpGet("GetCustomerProfile/{customerId:guid}")]
-    public async Task<ActionResult<APIResponse>> GetCustomerProfile(string customerId)
+    [HttpGet("GetCustomerProfile")]
+    public async Task<ActionResult<APIResponse>> GetCustomerProfile()
     {
+        var userId = GetUserId();
         var response = await serviceManager.Customer
-            .GetCustomerProfileAsync(customerId);
+            .GetCustomerProfileAsync(userId);
         return Ok(response);
     }
 
