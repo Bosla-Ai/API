@@ -72,6 +72,10 @@ public class UserController(
     {
         var (userId, request) = serviceManager.Customer.GetAiRequest(requestId);
 
+        var authenticatedUserId = GetUserId();
+        if (!string.Equals(userId, authenticatedUserId, StringComparison.Ordinal))
+            throw new UnauthorizedException("Unauthorized access to this request");
+
         Response.ContentType = "text/event-stream";
         Response.Headers["Cache-Control"] = "no-cache";
         Response.Headers["Connection"] = "keep-alive";
