@@ -1,17 +1,19 @@
 using System.Text;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Shared.DTOs;
+using Shared.Options;
 
 namespace Service.Helpers;
 
-public class ConversationContextManager(IMemoryCache cache, IChatRepository chatRepository, CustomerHelper customerHelper)
+public class ConversationContextManager(IMemoryCache cache, IChatRepository chatRepository, CustomerHelper customerHelper, IOptionsMonitor<AiOptions> aiOptions)
 {
     private readonly IMemoryCache _cache = cache;
     private readonly IChatRepository _chatRepository = chatRepository;
     private readonly CustomerHelper _customerHelper = customerHelper;
     private readonly TimeSpan _hotCacheExpiration = TimeSpan.FromMinutes(5);
-    private const int SummarizationThreshold = 50;
+    private int SummarizationThreshold => aiOptions.CurrentValue.Llm.SummarizationThreshold;
 
     public Action<string, object>? OnSseEvent { get; set; }
 

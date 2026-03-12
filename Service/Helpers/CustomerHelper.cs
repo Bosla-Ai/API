@@ -22,30 +22,42 @@ public class CustomerHelper
     private readonly List<string> _geminiFallbackModels;
     private readonly string _geminiApiUrl;
     private readonly bool _geminiIncludeThoughts;
-    private static volatile int _currentGeminiKeyIndex = 0;
+    private static int _currentGeminiKeyIndex = 0;
 
     // Cerebras (primary LLM)
     private readonly List<string> _llmApiKeys;
     private readonly string _llmApiUrl;
     private readonly string _llmModel;
     private readonly string _llmProvider;
-    private static volatile int _currentLlmKeyIndex = 0;
+    private static int _currentLlmKeyIndex = 0;
 
     // Groq (fallback LLM)
     private readonly List<string> _groqApiKeys;
     private readonly string _groqApiUrl;
     private readonly string _groqModel;
-    private static volatile int _currentGroqKeyIndex = 0;
+    private static int _currentGroqKeyIndex = 0;
 
     // Mistral (CV Analysis specialist)
     private readonly List<string> _mistralApiKeys;
     private readonly string _mistralApiUrl;
     private readonly string _mistralModel;
-    private static volatile int _currentMistralKeyIndex = 0;
+    private static int _currentMistralKeyIndex = 0;
 
     // Task-based model routing
     private readonly string _chatModel;
     private readonly string _reasoningModel;
+
+    private static object[] BuildOpenAiMessages(string? systemPrompt, string userPrompt)
+    {
+        if (!string.IsNullOrEmpty(systemPrompt))
+            return new object[]
+            {
+                new { role = "system", content = systemPrompt },
+                new { role = "user", content = userPrompt }
+            };
+
+        return new object[] { new { role = "user", content = userPrompt } };
+    }
 
     private bool IsReasoningModel(string modelName)
     {
@@ -97,7 +109,6 @@ public class CustomerHelper
     {
         LLMInteractionType.ChatWithAI => _chatModel,
         LLMInteractionType.ChooseTrack => _chatModel,
-        LLMInteractionType.ChooseMethod => _chatModel,
         LLMInteractionType.TopicPreview => _chatModel,
         LLMInteractionType.RoadmapGeneration => _reasoningModel,
         LLMInteractionType.CVAnalysis => _reasoningModel,
@@ -184,7 +195,7 @@ public class CustomerHelper
             try
             {
                 var result = await ExecuteLlmRequest(prompt, useThinking, model, currentKey);
-                _currentLlmKeyIndex = keyIndex;
+                Interlocked.Exchange(ref _currentLlmKeyIndex, keyIndex);
                 return result;
             }
             catch (Exception ex) when (IsRateLimitError(ex))
@@ -214,7 +225,7 @@ public class CustomerHelper
             try
             {
                 var result = await ExecuteGroqRequest(prompt, useThinking, currentKey);
-                _currentGroqKeyIndex = keyIndex;
+                Interlocked.Exchange(ref _currentGroqKeyIndex, keyIndex);
                 return result;
             }
             catch (Exception ex) when (IsRateLimitError(ex))
@@ -248,8 +259,6 @@ public class CustomerHelper
 
                 try
                 {
-                    var url = $"{apiUrl}?key={currentKey}";
-
                     var enableThinking = (_geminiIncludeThoughts || IsReasoningModel(model)) && useThinking;
 
                     var requestBody = new
@@ -261,7 +270,11 @@ public class CustomerHelper
                     var json = JsonConvert.SerializeObject(requestBody, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
                     using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                    using var response = await _httpClient.PostAsync(url, content);
+                    using var geminiRequest = new HttpRequestMessage(HttpMethod.Post, apiUrl);
+                    geminiRequest.Content = content;
+                    geminiRequest.Headers.Add("x-goog-api-key", currentKey);
+
+                    using var response = await _httpClient.SendAsync(geminiRequest);
                     var responseString = await response.Content.ReadAsStringAsync();
 
                     if (!response.IsSuccessStatusCode)
@@ -269,7 +282,7 @@ public class CustomerHelper
                         throw new Exception($"Gemini Error {response.StatusCode}: {responseString}");
                     }
 
-                    _currentGeminiKeyIndex = keyIndex;
+                    Interlocked.Exchange(ref _currentGeminiKeyIndex, keyIndex);
 
                     var text = ExtractTextFromResponse(responseString, out var thought);
                     return (text, model, thought);
@@ -390,7 +403,7 @@ public class CustomerHelper
             try
             {
                 var result = await ExecuteMistralRequest(prompt, useThinking, currentKey);
-                _currentMistralKeyIndex = keyIndex;
+                Interlocked.Exchange(ref _currentMistralKeyIndex, keyIndex);
                 return result;
             }
             catch (Exception ex) when (IsRateLimitError(ex))
@@ -491,7 +504,8 @@ public class CustomerHelper
         bool useThinking = false,
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
         string? userId = null,
-        bool isSuperAdmin = false)
+        bool isSuperAdmin = false,
+        string? systemPrompt = null)
     {
         bool useLlmFallback = false;
 
@@ -513,7 +527,7 @@ public class CustomerHelper
             {
                 try
                 {
-                    await foreach (var chunk in ExecuteGeminiStreamRequestWithRotation(prompt, useThinking, cancellationToken))
+                    await foreach (var chunk in ExecuteGeminiStreamRequestWithRotation(prompt, useThinking, systemPrompt, cancellationToken))
                         await channel.Writer.WriteAsync(chunk, cancellationToken);
                     geminiCompleted = true;
                 }
@@ -562,13 +576,13 @@ public class CustomerHelper
         if (useLlmFallback && _groqApiKeys.Any())
         {
             yield return $"__FALLBACK__:groq";
-            await foreach (var chunk in ExecuteGroqStreamWithKeyRotation(prompt, useThinking, cancellationToken))
+            await foreach (var chunk in ExecuteGroqStreamWithKeyRotation(prompt, useThinking, cancellationToken, systemPrompt))
                 yield return chunk;
         }
         else if (useLlmFallback && _llmApiKeys.Any())
         {
             yield return $"__FALLBACK__:{_llmProvider}";
-            await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken))
+            await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken, systemPrompt: systemPrompt))
                 yield return chunk;
         }
         else if (useLlmFallback)
@@ -585,12 +599,13 @@ public class CustomerHelper
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
         string? userId = null,
         bool isSuperAdmin = false,
-        ChatMode chatMode = ChatMode.Normal)
+        ChatMode chatMode = ChatMode.Normal,
+        string? systemPrompt = null)
     {
         // Powerful mode: route all tasks to Gemini (intent detection bypasses this via SendStreamRequestWithModel)
         if (chatMode == ChatMode.Powerful)
         {
-            await foreach (var chunk in SendStreamRequestToGemini(prompt, useThinking, cancellationToken, userId, isSuperAdmin))
+            await foreach (var chunk in SendStreamRequestToGemini(prompt, useThinking, cancellationToken, userId, isSuperAdmin, systemPrompt))
                 yield return chunk;
             yield break;
         }
@@ -598,13 +613,13 @@ public class CustomerHelper
         // Normal mode: CVAnalysis → Mistral (specialist) → Cerebras → Groq
         if (taskType == LLMInteractionType.CVAnalysis)
         {
-            await foreach (var chunk in ExecuteMistralStreamWithKeyRotation(prompt, useThinking, cancellationToken))
+            await foreach (var chunk in ExecuteMistralStreamWithKeyRotation(prompt, useThinking, cancellationToken, systemPrompt))
                 yield return chunk;
             yield break;
         }
 
         // Normal mode: Cerebras (primary) → Groq (fallback)
-        await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken))
+        await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken, systemPrompt: systemPrompt))
             yield return chunk;
     }
 
@@ -614,9 +629,10 @@ public class CustomerHelper
         bool useThinking = false,
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
         string? userId = null,
-        bool isSuperAdmin = false)
+        bool isSuperAdmin = false,
+        string? systemPrompt = null)
     {
-        await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken, model))
+        await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken, model, systemPrompt))
             yield return chunk;
     }
 
@@ -625,15 +641,17 @@ public class CustomerHelper
         string prompt,
         bool useThinking,
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
-        string? modelOverride = null)
+        string? modelOverride = null,
+        string? systemPrompt = null)
     {
         if (!_llmApiKeys.Any())
             throw new InternalServerErrorException($"{_llmProvider} API keys are not configured.");
 
         Exception? lastException = null;
+        var startLlmIndex = Volatile.Read(ref _currentLlmKeyIndex);
         for (int i = 0; i < _llmApiKeys.Count; i++)
         {
-            var keyIndex = (_currentLlmKeyIndex + i) % _llmApiKeys.Count;
+            var keyIndex = (startLlmIndex + i) % _llmApiKeys.Count;
             var currentKey = _llmApiKeys[keyIndex];
 
             var channel = Channel.CreateUnbounded<string>();
@@ -645,7 +663,7 @@ public class CustomerHelper
             {
                 try
                 {
-                    await foreach (var chunk in ExecuteLlmStreamRequest(prompt, useThinking, currentKey, cancellationToken, modelOverride))
+                    await foreach (var chunk in ExecuteLlmStreamRequest(prompt, useThinking, currentKey, cancellationToken, modelOverride, systemPrompt))
                         await channel.Writer.WriteAsync(chunk, cancellationToken);
                     keyCompleted = true;
                 }
@@ -672,12 +690,19 @@ public class CustomerHelper
 
             if (keyCompleted)
             {
-                _currentLlmKeyIndex = keyIndex;
+                Interlocked.Exchange(ref _currentLlmKeyIndex, keyIndex);
                 yield break;
             }
 
             if (anyChunksYielded)
             {
+                if (keyException != null && IsRateLimitError(keyException))
+                {
+                    _logger.LogWarning("{Provider} key {KeyIndex} rate-limited mid-stream. Will retry with next key...", _llmProvider, keyIndex + 1);
+                    yield return "__RETRY__";
+                    lastException = keyException;
+                    continue;
+                }
                 _logger.LogWarning("{Provider} key {KeyIndex} failed mid-stream after yielding content.", _llmProvider, keyIndex + 1);
                 throw new InternalServerErrorException(
                     $"{_llmProvider} failed mid-stream: {keyException?.Message}");
@@ -693,7 +718,7 @@ public class CustomerHelper
         // All Cerebras keys exhausted, fall back to Groq streaming
         _logger.LogWarning("All {Provider} stream keys exhausted. Falling back to Groq...", _llmProvider);
         yield return $"__FALLBACK__:groq";
-        await foreach (var chunk in ExecuteGroqStreamWithKeyRotation(prompt, useThinking, cancellationToken))
+        await foreach (var chunk in ExecuteGroqStreamWithKeyRotation(prompt, useThinking, cancellationToken, systemPrompt))
             yield return chunk;
     }
 
@@ -701,15 +726,17 @@ public class CustomerHelper
     private async IAsyncEnumerable<string> ExecuteGroqStreamWithKeyRotation(
         string prompt,
         bool useThinking,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default,
+        string? systemPrompt = null)
     {
         if (!_groqApiKeys.Any())
             throw new InternalServerErrorException("All AI provider keys exhausted (Cerebras and Groq).");
 
         Exception? lastException = null;
+        var startGroqIndex = Volatile.Read(ref _currentGroqKeyIndex);
         for (int i = 0; i < _groqApiKeys.Count; i++)
         {
-            var keyIndex = (_currentGroqKeyIndex + i) % _groqApiKeys.Count;
+            var keyIndex = (startGroqIndex + i) % _groqApiKeys.Count;
             var currentKey = _groqApiKeys[keyIndex];
 
             var channel = Channel.CreateUnbounded<string>();
@@ -721,7 +748,7 @@ public class CustomerHelper
             {
                 try
                 {
-                    await foreach (var chunk in ExecuteGroqStreamRequest(prompt, useThinking, currentKey, cancellationToken))
+                    await foreach (var chunk in ExecuteGroqStreamRequest(prompt, useThinking, currentKey, cancellationToken, systemPrompt))
                         await channel.Writer.WriteAsync(chunk, cancellationToken);
                     keyCompleted = true;
                 }
@@ -748,12 +775,19 @@ public class CustomerHelper
 
             if (keyCompleted)
             {
-                _currentGroqKeyIndex = keyIndex;
+                Interlocked.Exchange(ref _currentGroqKeyIndex, keyIndex);
                 yield break;
             }
 
             if (anyChunksYielded)
             {
+                if (keyException != null && IsRateLimitError(keyException))
+                {
+                    _logger.LogWarning("Groq key {KeyIndex} rate-limited mid-stream. Will retry with next key...", keyIndex + 1);
+                    yield return "__RETRY__";
+                    lastException = keyException;
+                    continue;
+                }
                 _logger.LogWarning("Groq key {KeyIndex} failed mid-stream after yielding content.", keyIndex + 1);
                 throw new InternalServerErrorException(
                     $"Groq failed mid-stream: {keyException?.Message}");
@@ -774,21 +808,23 @@ public class CustomerHelper
     private async IAsyncEnumerable<string> ExecuteMistralStreamWithKeyRotation(
         string prompt,
         bool useThinking,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default,
+        string? systemPrompt = null)
     {
         if (!_mistralApiKeys.Any())
         {
             _logger.LogWarning("Mistral stream keys not configured. Falling back to {Provider}...", _llmProvider);
             yield return $"__FALLBACK__:{_llmProvider}";
-            await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken))
+            await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken, systemPrompt: systemPrompt))
                 yield return chunk;
             yield break;
         }
 
         Exception? lastException = null;
+        var startMistralIndex = Volatile.Read(ref _currentMistralKeyIndex);
         for (int i = 0; i < _mistralApiKeys.Count; i++)
         {
-            var keyIndex = (_currentMistralKeyIndex + i) % _mistralApiKeys.Count;
+            var keyIndex = (startMistralIndex + i) % _mistralApiKeys.Count;
             var currentKey = _mistralApiKeys[keyIndex];
 
             var channel = Channel.CreateUnbounded<string>();
@@ -800,7 +836,7 @@ public class CustomerHelper
             {
                 try
                 {
-                    await foreach (var chunk in ExecuteMistralStreamRequest(prompt, useThinking, currentKey, cancellationToken))
+                    await foreach (var chunk in ExecuteMistralStreamRequest(prompt, useThinking, currentKey, systemPrompt, cancellationToken))
                         await channel.Writer.WriteAsync(chunk, cancellationToken);
                     keyCompleted = true;
                 }
@@ -827,12 +863,19 @@ public class CustomerHelper
 
             if (keyCompleted)
             {
-                _currentMistralKeyIndex = keyIndex;
+                Interlocked.Exchange(ref _currentMistralKeyIndex, keyIndex);
                 yield break;
             }
 
             if (anyChunksYielded)
             {
+                if (keyException != null && IsRateLimitError(keyException))
+                {
+                    _logger.LogWarning("Mistral key {KeyIndex} rate-limited mid-stream. Will retry with next key...", keyIndex + 1);
+                    yield return "__RETRY__";
+                    lastException = keyException;
+                    continue;
+                }
                 _logger.LogWarning("Mistral key {KeyIndex} failed mid-stream after yielding content.", keyIndex + 1);
                 throw new InternalServerErrorException(
                     $"Mistral failed mid-stream: {keyException?.Message}");
@@ -847,7 +890,7 @@ public class CustomerHelper
         // All Mistral keys exhausted, fall back to Cerebras→Groq cascade
         _logger.LogWarning("All Mistral stream keys exhausted. Falling back to {Provider}...", _llmProvider);
         yield return $"__FALLBACK__:{_llmProvider}";
-        await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken))
+        await foreach (var chunk in ExecuteLlmStreamWithKeyRotation(prompt, useThinking, cancellationToken, systemPrompt: systemPrompt))
             yield return chunk;
     }
 
@@ -856,6 +899,7 @@ public class CustomerHelper
         string prompt,
         bool useThinking,
         string apiKey,
+        string? systemPrompt = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var channel = Channel.CreateUnbounded<string>();
@@ -867,7 +911,8 @@ public class CustomerHelper
 
             try
             {
-                var requestBody = new { model = _mistralModel, messages = new[] { new { role = "user", content = prompt } }, stream = true };
+                var messages = BuildOpenAiMessages(systemPrompt, prompt);
+                var requestBody = new { model = _mistralModel, messages, stream = true };
 
                 var requestJson = JsonConvert.SerializeObject(requestBody);
                 using var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
@@ -915,6 +960,7 @@ public class CustomerHelper
     private async IAsyncEnumerable<string> ExecuteGeminiStreamRequestWithRotation(
         string prompt,
         bool useThinking,
+        string? systemPrompt = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var channel = Channel.CreateUnbounded<string>();
@@ -946,12 +992,17 @@ public class CustomerHelper
                             // Build URL with current model
                             var modelUrl = _geminiApiUrl.Replace(_geminiModel, model);
                             var baseUrl = modelUrl.Replace(":generateContent", ":streamGenerateContent");
-                            var url = $"{baseUrl}?key={currentKey}&alt=sse";
+                            var url = $"{baseUrl}?alt=sse";
 
                             var enableThinking = (_geminiIncludeThoughts || IsReasoningModel(model)) && useThinking;
 
+                            object? systemInstruction = !string.IsNullOrWhiteSpace(systemPrompt)
+                                ? new { parts = new[] { new { text = systemPrompt } } }
+                                : null;
+
                             var requestBody = new
                             {
+                                system_instruction = systemInstruction,
                                 contents = new[] { new { parts = new[] { new { text = prompt } } } },
                                 generationConfig = enableThinking ? new { thinking_config = new { include_thoughts = true } } : null
                             };
@@ -960,6 +1011,7 @@ public class CustomerHelper
                             using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
                             using var request = new HttpRequestMessage(HttpMethod.Post, url);
+                            request.Headers.Add("x-goog-api-key", currentKey);
                             request.Content = content;
 
                             using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -1046,7 +1098,7 @@ public class CustomerHelper
                                     await channel.Writer.WriteAsync(bufferLine, cancellationToken);
                             }
 
-                            _currentGeminiKeyIndex = keyIndex;
+                            Interlocked.Exchange(ref _currentGeminiKeyIndex, keyIndex);
                             return; // Success
                         }
                         catch (Exception ex) when (ex.Message.Contains("429") || ex.Message.Contains("RESOURCE_EXHAUSTED") || ex.Message.Contains("quota"))
@@ -1087,7 +1139,8 @@ public class CustomerHelper
         bool useThinking,
         string apiKey,
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
-        string? modelOverride = null)
+        string? modelOverride = null,
+        string? systemPrompt = null)
     {
         var channel = Channel.CreateUnbounded<string>();
         Exception? streamException = null;
@@ -1100,10 +1153,11 @@ public class CustomerHelper
             {
                 var model = modelOverride ?? _llmModel;
 
+                var messages = BuildOpenAiMessages(systemPrompt, prompt);
                 var requestBody = new
                 {
                     model,
-                    messages = new[] { new { role = "user", content = prompt } },
+                    messages,
                     stream = true
                 };
 
@@ -1155,7 +1209,8 @@ public class CustomerHelper
         string prompt,
         bool useThinking,
         string apiKey,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default,
+        string? systemPrompt = null)
     {
         var channel = Channel.CreateUnbounded<string>();
         Exception? streamException = null;
@@ -1166,7 +1221,8 @@ public class CustomerHelper
 
             try
             {
-                var requestBody = new { model = _groqModel, messages = new[] { new { role = "user", content = prompt } }, stream = true };
+                var messages = BuildOpenAiMessages(systemPrompt, prompt);
+                var requestBody = new { model = _groqModel, messages, stream = true };
 
                 var requestJson = JsonConvert.SerializeObject(requestBody);
                 using var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
@@ -1293,7 +1349,9 @@ public class CustomerHelper
     {
         var msg = ex.Message;
         return msg.Contains("429") || msg.Contains("rate limit", StringComparison.OrdinalIgnoreCase)
-            || msg.Contains("quota", StringComparison.OrdinalIgnoreCase) || msg.Contains("RESOURCE_EXHAUSTED");
+            || msg.Contains("quota", StringComparison.OrdinalIgnoreCase) || msg.Contains("RESOURCE_EXHAUSTED")
+            || msg.Contains("TooManyRequests", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("queue_exceeded", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<string> SummarizeConversationAsync(string conversationHistory)

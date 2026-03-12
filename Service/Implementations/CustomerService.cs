@@ -36,7 +36,8 @@ public class CustomerService(
     , IJobMarketService jobMarketService
     , IStackExchangeService stackExchangeService
     , ITechEcosystemService techEcosystemService
-    , IHttpContextAccessor httpContextAccessor) : ICustomerService
+    , IHttpContextAccessor httpContextAccessor
+    , IChatRepository chatRepository) : ICustomerService
 {
     private bool IsSuperAdmin()
     {
@@ -207,6 +208,15 @@ public class CustomerService(
             }
         }
 
+        // ── Minimal input guard ──
+        // Very short queries (e.g., "hi", "hello") crash some LLM providers during intent detection.
+        // Skip the expensive intent detection and route directly to ChatWithAI.
+        // Strip the "[Active Mode: X]" prefix so it doesn't inflate the word count.
+        var queryForWordCount = System.Text.RegularExpressions.Regex.Replace(query, @"^\[Active Mode:.*?\]\s*", "");
+        var wordCount = queryForWordCount.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        var minWordThreshold = options.CurrentValue.Llm.MinimalInputWordThreshold;
+        var skipIntentDetection = wordCount < minWordThreshold;
+
         // Intent Detection
         var prompts = options.CurrentValue.Prompts;
 
@@ -222,80 +232,116 @@ public class CustomerService(
                 "No real-time market data available. Use your knowledge of current labor market trends.");
         }
 
-        var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
-            systemPrompt,
-            (!string.IsNullOrEmpty(conversationContext.ToString()) ? $"Conversation History:\n{conversationContext}\n\n" : ""),
-            query);
-
-        var detectionJsonBuilder = new StringBuilder();
-        string detectionModel = "Unknown";
-        string thinkingLog = "";
+        var interactionType = LLMInteractionType.ChatWithAI;
+        float confidence = 0;
+        string? aiResponse = null;
+        RoadmapRequestDTO? toolArguments = null;
+        string? targetRole = null;
+        string[]? followUpSuggestions = null;
+        string? videoUrl = null;
+        string? videoSearchQuery = null;
+        AskUserQuestion[]? questions = null;
+        string? coachMonologue = null;
+        string? chatTitle = null;
         string? thinkingTitle = null;
-        bool titleExtracted = false;
 
-        // Stream intent detection \u2014 internal task, uses intent model directly
-        await foreach (var chunk in customerHelper.SendStreamRequestWithModel(detectionPrompt, options.CurrentValue.Llm.Model, useThinking: true, cancellationToken: cancellationToken, userId: userId, isSuperAdmin: IsSuperAdmin()))
+        if (!skipIntentDetection)
         {
-            if (chunk.StartsWith("__FALLBACK__:"))
-            {
-                var provider = chunk[13..].Trim();
-                yield return FormatSse("fallback", new { provider, message = "Switched to backup AI model" });
-            }
-            else if (chunk.StartsWith("__MODEL__:"))
-            {
-                detectionModel = chunk[10..].Trim();
-                yield return FormatSse("model", new { name = detectionModel });
-            }
-            else if (chunk.StartsWith("__THINKING_CONTENT__:"))
-            {
-                var content = chunk[21..];
-                thinkingLog += content;
+            var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
+                (!string.IsNullOrEmpty(conversationContext.ToString()) ? $"Conversation History:\n{conversationContext}\n\n" : ""),
+                query);
 
-                // Title Extraction Logic: First line is title, rest is debug log
-                if (!titleExtracted)
+            var detectionJsonBuilder = new StringBuilder();
+            string detectionModel = "Unknown";
+            string thinkingLog = "";
+            bool titleExtracted = false;
+
+            // Stream intent detection — internal task, uses intent model directly
+            await foreach (var chunk in customerHelper.SendStreamRequestWithModel(detectionPrompt, options.CurrentValue.Llm.Model, useThinking: true, cancellationToken: cancellationToken, userId: userId, isSuperAdmin: IsSuperAdmin(), systemPrompt: systemPrompt))
+            {
+                if (chunk.StartsWith("__FALLBACK__:"))
                 {
-                    if (thinkingLog.Contains("\n"))
+                    var provider = chunk[13..].Trim();
+                    yield return FormatSse("fallback", new { provider, message = "Switched to backup AI model" });
+                }
+                else if (chunk == "__RETRY__")
+                {
+                    yield return FormatSse("retry", new { message = "Rate limited, retrying with backup model..." });
+                    detectionJsonBuilder.Clear();
+                    thinkingLog = "";
+                    thinkingTitle = null;
+                    titleExtracted = false;
+                }
+                else if (chunk.StartsWith("__MODEL__:"))
+                {
+                    detectionModel = chunk[10..].Trim();
+                    yield return FormatSse("model", new { name = detectionModel, reasoning = true });
+                }
+                else if (chunk.StartsWith("__THINKING_CONTENT__:"))
+                {
+                    var content = chunk[21..];
+                    thinkingLog += content;
+
+                    // Only emit title on first chunk to start the "Thought for Xs" timer
+                    // Raw thinking stays internal — coach_monologue will be sent after JSON parse
+                    if (!titleExtracted)
                     {
-                        var firstNewLineIndex = thinkingLog.IndexOf('\n');
-                        thinkingTitle = thinkingLog[..firstNewLineIndex].Trim('*', ' ', '#'); // Clean md formatting
                         titleExtracted = true;
-
-                        // Emit title
+                        thinkingTitle = "Analyzing your question";
                         yield return FormatSse("thinking", new { title = thinkingTitle, debug = "" });
-
-                        // Emit remainder as debug
-                        var remainder = thinkingLog[(firstNewLineIndex + 1)..];
-                        if (!string.IsNullOrEmpty(remainder))
-                        {
-                            yield return FormatSse("thinking", new { title = thinkingTitle, debug = remainder });
-                        }
                     }
                 }
-                else
+                else if (!chunk.StartsWith("__STATUS__"))
                 {
-                    // Already extracted title, stream as debug delta
-                    yield return FormatSse("thinking", new { title = thinkingTitle ?? "Thinking...", debug = content });
+                    detectionJsonBuilder.Append(chunk);
                 }
             }
-            else if (!chunk.StartsWith("__STATUS__"))
-            {
-                detectionJsonBuilder.Append(chunk);
-            }
+
+            // Parse the accumulated JSON
+            var responseText = detectionJsonBuilder.ToString();
+            var parsed = ParseCombinedResponse(responseText);
+
+            interactionType = parsed?.intent ?? LLMInteractionType.ChatWithAI;
+            confidence = parsed?.confidence ?? 0;
+            aiResponse = parsed?.response;
+            toolArguments = parsed?.toolArguments;
+            targetRole = parsed?.targetRole;
+            followUpSuggestions = parsed?.followUpSuggestions;
+            videoUrl = parsed?.videoUrl;
+            videoSearchQuery = parsed?.videoSearchQuery;
+            questions = parsed?.questions;
+            coachMonologue = parsed?.coachMonologue;
+            chatTitle = parsed?.title;
         }
 
-        // Parse the accumulated JSON
-        var responseText = detectionJsonBuilder.ToString();
-        var parsed = ParseCombinedResponse(responseText);
+        // Emit coach_monologue as the user-facing thinking content
+        if (!string.IsNullOrEmpty(coachMonologue))
+        {
+            yield return FormatSse("thinking", new { title = thinkingTitle ?? "Analyzing your question", debug = coachMonologue });
+        }
 
-        var interactionType = parsed?.intent ?? LLMInteractionType.ChatWithAI;
-        var confidence = parsed?.confidence ?? 0;
-        var aiResponse = parsed?.response;
-        var toolArguments = parsed?.toolArguments;
-        var targetRole = parsed?.targetRole;
-        var followUpSuggestions = parsed?.followUpSuggestions;
-        var videoUrl = parsed?.videoUrl;
-        var videoSearchQuery = parsed?.videoSearchQuery;
-        var questions = parsed?.questions;
+        // Emit AI-generated title for the conversation sidebar
+        if (!string.IsNullOrEmpty(chatTitle))
+        {
+            yield return FormatSse("title", new { title = chatTitle });
+
+            // Persist title to database so it survives page reload
+            try
+            {
+                await chatRepository.AddMessageAsync(new ChatMessageEntity
+                {
+                    UserId = userId,
+                    SessionId = actualSessionId,
+                    Message = chatTitle,
+                    Role = "title",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist chat title for session {SessionId}", actualSessionId);
+            }
+        }
 
         // If we didn't get market data yet but now have a target role, try again
         if (fetchedMarketInsight is null && !string.IsNullOrEmpty(targetRole))
@@ -409,23 +455,52 @@ public class CustomerService(
                 yield return FormatSse("tool", new { name = "VideoSearch", state = "end", summary = "No embeddable video found" });
             }
         }
-        else if (interactionType == LLMInteractionType.ChatWithAI || interactionType == LLMInteractionType.ChooseMethod
+        else if (interactionType == LLMInteractionType.ChatWithAI
                  || interactionType == LLMInteractionType.TopicPreview)
         {
-            string chatPrompt = BuildChatPrompt(conversationContext.ToString(), query);
+            var (chatSystemPrompt, chatPrompt) = BuildChatPrompt(conversationContext.ToString(), query);
 
             var fullResponseBuilder = new StringBuilder();
+            var chatThinkingLog = "";
+            var chatThinkingTitle = "";
+            var chatTitleExtracted = false;
 
             try
             {
-                await foreach (var chunk in customerHelper.SendStreamRequestByTask(chatPrompt, LLMInteractionType.ChatWithAI, useThinking: false, cancellationToken: cancellationToken, userId: userId, isSuperAdmin: IsSuperAdmin(), chatMode: chatMode))
+                await foreach (var chunk in customerHelper.SendStreamRequestByTask(chatPrompt, LLMInteractionType.ChatWithAI, useThinking: true, cancellationToken: cancellationToken, userId: userId, isSuperAdmin: IsSuperAdmin(), chatMode: chatMode, systemPrompt: chatSystemPrompt))
                 {
                     if (chunk.StartsWith("__FALLBACK__:"))
                     {
                         var provider = chunk[13..].Trim();
                         yield return FormatSse("fallback", new { provider, message = "Switched to backup AI model" });
                     }
-                    else if (!chunk.StartsWith("__STATUS__") && !chunk.StartsWith("__MODEL__") && !chunk.StartsWith("__THINKING_CONTENT__"))
+                    else if (chunk == "__RETRY__")
+                    {
+                        yield return FormatSse("retry", new { message = "Rate limited, retrying with backup model..." });
+                        fullResponseBuilder.Clear();
+                    }
+                    else if (chunk.StartsWith("__MODEL__:"))
+                    {
+                        yield return FormatSse("model", new { name = chunk[10..].Trim(), reasoning = true });
+                    }
+                    else if (chunk.StartsWith("__THINKING_CONTENT__:"))
+                    {
+                        var content = chunk[21..];
+                        chatThinkingLog += content;
+
+                        // Emit clean title on first chunk, then stream debug incrementally
+                        if (!chatTitleExtracted)
+                        {
+                            chatTitleExtracted = true;
+                            chatThinkingTitle = "Crafting response";
+                            yield return FormatSse("thinking", new { title = chatThinkingTitle, debug = content });
+                        }
+                        else
+                        {
+                            yield return FormatSse("thinking", new { title = chatThinkingTitle, debug = content });
+                        }
+                    }
+                    else if (!chunk.StartsWith("__STATUS__"))
                     {
                         yield return FormatSse("text", new { delta = chunk });
                         fullResponseBuilder.Append(chunk);
@@ -637,12 +712,13 @@ public class CustomerService(
     {
         var prompts = options.CurrentValue.Prompts;
         var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
-            prompts.IntentDetectionSystemPrompt,
             (!string.IsNullOrEmpty(conversationContext) ? $"Conversation History:\n{conversationContext}\n\n" : ""),
             query);
+        // Non-stream path: prepend system prompt since SendRequestWithModel doesn't support system role
+        var fullDetectionPrompt = prompts.IntentDetectionSystemPrompt + "\n\n" + detectionPrompt;
         try
         {
-            var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestWithModel(detectionPrompt, options.CurrentValue.Llm.Model, useThinking: true);
+            var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestWithModel(fullDetectionPrompt, options.CurrentValue.Llm.Model, useThinking: true);
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
                 return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName, thinkingContent, parsed.Value.targetRole, parsed.Value.followUpSuggestions, parsed.Value.videoUrl, parsed.Value.videoSearchQuery, parsed.Value.questions);
@@ -655,15 +731,16 @@ public class CustomerService(
         }
     }
 
-    private string BuildChatPrompt(string context, string query)
+    private (string SystemPrompt, string UserPrompt) BuildChatPrompt(string context, string query)
     {
         var prompts = options.CurrentValue.Prompts;
-        return string.Format(prompts.ChatUserPromptTemplate,
-            prompts.ChatSystemPrompt + "\n" + context,
+        var userPrompt = string.Format(prompts.ChatUserPromptTemplate,
+            context,
             query);
+        return (prompts.ChatSystemPrompt, userPrompt);
     }
 
-    private (LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)? ParseCombinedResponse(string? responseText)
+    private (LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions, string? coachMonologue, string? title)? ParseCombinedResponse(string? responseText)
     {
         if (string.IsNullOrWhiteSpace(responseText))
             return null;
@@ -727,9 +804,17 @@ public class CustomerService(
                 questions = JsonSerializer.Deserialize<AskUserQuestion[]>(qProp.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             }
 
+            var coachMonologue = root.TryGetProperty("coach_monologue", out var cmProp) && cmProp.ValueKind == JsonValueKind.String
+                ? cmProp.GetString()
+                : null;
+
+            var title = root.TryGetProperty("title", out var titleProp) && titleProp.ValueKind == JsonValueKind.String
+                ? titleProp.GetString()
+                : null;
+
             if (!string.IsNullOrEmpty(intentStr) && Enum.TryParse<LLMInteractionType>(intentStr, true, out var intent))
             {
-                return (intent, Math.Clamp(confidence, 0, 100), response, toolArguments, targetRole, followUpSuggestions, videoUrl, videoSearchQuery, questions);
+                return (intent, Math.Clamp(confidence, 0, 100), response, toolArguments, targetRole, followUpSuggestions, videoUrl, videoSearchQuery, questions, coachMonologue, title);
             }
         }
         catch (Exception ex)

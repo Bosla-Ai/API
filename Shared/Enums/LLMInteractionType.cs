@@ -6,6 +6,7 @@ public enum LLMInteractionType
     CVAnalysis,
     ChatWithAI,
     ChooseTrack,
+    [Obsolete("Merged into ChatWithAI. Kept for backward compatibility.")]
     ChooseMethod,
     TopicPreview,
 }

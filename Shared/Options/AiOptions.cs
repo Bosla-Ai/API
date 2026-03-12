@@ -56,6 +56,8 @@ public class LlmOptions
     public string Model { get; set; } = "gpt-oss-120b";
     public string ChatModel { get; set; } = "gpt-oss-120b";
     public string ReasoningModel { get; set; } = "gpt-oss-120b";
+    public int MinimalInputWordThreshold { get; set; } = 3;
+    public int SummarizationThreshold { get; set; } = 10;
 }
 
 public class GroqOptions

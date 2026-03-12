@@ -65,13 +65,18 @@ public class ChatHistoryService(
                     .FirstOrDefault(m => m.Role == "assistant" && !m.Message.StartsWith("[SYSTEM]") && m.Message != "[CANCELLED]")
                     ?? latestMessage;
 
+                // Prefer AI-generated title if persisted, else fall back to first user message
+                var titleMessage = messages.FirstOrDefault(m => m.Role == "title");
+                var title = titleMessage?.Message
+                    ?? TruncatePreview(StripModePrefix(firstUserMessage?.Message ?? "New Chat"));
+
                 return new ChatSessionSummaryDTO
                 {
                     SessionId = group.Key,
-                    Title = TruncatePreview(StripModePrefix(firstUserMessage?.Message ?? "New Chat")),
+                    Title = title,
                     LastMessageAt = latestMessage.CreatedAt,
                     LastMessagePreview = TruncatePreview(previewMessage.Message),
-                    MessageCount = messages.Count
+                    MessageCount = messages.Count(m => m.Role != "title")
                 };
             })
             .OrderByDescending(s => s.LastMessageAt)
@@ -104,6 +109,7 @@ public class ChatHistoryService(
             {
                 SessionId = sessionId,
                 Messages = [.. messages
+                    .Where(m => m.Role != "title")
                     .Select(m => new ChatMessageDTO
                     {
                         Role = m.Role,
