@@ -50,13 +50,13 @@ public class CustomerHelper
     private static object[] BuildOpenAiMessages(string? systemPrompt, string userPrompt)
     {
         if (!string.IsNullOrEmpty(systemPrompt))
-            return new object[]
-            {
+            return
+            [
                 new { role = "system", content = systemPrompt },
                 new { role = "user", content = userPrompt }
-            };
+            ];
 
-        return new object[] { new { role = "user", content = userPrompt } };
+        return [new { role = "user", content = userPrompt }];
     }
 
     private bool IsReasoningModel(string modelName)
@@ -1351,7 +1351,11 @@ public class CustomerHelper
         return msg.Contains("429") || msg.Contains("rate limit", StringComparison.OrdinalIgnoreCase)
             || msg.Contains("quota", StringComparison.OrdinalIgnoreCase) || msg.Contains("RESOURCE_EXHAUSTED")
             || msg.Contains("TooManyRequests", StringComparison.OrdinalIgnoreCase)
-            || msg.Contains("queue_exceeded", StringComparison.OrdinalIgnoreCase);
+            || msg.Contains("queue_exceeded", StringComparison.OrdinalIgnoreCase)
+            // Also fallback on model availability errors (e.g., model removed or no access)
+            || msg.Contains("model_not_found", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("does not exist", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("not_found_error", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<string> SummarizeConversationAsync(string conversationHistory)
