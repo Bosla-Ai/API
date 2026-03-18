@@ -15,6 +15,7 @@ public class CustomerHelper
     private readonly ILogger<CustomerHelper> _logger;
     private readonly HttpClient _httpClient;
     private readonly UserRateLimiter _rateLimiter;
+    private readonly IOptionsMonitor<AiOptions> _options;
 
     // Gemini
     private readonly List<string> _geminiApiKeys;
@@ -75,6 +76,7 @@ public class CustomerHelper
         _logger = logger;
         _httpClient = httpClient;
         _rateLimiter = rateLimiter;
+        _options = options;
         var aiOptions = options.CurrentValue;
 
         _geminiApiKeys = aiOptions.Gemini.ApiKeys;
@@ -1358,17 +1360,22 @@ public class CustomerHelper
             || msg.Contains("not_found_error", StringComparison.OrdinalIgnoreCase);
     }
 
-    public async Task<string> SummarizeConversationAsync(string conversationHistory)
+    public async Task<string> CompactConversationAsync(string conversationHistory)
     {
-        var prompt = $@"Summarize the following conversation into a concise summary that captures the key points, user preferences, and important context. Keep it under 200 words.
+        var template = _options.CurrentValue.Prompts.SummarizationPromptTemplate;
 
-Conversation:
-{conversationHistory}
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            template = "Compact the following conversation into a short, high-signal context memory. Keep only enduring facts (goals, preferences, constraints, decisions, pending actions) and remove repetition/chit-chat. Keep it under 200 words.\\n\\nConversation:\\n{0}\\n\\nOutput format:\\n- **User Goals**: what they want to achieve\\n- **Preferences & Constraints**: language, budget, platforms, boundaries\\n- **Decisions Made**: choices already confirmed\\n- **Pending Actions**: next concrete steps\\n\\nReturn compact context:";
+        }
 
-Provide a clear, factual summary:";
+        var prompt = string.Format(template, conversationHistory);
 
-        // Route summarization to LLM provider to save Gemini quota
+        // Route compaction to LLM provider to save Gemini quota
         var (Response, _, _) = await SendRequestWithModel(prompt, _chatModel, useThinking: false);
         return Response;
     }
+
+    public Task<string> SummarizeConversationAsync(string conversationHistory)
+        => CompactConversationAsync(conversationHistory);
 }
