@@ -698,9 +698,9 @@ public class CustomerHelper
 
             if (anyChunksYielded)
             {
-                if (keyException != null && IsRateLimitError(keyException))
+                if (keyException != null && IsRetryableStreamError(keyException))
                 {
-                    _logger.LogWarning("{Provider} key {KeyIndex} rate-limited mid-stream. Will retry with next key...", _llmProvider, keyIndex + 1);
+                    _logger.LogWarning("{Provider} key {KeyIndex} failed with a retryable mid-stream error. Will retry with next key...", _llmProvider, keyIndex + 1);
                     yield return "__RETRY__";
                     lastException = keyException;
                     continue;
@@ -710,8 +710,8 @@ public class CustomerHelper
                     $"{_llmProvider} failed mid-stream: {keyException?.Message}");
             }
 
-            // Only retry on rate limit errors
-            if (keyException != null && !IsRateLimitError(keyException))
+            // Only retry on explicitly retryable stream errors
+            if (keyException != null && !IsRetryableStreamError(keyException))
                 throw keyException;
 
             lastException = keyException;
@@ -783,9 +783,9 @@ public class CustomerHelper
 
             if (anyChunksYielded)
             {
-                if (keyException != null && IsRateLimitError(keyException))
+                if (keyException != null && IsRetryableStreamError(keyException))
                 {
-                    _logger.LogWarning("Groq key {KeyIndex} rate-limited mid-stream. Will retry with next key...", keyIndex + 1);
+                    _logger.LogWarning("Groq key {KeyIndex} failed with a retryable mid-stream error. Will retry with next key...", keyIndex + 1);
                     yield return "__RETRY__";
                     lastException = keyException;
                     continue;
@@ -795,7 +795,7 @@ public class CustomerHelper
                     $"Groq failed mid-stream: {keyException?.Message}");
             }
 
-            if (keyException != null && !IsRateLimitError(keyException))
+            if (keyException != null && !IsRetryableStreamError(keyException))
                 throw keyException;
 
             lastException = keyException;
@@ -871,9 +871,9 @@ public class CustomerHelper
 
             if (anyChunksYielded)
             {
-                if (keyException != null && IsRateLimitError(keyException))
+                if (keyException != null && IsRetryableStreamError(keyException))
                 {
-                    _logger.LogWarning("Mistral key {KeyIndex} rate-limited mid-stream. Will retry with next key...", keyIndex + 1);
+                    _logger.LogWarning("Mistral key {KeyIndex} failed with a retryable mid-stream error. Will retry with next key...", keyIndex + 1);
                     yield return "__RETRY__";
                     lastException = keyException;
                     continue;
@@ -883,7 +883,7 @@ public class CustomerHelper
                     $"Mistral failed mid-stream: {keyException?.Message}");
             }
 
-            if (keyException != null && !IsRateLimitError(keyException))
+            if (keyException != null && !IsRetryableStreamError(keyException))
                 throw keyException;
 
             lastException = keyException;
@@ -1358,6 +1358,32 @@ public class CustomerHelper
             || msg.Contains("model_not_found", StringComparison.OrdinalIgnoreCase)
             || msg.Contains("does not exist", StringComparison.OrdinalIgnoreCase)
             || msg.Contains("not_found_error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRetryableStreamError(Exception ex)
+    {
+        if (ex is OperationCanceledException)
+            return false;
+
+        if (IsRateLimitError(ex))
+            return true;
+
+        var msg = ex.Message;
+        return msg.Contains("timeout", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("timed out", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("http2", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("protocol error", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("connection reset", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("connection closed", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("stream ended", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("end of stream", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("service unavailable", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("temporarily unavailable", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("bad gateway", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("gateway timeout", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("502")
+               || msg.Contains("503")
+               || msg.Contains("504");
     }
 
     public async Task<string> CompactConversationAsync(string conversationHistory)
