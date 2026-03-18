@@ -1,5 +1,3 @@
-using System.Net;
-using Domain.Exceptions;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Azure.Cosmos.Linq;
 using Microsoft.Extensions.Configuration;
@@ -13,79 +11,30 @@ public class CosmosChatRepository(CosmosClient cosmosClient, IConfiguration conf
     private readonly CosmosClient _cosmosClient = cosmosClient;
     private readonly string _databaseName = configuration["CosmosDb:DatabaseName"] ?? "BoslaChat";
     private readonly string _containerName = configuration["CosmosDb:ContainerName"] ?? "chat_messages";
-    private readonly SemaphoreSlim _containerInitLock = new(1, 1);
-    private Task<Container>? _containerTask;
+    private Container? _container;
+    private readonly SemaphoreSlim _initLock = new(1, 1);
 
     private async Task<Container> GetContainerAsync()
     {
-        var existingTask = _containerTask;
-        if (existingTask != null && !existingTask.IsFaulted && !existingTask.IsCanceled)
-        {
-            return await existingTask;
-        }
+        if (_container != null)
+            return _container;
 
-        await _containerInitLock.WaitAsync();
+        await _initLock.WaitAsync();
         try
         {
-            existingTask = _containerTask;
-            if (existingTask == null || existingTask.IsFaulted || existingTask.IsCanceled)
-            {
-                _containerTask = InitializeContainerWithRetryAsync();
-                existingTask = _containerTask;
-            }
+            if (_container != null)
+                return _container;
 
-            return await existingTask;
+            var databaseResponse = await _cosmosClient.CreateDatabaseIfNotExistsAsync(_databaseName);
+            var database = databaseResponse.Database;
+            var containerResponse = await database.CreateContainerIfNotExistsAsync(_containerName, "/UserId");
+            _container = containerResponse.Container;
+            return _container;
         }
         finally
         {
-            _containerInitLock.Release();
+            _initLock.Release();
         }
-    }
-
-    private async Task<Container> InitializeContainerWithRetryAsync()
-    {
-        var delays = new[]
-        {
-            TimeSpan.FromMilliseconds(200),
-            TimeSpan.FromMilliseconds(500)
-        };
-
-        const int maxAttempts = 3;
-
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            try
-            {
-                var databaseResponse = await _cosmosClient.CreateDatabaseIfNotExistsAsync(_databaseName);
-                var database = databaseResponse.Database;
-                var containerResponse = await database.CreateContainerIfNotExistsAsync(_containerName, "/UserId");
-                return containerResponse.Container;
-            }
-            catch (Exception ex) when (IsTransient(ex) && attempt < maxAttempts)
-            {
-                await Task.Delay(delays[attempt - 1]);
-            }
-        }
-
-        throw new InternalServerErrorException("Unable to access chat storage at the moment.");
-    }
-
-    private static bool IsTransient(Exception ex)
-    {
-        if (ex is TaskCanceledException or HttpRequestException)
-        {
-            return true;
-        }
-
-        if (ex is CosmosException cosmosEx)
-        {
-            return cosmosEx.StatusCode is HttpStatusCode.RequestTimeout
-                or HttpStatusCode.TooManyRequests
-                or HttpStatusCode.ServiceUnavailable
-                or HttpStatusCode.GatewayTimeout;
-        }
-
-        return false;
     }
 
     public async Task AddMessageAsync(ChatMessageEntity message)

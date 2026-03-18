@@ -12,7 +12,7 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
     private readonly IMemoryCache _cache = cache;
     private readonly IChatRepository _chatRepository = chatRepository;
     private readonly CustomerHelper _customerHelper = customerHelper;
-    private readonly TimeSpan _hotCacheExpiration = TimeSpan.FromMinutes(5);
+    private readonly TimeSpan _hotCacheExpiration = TimeSpan.FromMinutes(10);
     private int CompactionThreshold => aiOptions.CurrentValue.Llm.SummarizationThreshold;
 
     public Action<string, object>? OnSseEvent { get; set; }
@@ -96,9 +96,6 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
         }
 
         var compactContext = await _customerHelper.CompactConversationAsync(conversationText.ToString());
-
-        var messageIds = messages.Select(m => m.Id).ToList();
-        await _chatRepository.DeleteMessagesAsync(userId, sessionId, messageIds);
 
         var summaryEntity = new ChatMessageEntity
         {
