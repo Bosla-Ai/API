@@ -93,7 +93,7 @@ public class CustomerService(
         await Task.WhenAll(contextTask, addMessageTask);
         var conversationContext = await contextTask;
 
-        // Drain any buffered SSE events (e.g. summarization)
+        // Drain any buffered SSE events (e.g. compaction)
         while (pendingSseEvents.TryDequeue(out var sseEvent))
             yield return sseEvent;
 
@@ -380,6 +380,30 @@ public class CustomerService(
             targetRole,
         });
 
+        var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
+            && !HasRoadmapConfirmation(query);
+
+        if (roadmapNeedsConfirmation)
+        {
+            if (!string.IsNullOrEmpty(aiResponse))
+                yield return FormatSse("text", new { delta = aiResponse });
+
+            yield return FormatSse("ask_user", new { questions = BuildRoadmapConfirmationQuestions() });
+
+            if (followUpSuggestions is { Length: > 0 })
+                yield return FormatSse("suggestions", new { items = followUpSuggestions });
+
+            yield return FormatSse("done", new { message = "Roadmap confirmation requested" });
+
+            await conversationContextManager.AddMessageToContextAsync(
+                userId,
+                actualSessionId,
+                aiResponse ?? "Please confirm if you want me to generate your roadmap now.",
+                "assistant");
+
+            yield break;
+        }
+
         // If the AI decided to ask the user questions, emit ask_user and stop
         if (questions is { Length: > 0 })
         {
@@ -659,6 +683,33 @@ public class CustomerService(
 
             var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, _) = await DetectIntentAsync(query, conversationContext.ToString());
 
+            var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
+                && !HasRoadmapConfirmation(query);
+
+            if (roadmapNeedsConfirmation)
+            {
+                var confirmMessage = !string.IsNullOrEmpty(aiResponse)
+                    ? aiResponse
+                    : "I can generate your roadmap. Please confirm to continue.";
+
+                await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, confirmMessage, "assistant");
+
+                return new APIResponse<AiIntentDetectionResponse>()
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Data = new AiIntentDetectionResponse
+                    {
+                        InteractionType = LLMInteractionType.RoadmapGeneration,
+                        Confidence = confidence,
+                        Success = true,
+                        Answer = confirmMessage,
+                        Thinking = !string.IsNullOrEmpty(thinkingContent),
+                        ThinkingLog = thinkingContent,
+                        Questions = BuildRoadmapConfirmationQuestions()
+                    }
+                };
+            }
+
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
                 toolArguments.JobId = Guid.NewGuid().ToString("N")[..12];
@@ -679,7 +730,8 @@ public class CustomerService(
                 Answer = !string.IsNullOrEmpty(aiResponse) ? aiResponse : null,
                 Thinking = !string.IsNullOrEmpty(thinkingContent),
                 ThinkingLog = thinkingContent,
-                VideoUrl = interactionType == LLMInteractionType.TopicPreview ? videoUrl : null
+                VideoUrl = interactionType == LLMInteractionType.TopicPreview ? videoUrl : null,
+                Questions = null
             };
 
             if (!string.IsNullOrEmpty(response.Answer))
@@ -870,6 +922,61 @@ public class CustomerService(
         using var sha256 = SHA256.Create();
         var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(input));
         return BitConverter.ToString(hash).Replace("-", "").ToLower()[..16];
+    }
+
+    private static bool HasRoadmapConfirmation(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return false;
+
+        var normalized = query.Trim().ToLowerInvariant();
+
+        var roadmapTerms = new[]
+        {
+            "roadmap",
+            "learning path",
+            "خريطة طريق",
+            "مسار تعلم",
+            "رودماب"
+        };
+
+        var confirmTerms = new[]
+        {
+            "yes",
+            "confirm",
+            "go ahead",
+            "proceed",
+            "generate now",
+            "create now",
+            "نعم",
+            "أكيد",
+            "تمام",
+            "ابدأ",
+            "وافق"
+        };
+
+        var hasConfirmTerm = confirmTerms.Any(normalized.Contains);
+
+        if (!hasConfirmTerm)
+            return false;
+
+        var hasRoadmapTerm = roadmapTerms.Any(normalized.Contains);
+        return hasRoadmapTerm || normalized is "yes" or "نعم" or "أكيد" or "تمام";
+    }
+
+    private static AskUserQuestion[] BuildRoadmapConfirmationQuestions()
+    {
+        return
+        [
+            new AskUserQuestion
+            {
+                Id = "roadmap_confirm",
+                Text = "I detected a roadmap request. Do you want me to generate your roadmap now?",
+                Type = "checkbox",
+                Options = ["Yes, generate roadmap now", "Not now"],
+                Required = true
+            }
+        ];
     }
 
     public async Task<APIResponse> GetCustomerProfileAsync(string customerId)
