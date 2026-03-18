@@ -1,9 +1,11 @@
+using System.Reflection;
 using AutoMapper;
 using Domain.Contracts;
 using Domain.Entities;
 using FluentAssertions;
 using Moq;
 using Service.Implementations;
+using Shared;
 
 namespace BoslaAPI.Tests.Services;
 
@@ -26,6 +28,99 @@ public class CustomerServiceTests
             .Returns(_customerRepoMock.Object);
     }
 
+    #region Intent Guardrail Tests
+
+    [Theory]
+    [InlineData("Create a roadmap for backend", true)]
+    [InlineData("I need a learning path in .NET", true)]
+    [InlineData("Analyze the backend market and give me a report", false)]
+    [InlineData("Compare backend and devops salaries", false)]
+    [InlineData("", false)]
+    public void IsExplicitRoadmapRequest_DetectsOnlyExplicitRoadmapQueries(string query, bool expected)
+    {
+        // Arrange
+        var method = typeof(CustomerService).GetMethod(
+            "IsExplicitRoadmapRequest",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        // Act
+        var result = (bool)method!.Invoke(null, [query])!;
+
+        // Assert
+        result.Should().Be(expected);
+    }
+
+    [Fact]
+    public void IsRoadmapIntakeQuestionSet_ReturnsTrue_ForRoadmapIntakeQuestions()
+    {
+        // Arrange
+        var questions = new[]
+        {
+            new AskUserQuestion
+            {
+                Id = "q1",
+                Text = "What specific job title are you aiming for?",
+                Type = "text",
+                Required = true
+            },
+            new AskUserQuestion
+            {
+                Id = "q2",
+                Text = "What is your current programming experience level?",
+                Type = "checkbox",
+                Options = ["Beginner", "Intermediate", "Advanced"],
+                Required = true
+            }
+        };
+
+        var method = typeof(CustomerService).GetMethod(
+            "IsRoadmapIntakeQuestionSet",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        // Act
+        var result = (bool)method!.Invoke(null, [questions])!;
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsRoadmapIntakeQuestionSet_ReturnsFalse_ForGenericAnalysisQuestions()
+    {
+        // Arrange
+        var questions = new[]
+        {
+            new AskUserQuestion
+            {
+                Id = "q1",
+                Text = "Which region should I analyze?",
+                Type = "checkbox",
+                Options = ["US", "EU", "MENA"],
+                Required = true
+            },
+            new AskUserQuestion
+            {
+                Id = "q2",
+                Text = "What seniority level should the report focus on?",
+                Type = "checkbox",
+                Options = ["Junior", "Mid", "Senior"],
+                Required = false
+            }
+        };
+
+        var method = typeof(CustomerService).GetMethod(
+            "IsRoadmapIntakeQuestionSet",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        // Act
+        var result = (bool)method!.Invoke(null, [questions])!;
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    #endregion
+
     #region GetAllAsync Tests
 
     [Fact]
@@ -40,7 +135,7 @@ public class CustomerServiceTests
         };
 
         _customerRepoMock
-            .Setup(r => r.GetAllAsync(null))
+            .Setup(r => r.GetAllAsync(It.IsAny<Specifications<Customer>>()))
             .ReturnsAsync(customers);
 
         var mapperMock = new Mock<IMapper>();
@@ -59,7 +154,7 @@ public class CustomerServiceTests
     {
         // Arrange
         _customerRepoMock
-            .Setup(r => r.GetAllAsync(null))
+            .Setup(r => r.GetAllAsync(It.IsAny<Specifications<Customer>>()))
             .ReturnsAsync([]);
 
         var mapperMock = new Mock<IMapper>();

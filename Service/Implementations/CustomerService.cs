@@ -380,6 +380,17 @@ public class CustomerService(
             targetRole,
         });
 
+        var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
+
+        // Safety net: avoid roadmap hijacking unless user explicitly asked for roadmap/path/plan.
+        if (interactionType == LLMInteractionType.RoadmapGeneration && !explicitRoadmapRequest)
+        {
+            interactionType = LLMInteractionType.ChatWithAI;
+            toolArguments = null;
+            if (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions))
+                questions = null;
+        }
+
         var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
             && !HasRoadmapConfirmation(query);
 
@@ -404,7 +415,11 @@ public class CustomerService(
             yield break;
         }
 
-        // If the AI decided to ask the user questions, emit ask_user and stop
+        // If the AI decided to ask the user questions, emit ask_user and stop.
+        // Ignore roadmap-intake question sets unless roadmap was explicitly requested.
+        if (questions is { Length: > 0 } && !explicitRoadmapRequest && IsRoadmapIntakeQuestionSet(questions))
+            questions = null;
+
         if (questions is { Length: > 0 })
         {
             // Emit the response text first (introduces the questions)
@@ -682,6 +697,13 @@ public class CustomerService(
             var conversationContext = await contextTask;
 
             var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, _) = await DetectIntentAsync(query, conversationContext.ToString());
+
+            var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
+            if (interactionType == LLMInteractionType.RoadmapGeneration && !explicitRoadmapRequest)
+            {
+                interactionType = LLMInteractionType.ChatWithAI;
+                toolArguments = null;
+            }
 
             var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
                 && !HasRoadmapConfirmation(query);
@@ -977,6 +999,64 @@ public class CustomerService(
                 Required = true
             }
         ];
+    }
+
+    private static bool IsExplicitRoadmapRequest(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return false;
+
+        var normalized = query.Trim().ToLowerInvariant();
+
+        var roadmapTerms = new[]
+        {
+            "roadmap",
+            "learning path",
+            "study plan",
+            "learning plan",
+            "plan for",
+            "خريطة طريق",
+            "مسار تعلم",
+            "خطة تعلم",
+            "خطة دراسة",
+            "رودماب"
+        };
+
+        return roadmapTerms.Any(normalized.Contains);
+    }
+
+    private static bool IsRoadmapIntakeQuestionSet(AskUserQuestion[] questions)
+    {
+        if (questions.Length == 0)
+            return false;
+
+        static bool ContainsRoadmapIntakeTerms(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            var normalized = text.Trim().ToLowerInvariant();
+            var terms = new[]
+            {
+                "roadmap",
+                "learning path",
+                "target role",
+                "job title",
+                "experience level",
+                "career goal",
+                "generate your roadmap",
+                "خريطة طريق",
+                "مسار تعلم",
+                "المسمى الوظيفي",
+                "مستوى الخبرة"
+            };
+
+            return terms.Any(normalized.Contains);
+        }
+
+        return questions.Any(q =>
+            ContainsRoadmapIntakeTerms(q.Text)
+            || q.Options?.Any(ContainsRoadmapIntakeTerms) == true);
     }
 
     public async Task<APIResponse> GetCustomerProfileAsync(string customerId)
