@@ -695,6 +695,7 @@ public class CustomerService(
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Failed to process AI intent detection for user {UserId} in session {SessionId}", userId, sessionId);
             return new APIResponse<AiIntentDetectionResponse>()
             {
                 StatusCode = HttpStatusCode.InternalServerError,
@@ -702,7 +703,7 @@ public class CustomerService(
                 {
                     InteractionType = LLMInteractionType.ChatWithAI,
                     Success = false,
-                    ErrorMessage = ex.Message
+                    ErrorMessage = "Unable to process your request right now. Please try again."
                 }
             };
         }
@@ -857,7 +858,8 @@ public class CustomerService(
         }
         catch (Exception ex)
         {
-            return $"Error calling roadmap service: {ex.Message}";
+            _logger.LogError(ex, "Roadmap service call failed for request payload.");
+            return "Error: Unable to reach roadmap service right now. Please try again later.";
         }
     }
 

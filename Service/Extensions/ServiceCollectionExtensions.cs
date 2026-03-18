@@ -57,11 +57,11 @@ public static class ServiceCollectionExtensions
 
         if (isCosmosConfigured)
         {
-            services.AddScoped<IChatRepository, CosmosChatRepository>();
+            services.AddSingleton<IChatRepository, CosmosChatRepository>();
         }
         else
         {
-            services.AddScoped<IChatRepository, NullChatRepository>();
+            services.AddSingleton<IChatRepository, NullChatRepository>();
         }
 
         services.AddHttpContextAccessor();

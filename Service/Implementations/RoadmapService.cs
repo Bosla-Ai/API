@@ -73,18 +73,18 @@ public class RoadmapService(
                 var response = await httpClient.PostAsJsonAsync(_pythonApiUrl, requestPayload);
 
                 if (!response.IsSuccessStatusCode)
-                    throw new InternalServerErrorException($"Python Scraper failed with status {response.StatusCode}: {response.ReasonPhrase}");
+                    throw new InternalServerErrorException("Unable to generate roadmap at the moment.");
 
-                var roadmapResponse = await response.Content.ReadFromJsonAsync<RoadmapGenerationDTO>() ?? throw new InternalServerErrorException("Received empty data from Python Microservice.");
+                var roadmapResponse = await response.Content.ReadFromJsonAsync<RoadmapGenerationDTO>() ?? throw new InternalServerErrorException("Unable to generate roadmap at the moment.");
                 roadmapData = roadmapResponse;
             }
-            catch (HttpRequestException ex)
+            catch (HttpRequestException)
             {
-                throw new InternalServerErrorException($"Failed to connect to Python Microservice at {_pythonApiUrl}. Is it running? Error: {ex.Message}");
+                throw new InternalServerErrorException("Roadmap service is temporarily unavailable.");
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                throw new InternalServerErrorException($"An unexpected error occurred while calling the Python Microservice: {ex.Message}");
+                throw new InternalServerErrorException("Unable to generate roadmap at the moment.");
             }
 
 
