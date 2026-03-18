@@ -98,6 +98,7 @@ public class UserController(
             try
             {
                 await Response.WriteAsync($"event: error\ndata: {{\"message\": \"An error occurred\"}}\n\n");
+                await Response.WriteAsync($"event: done\ndata: {{\"message\": \"Stream terminated due to error\"}}\n\n");
                 await Response.Body.FlushAsync();
             }
             catch
