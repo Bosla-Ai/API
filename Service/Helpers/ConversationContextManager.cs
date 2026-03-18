@@ -13,7 +13,7 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
     private readonly IChatRepository _chatRepository = chatRepository;
     private readonly CustomerHelper _customerHelper = customerHelper;
     private readonly TimeSpan _hotCacheExpiration = TimeSpan.FromMinutes(5);
-    private int SummarizationThreshold => aiOptions.CurrentValue.Llm.SummarizationThreshold;
+    private int CompactionThreshold => aiOptions.CurrentValue.Llm.SummarizationThreshold;
 
     public Action<string, object>? OnSseEvent { get; set; }
 
@@ -44,7 +44,7 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
         }
 
         var dbMessages = await _chatRepository
-            .GetMessagesAsync(userId, sessionId, SummarizationThreshold + 5);
+            .GetMessagesAsync(userId, sessionId, CompactionThreshold + 5);
 
         if (!dbMessages.Any())
         {
@@ -52,20 +52,20 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
         }
 
         var regularMessages = dbMessages.Where(m => m.Role != "summary").ToList();
-        var existingSummary = dbMessages.FirstOrDefault(m => m.Role == "summary");
+        var existingCompactContext = dbMessages.FirstOrDefault(m => m.Role == "summary");
 
-        if (regularMessages.Count >= SummarizationThreshold && existingSummary == null)
+        if (regularMessages.Count >= CompactionThreshold && existingCompactContext == null)
         {
-            await SummarizeAndCompressAsync(userId, sessionId, regularMessages);
-            dbMessages = await _chatRepository.GetMessagesAsync(userId, sessionId, SummarizationThreshold + 5);
+            await CompactConversationContextAsync(userId, sessionId, regularMessages);
+            dbMessages = await _chatRepository.GetMessagesAsync(userId, sessionId, CompactionThreshold + 5);
         }
 
         var sb = new StringBuilder();
 
-        var summary = dbMessages.FirstOrDefault(m => m.Role == "summary");
-        if (summary != null)
+        var compactContext = dbMessages.FirstOrDefault(m => m.Role == "summary");
+        if (compactContext != null)
         {
-            sb.AppendLine($"[Previous Context Summary]: {summary.Message}");
+            sb.AppendLine($"[Previous Compacted Context]: {compactContext.Message}");
             sb.AppendLine();
         }
 
@@ -85,9 +85,9 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
         return context;
     }
 
-    private async Task SummarizeAndCompressAsync(string userId, string sessionId, List<ChatMessageEntity> messages)
+    private async Task CompactConversationContextAsync(string userId, string sessionId, List<ChatMessageEntity> messages)
     {
-        OnSseEvent?.Invoke("tool", new { name = "Summarization", state = "start", summary = $"Compressing {messages.Count} messages into context summary..." });
+        OnSseEvent?.Invoke("tool", new { name = "Compaction", state = "start", summary = $"Compacting {messages.Count} messages into context memory..." });
 
         var conversationText = new StringBuilder();
         foreach (var msg in messages)
@@ -95,7 +95,7 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
             conversationText.AppendLine($"[{msg.Role}]: {msg.Message}");
         }
 
-        var summary = await _customerHelper.SummarizeConversationAsync(conversationText.ToString());
+        var compactContext = await _customerHelper.CompactConversationAsync(conversationText.ToString());
 
         var messageIds = messages.Select(m => m.Id).ToList();
         await _chatRepository.DeleteMessagesAsync(userId, sessionId, messageIds);
@@ -104,13 +104,13 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
         {
             UserId = userId,
             SessionId = sessionId,
-            Message = summary,
+            Message = compactContext,
             Role = "summary",
             CreatedAt = DateTime.UtcNow
         };
         await _chatRepository.AddMessageAsync(summaryEntity);
 
-        OnSseEvent?.Invoke("tool", new { name = "Summarization", state = "end", summary = "Conversation context optimized." });
+        OnSseEvent?.Invoke("tool", new { name = "Compaction", state = "end", summary = "Conversation context compacted." });
     }
 
     public Task ClearConversationContextAsync(string userId, string sessionId)
