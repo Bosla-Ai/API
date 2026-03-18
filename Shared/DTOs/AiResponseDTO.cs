@@ -12,4 +12,5 @@ public class AiIntentDetectionResponse
     public string? ThinkingLog { get; set; }
     public string? ErrorMessage { get; set; }
     public string? VideoUrl { get; set; }
+    public AskUserQuestion[]? Questions { get; set; }
 }
