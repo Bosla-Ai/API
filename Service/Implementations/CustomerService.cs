@@ -218,9 +218,6 @@ public class CustomerService(
         var minWordThreshold = options.CurrentValue.Llm.MinimalInputWordThreshold;
         var skipIntentDetection = wordCount < minWordThreshold;
 
-        // ═══════════════════════════════════════════════════════════════════
-        //  SMART DISCOVERY FUNNEL - Stage 1: Mode Classification
-        // ═══════════════════════════════════════════════════════════════════
         var enableModeClassification = options.CurrentValue.Llm.EnableModeClassification;
         var sessionMessageThreshold = options.CurrentValue.Llm.NewSessionMessageThreshold;
         string classifiedMode = "ACTION"; // Default to current behavior
@@ -278,9 +275,6 @@ public class CustomerService(
             });
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        //  Route based on classified mode
-        // ═══════════════════════════════════════════════════════════════════
 
         // FRIEND mode: Skip intent detection, go directly to warm chat
         if (classifiedMode == "FRIEND")
@@ -780,9 +774,6 @@ public class CustomerService(
             yield return FormatSse("suggestions", new { items = followUpSuggestions });
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        //  SMART DISCOVERY FUNNEL - Stage 3: Background Profile Extraction
-        // ═══════════════════════════════════════════════════════════════════
         if (options.CurrentValue.Llm.EnableBackgroundProfileExtraction && classifiedMode == "FRIEND")
         {
             // Capture dependencies for closure (avoid capturing 'this' for fire-and-forget)
@@ -1340,9 +1331,6 @@ public class CustomerService(
         return node?.ToJsonString() ?? json;
     }
 
-    /// <summary>
-    /// Classify mode with fallback handling (extracted to avoid yield in try-catch)
-    /// </summary>
     private static async Task<(string Mode, string? Error)> ClassifyModeWithFallbackAsync(
         CustomerHelper customerHelper,
         string query,

@@ -118,9 +118,6 @@ public class CustomerHelper
         _ => _llmModel
     };
 
-    /// <summary>
-    /// Returns the number of remaining Gemini requests for the given user today.
-    /// </summary>
     public int GetGeminiRemainingQuota(string userId, bool isSuperAdmin)
         => _rateLimiter.GetRemainingRequests(userId, isSuperAdmin);
 
@@ -1406,10 +1403,6 @@ public class CustomerHelper
     public Task<string> SummarizeConversationAsync(string conversationHistory)
         => CompactConversationAsync(conversationHistory);
 
-    /// <summary>
-    /// Lightweight mode classification for Smart Discovery Funnel.
-    /// Returns: FRIEND, ACTION, or UNCLEAR
-    /// </summary>
     public async Task<string> ClassifyModeAsync(string query, int sessionMessageCount, bool profileComplete)
     {
         var template = _options.CurrentValue.Prompts.ModeClassificationPrompt;
@@ -1446,10 +1439,6 @@ public class CustomerHelper
         }
     }
 
-    /// <summary>
-    /// Simplified intent detection for ACTION mode (OSS-friendly).
-    /// Returns: (intent, confidence, targetRole)
-    /// </summary>
     public async Task<(LLMInteractionType Intent, float Confidence, string? TargetRole)> ClassifyIntentSimplifiedAsync(
         string query, string? profileSummary)
     {
@@ -1504,9 +1493,6 @@ public class CustomerHelper
         }
     }
 
-    /// <summary>
-    /// Background profile extraction from conversation (non-blocking).
-    /// </summary>
     public async Task<UserProfileExtraction?> ExtractProfileAsync(string conversationHistory)
     {
         var template = _options.CurrentValue.Prompts.ProfileExtractionPrompt;
