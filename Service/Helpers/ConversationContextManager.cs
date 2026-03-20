@@ -117,5 +117,11 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
         return Task.CompletedTask;
     }
 
+    public async Task<int> GetMessageCountAsync(string userId, string sessionId)
+    {
+        var messages = await _chatRepository.GetMessagesAsync(userId, sessionId, 100);
+        return messages.Count(m => m.Role != "summary" && m.Role != "title");
+    }
+
     private static string GetCacheKey(string userId, string sessionId) => $"chat_{userId}_{sessionId}";
 }

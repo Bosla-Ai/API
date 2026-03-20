@@ -37,7 +37,8 @@ public class CustomerService(
     , IStackExchangeService stackExchangeService
     , ITechEcosystemService techEcosystemService
     , IHttpContextAccessor httpContextAccessor
-    , IChatRepository chatRepository) : ICustomerService
+    , IChatRepository chatRepository
+    , IUserProfileRepository userProfileRepository) : ICustomerService
 {
     private bool IsSuperAdmin()
     {
@@ -217,7 +218,92 @@ public class CustomerService(
         var minWordThreshold = options.CurrentValue.Llm.MinimalInputWordThreshold;
         var skipIntentDetection = wordCount < minWordThreshold;
 
-        // Intent Detection
+        // ═══════════════════════════════════════════════════════════════════
+        //  SMART DISCOVERY FUNNEL - Stage 1: Mode Classification
+        // ═══════════════════════════════════════════════════════════════════
+        var enableModeClassification = options.CurrentValue.Llm.EnableModeClassification;
+        var sessionMessageThreshold = options.CurrentValue.Llm.NewSessionMessageThreshold;
+        string classifiedMode = "ACTION"; // Default to current behavior
+        int sessionMessageCount = 0;
+        string? modeClassificationError = null;
+        UserProfileEntity? userProfile = null;
+
+        // Fetch user profile from Cosmos DB for personalization
+        try
+        {
+            userProfile = await userProfileRepository.GetByUserIdAsync(userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to fetch user profile for {UserId}", userId);
+        }
+
+        // Generate profile summary for prompts
+        var profileSummary = userProfile?.ToPromptSummary() ?? "No profile data yet";
+
+        if (enableModeClassification && !skipIntentDetection && chatMode != ChatMode.Powerful)
+        {
+            yield return FormatSse("status", new { message = "Understanding your request...", step = "mode_classification" });
+
+            // Get session message count for context
+            sessionMessageCount = await conversationContextManager.GetMessageCountAsync(userId, actualSessionId);
+
+            // Check if profile is complete (has target role or interests)
+            var profileComplete = userProfile != null
+                && (!string.IsNullOrEmpty(userProfile.TargetRole) || userProfile.Interests?.Count > 0);
+
+            // Apply new-session bias: lean toward FRIEND mode for new sessions with incomplete profiles
+            var applyFriendBias = sessionMessageCount < sessionMessageThreshold && !profileComplete;
+
+            // Classify mode (wrapped to avoid yield in try-catch)
+            (classifiedMode, modeClassificationError) = await ClassifyModeWithFallbackAsync(
+                customerHelper, query, sessionMessageCount, profileComplete, applyFriendBias, _logger);
+        }
+
+        // Emit mode classification result
+        if (sessionMessageCount > 0)
+        {
+            yield return FormatSse("mode", new { classified = classifiedMode, sessionMessages = sessionMessageCount });
+        }
+
+        // Emit profile info if available
+        if (userProfile != null)
+        {
+            yield return FormatSse("profile", new
+            {
+                hasProfile = true,
+                targetRole = userProfile.TargetRole,
+                interestsCount = userProfile.Interests?.Count ?? 0,
+                extractionCount = userProfile.ExtractionCount
+            });
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        //  Route based on classified mode
+        // ═══════════════════════════════════════════════════════════════════
+
+        // FRIEND mode: Skip intent detection, go directly to warm chat
+        if (classifiedMode == "FRIEND")
+        {
+            skipIntentDetection = true;
+            _logger.LogDebug("FRIEND mode: Skipping intent detection for empathetic conversation");
+        }
+
+        // UNCLEAR mode: Skip intent detection, ask clarifying question
+        if (classifiedMode == "UNCLEAR")
+        {
+            skipIntentDetection = true;
+            yield return FormatSse("text", new { delta = "I'd love to help! Could you tell me a bit more about what you're looking for? For example:\n- Are you exploring career options?\n- Do you have a specific skill you want to learn?\n- Or would you like to chat about your career journey?" });
+            yield return FormatSse("done", new { message = "Clarification requested" });
+
+            await conversationContextManager.AddMessageToContextAsync(
+                userId, actualSessionId,
+                "I'd love to help! Could you tell me a bit more about what you're looking for?",
+                "assistant");
+            yield break;
+        }
+
+        // Intent Detection (only for ACTION mode)
         var prompts = options.CurrentValue.Prompts;
 
         // Inject market context into system prompt
@@ -497,7 +583,7 @@ public class CustomerService(
         else if (interactionType == LLMInteractionType.ChatWithAI
                  || interactionType == LLMInteractionType.TopicPreview)
         {
-            var (chatSystemPrompt, chatPrompt) = BuildChatPrompt(conversationContext.ToString(), query);
+            var (chatSystemPrompt, chatPrompt) = BuildChatPrompt(conversationContext.ToString(), query, profileSummary);
 
             var fullResponseBuilder = new StringBuilder();
             var chatThinkingLog = "";
@@ -605,7 +691,25 @@ public class CustomerService(
 
                 yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "processing" });
 
-                var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments!, cancellationToken);
+                // Keep SSE connection alive during long-running pipeline calls.
+                var apiResponseTask = ExecuteRoadmapGenerationAsync(toolArguments!, cancellationToken);
+                var heartbeatSeconds = 0;
+                while (!apiResponseTask.IsCompleted)
+                {
+                    var completed = await Task.WhenAny(apiResponseTask, Task.Delay(TimeSpan.FromSeconds(8), cancellationToken));
+                    if (completed == apiResponseTask)
+                        break;
+
+                    heartbeatSeconds += 8;
+                    yield return FormatSse("tool", new
+                    {
+                        name = "RoadmapGenerator",
+                        state = "processing",
+                        summary = $"Roadmap generation in progress... {heartbeatSeconds}s"
+                    });
+                }
+
+                var apiResponse = await apiResponseTask;
 
                 // Generate a stable ID that links the Cosmos chat message to a saved roadmap
                 var generationId = Guid.NewGuid().ToString();
@@ -674,6 +778,47 @@ public class CustomerService(
         if (followUpSuggestions is { Length: > 0 })
         {
             yield return FormatSse("suggestions", new { items = followUpSuggestions });
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        //  SMART DISCOVERY FUNNEL - Stage 3: Background Profile Extraction
+        // ═══════════════════════════════════════════════════════════════════
+        if (options.CurrentValue.Llm.EnableBackgroundProfileExtraction && classifiedMode == "FRIEND")
+        {
+            // Capture dependencies for closure (avoid capturing 'this' for fire-and-forget)
+            var capturedUserId = userId;
+            var capturedSessionId = actualSessionId;
+            var capturedContextManager = conversationContextManager;
+            var capturedHelper = customerHelper;
+            var capturedProfileRepo = userProfileRepository;
+            var capturedLogger = _logger;
+
+            // Fire-and-forget profile extraction (don't block response)
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var context = await capturedContextManager.GetConversationContextAsync(capturedUserId, capturedSessionId);
+                    var extractedProfile = await capturedHelper.ExtractProfileAsync(context);
+                    if (extractedProfile != null)
+                    {
+                        capturedLogger.LogDebug("Extracted profile for user {UserId}: Interests={Interests}, TargetRole={TargetRole}",
+                            capturedUserId,
+                            extractedProfile.Interests != null ? string.Join(", ", extractedProfile.Interests) : "none",
+                            extractedProfile.TargetRole ?? "none");
+
+                        // Save to Cosmos DB with smart merge
+                        var profileEntity = UserProfileEntity.FromExtraction(capturedUserId, extractedProfile);
+                        await capturedProfileRepo.UpsertAsync(profileEntity);
+
+                        capturedLogger.LogInformation("Saved profile to Cosmos DB for user {UserId}", capturedUserId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    capturedLogger.LogDebug(ex, "Background profile extraction failed for user {UserId}", capturedUserId);
+                }
+            });
         }
 
         yield return FormatSse("done", new { });
@@ -806,11 +951,19 @@ public class CustomerService(
         }
     }
 
-    private (string SystemPrompt, string UserPrompt) BuildChatPrompt(string context, string query)
+    private (string SystemPrompt, string UserPrompt) BuildChatPrompt(string context, string query, string? profileSummary = null)
     {
         var prompts = options.CurrentValue.Prompts;
+
+        // Inject profile summary into context if available
+        var enrichedContext = context;
+        if (!string.IsNullOrEmpty(profileSummary) && profileSummary != "No profile data yet")
+        {
+            enrichedContext = $"[User Profile: {profileSummary}]\n\n{context}";
+        }
+
         var userPrompt = string.Format(prompts.ChatUserPromptTemplate,
-            context,
+            enrichedContext,
             query);
         return (prompts.ChatSystemPrompt, userPrompt);
     }
@@ -1185,5 +1338,45 @@ public class CustomerService(
             obj["generationId"] = generationId;
         }
         return node?.ToJsonString() ?? json;
+    }
+
+    /// <summary>
+    /// Classify mode with fallback handling (extracted to avoid yield in try-catch)
+    /// </summary>
+    private static async Task<(string Mode, string? Error)> ClassifyModeWithFallbackAsync(
+        CustomerHelper customerHelper,
+        string query,
+        int sessionMessageCount,
+        bool profileComplete,
+        bool applyFriendBias,
+        ILogger logger)
+    {
+        try
+        {
+            var classifiedMode = await customerHelper.ClassifyModeAsync(query, sessionMessageCount, profileComplete);
+
+            // Apply bias if applicable
+            if (applyFriendBias && classifiedMode == "ACTION")
+            {
+                // For new sessions, only keep ACTION if it's a very explicit request
+                var hasExplicitActionKeyword = IsExplicitRoadmapRequest(query)
+                    || query.Contains("CV", StringComparison.OrdinalIgnoreCase)
+                    || query.Contains("resume", StringComparison.OrdinalIgnoreCase)
+                    || query.Contains("market report", StringComparison.OrdinalIgnoreCase);
+
+                if (!hasExplicitActionKeyword)
+                {
+                    classifiedMode = "FRIEND";
+                    logger.LogDebug("Applied FRIEND bias for new session. Original: ACTION, Query: {Query}", query);
+                }
+            }
+
+            return (classifiedMode, null);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Mode classification failed, defaulting to ACTION");
+            return ("ACTION", ex.Message);
+        }
     }
 }
