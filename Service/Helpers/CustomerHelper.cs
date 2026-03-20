@@ -5,6 +5,7 @@ using Domain.Exceptions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
+using Shared.DTOs;
 using Shared.Enums;
 using Shared.Options;
 
@@ -1404,4 +1405,135 @@ public class CustomerHelper
 
     public Task<string> SummarizeConversationAsync(string conversationHistory)
         => CompactConversationAsync(conversationHistory);
+
+    /// <summary>
+    /// Lightweight mode classification for Smart Discovery Funnel.
+    /// Returns: FRIEND, ACTION, or UNCLEAR
+    /// </summary>
+    public async Task<string> ClassifyModeAsync(string query, int sessionMessageCount, bool profileComplete)
+    {
+        var template = _options.CurrentValue.Prompts.ModeClassificationPrompt;
+
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            // Fallback if prompt not configured
+            return "ACTION";
+        }
+
+        var profileStatus = profileComplete ? "complete" : "incomplete";
+        var prompt = string.Format(template, query, sessionMessageCount, profileStatus);
+
+        try
+        {
+            // Use lightweight call - no thinking, fast model
+            var (response, _, _) = await SendRequestWithModel(prompt, _chatModel, useThinking: false);
+
+            var normalized = response.Trim().ToUpperInvariant();
+
+            // Extract just the mode word
+            if (normalized.Contains("FRIEND")) return "FRIEND";
+            if (normalized.Contains("ACTION")) return "ACTION";
+            if (normalized.Contains("UNCLEAR")) return "UNCLEAR";
+
+            // Default to ACTION if parsing fails (fallback to current behavior)
+            _logger.LogWarning("Mode classification returned unexpected value: {Response}. Defaulting to ACTION.", response);
+            return "ACTION";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Mode classification failed. Defaulting to ACTION.");
+            return "ACTION";
+        }
+    }
+
+    /// <summary>
+    /// Simplified intent detection for ACTION mode (OSS-friendly).
+    /// Returns: (intent, confidence, targetRole)
+    /// </summary>
+    public async Task<(LLMInteractionType Intent, float Confidence, string? TargetRole)> ClassifyIntentSimplifiedAsync(
+        string query, string? profileSummary)
+    {
+        var template = _options.CurrentValue.Prompts.SimplifiedIntentPrompt;
+
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            // Fallback if prompt not configured
+            return (LLMInteractionType.ChatWithAI, 50, null);
+        }
+
+        var prompt = string.Format(template, query, profileSummary ?? "No profile data available");
+
+        try
+        {
+            var (response, _, _) = await SendRequestWithModel(prompt, _chatModel, useThinking: false);
+
+            // Parse the JSON response
+            var cleanJson = response.Trim();
+            if (cleanJson.StartsWith("```"))
+            {
+                cleanJson = cleanJson.Replace("```json", "").Replace("```", "").Trim();
+            }
+
+            var parsed = JsonConvert.DeserializeAnonymousType(cleanJson, new
+            {
+                intent = "",
+                confidence = 0f,
+                target_role = (string?)null
+            });
+
+            if (parsed == null)
+            {
+                return (LLMInteractionType.ChatWithAI, 50, null);
+            }
+
+            var intent = parsed.intent?.ToLowerInvariant() switch
+            {
+                "roadmapgeneration" => LLMInteractionType.RoadmapGeneration,
+                "cvanalysis" => LLMInteractionType.CVAnalysis,
+                "topicpreview" => LLMInteractionType.TopicPreview,
+                "choosetrack" => LLMInteractionType.ChooseTrack,
+                _ => LLMInteractionType.ChatWithAI
+            };
+
+            return (intent, parsed.confidence, parsed.target_role);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Simplified intent classification failed. Defaulting to ChatWithAI.");
+            return (LLMInteractionType.ChatWithAI, 50, null);
+        }
+    }
+
+    /// <summary>
+    /// Background profile extraction from conversation (non-blocking).
+    /// </summary>
+    public async Task<UserProfileExtraction?> ExtractProfileAsync(string conversationHistory)
+    {
+        var template = _options.CurrentValue.Prompts.ProfileExtractionPrompt;
+
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            return null;
+        }
+
+        var prompt = string.Format(template, conversationHistory);
+
+        try
+        {
+            var (response, _, _) = await SendRequestWithModel(prompt, _chatModel, useThinking: false);
+
+            var cleanJson = response.Trim();
+            if (cleanJson.StartsWith("```"))
+            {
+                cleanJson = cleanJson.Replace("```json", "").Replace("```", "").Trim();
+            }
+
+            return JsonConvert.DeserializeObject<UserProfileExtraction>(cleanJson);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Profile extraction failed.");
+            return null;
+        }
+    }
 }
