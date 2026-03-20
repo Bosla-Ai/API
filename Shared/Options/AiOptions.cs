@@ -58,6 +58,11 @@ public class LlmOptions
     public string ReasoningModel { get; set; } = "gpt-oss-120b";
     public int MinimalInputWordThreshold { get; set; } = 3;
     public int SummarizationThreshold { get; set; } = 10;
+
+    // Smart Discovery Funnel settings
+    public int NewSessionMessageThreshold { get; set; } = 3;
+    public bool EnableModeClassification { get; set; } = true;
+    public bool EnableBackgroundProfileExtraction { get; set; } = true;
 }
 
 public class GroqOptions
@@ -81,4 +86,9 @@ public class PromptOptions
     public string ChatSystemPrompt { get; set; } = string.Empty;
     public string ChatUserPromptTemplate { get; set; } = string.Empty;
     public string SummarizationPromptTemplate { get; set; } = string.Empty;
+
+    // Smart Discovery Funnel prompts
+    public string ModeClassificationPrompt { get; set; } = string.Empty;
+    public string SimplifiedIntentPrompt { get; set; } = string.Empty;
+    public string ProfileExtractionPrompt { get; set; } = string.Empty;
 }
