@@ -8,4 +8,9 @@ public class CosmosDbOptions
     public string Key { get; set; } = string.Empty;
     public string DatabaseName { get; set; } = "BoslaChat";
     public string ContainerName { get; set; } = "chat_messages";
+
+    /// <summary>
+    /// Container name for user profiles extracted from AI conversations
+    /// </summary>
+    public string ProfileContainerName { get; set; } = "user_profiles";
 }

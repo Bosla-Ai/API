@@ -58,10 +58,12 @@ public static class ServiceCollectionExtensions
         if (isCosmosConfigured)
         {
             services.AddSingleton<IChatRepository, CosmosChatRepository>();
+            services.AddSingleton<IUserProfileRepository, CosmosUserProfileRepository>();
         }
         else
         {
             services.AddSingleton<IChatRepository, NullChatRepository>();
+            services.AddSingleton<IUserProfileRepository, NullUserProfileRepository>();
         }
 
         services.AddHttpContextAccessor();
