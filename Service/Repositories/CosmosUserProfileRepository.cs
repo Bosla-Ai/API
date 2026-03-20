@@ -6,10 +6,6 @@ using Shared.DTOs;
 
 namespace Service.Repositories;
 
-/// <summary>
-/// Cosmos DB implementation for user profile storage.
-/// Uses smart merge for profile updates - arrays are combined, scalars prefer newer non-null values.
-/// </summary>
 public class CosmosUserProfileRepository(
     CosmosClient cosmosClient,
     IConfiguration configuration,
