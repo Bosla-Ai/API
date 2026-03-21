@@ -221,7 +221,10 @@ public class CustomerService(
         var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
         var hasRoadmapContext = RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
         var roadmapConfirmationReply = HasRoadmapConfirmation(query) && hasRoadmapContext;
-        var roadmapRefinementReply = hasRoadmapContext && RoadmapIntentHelper.IsRoadmapRefinementRequest(query);
+        var roadmapRefinementReply = hasRoadmapContext
+            && !explicitRoadmapRequest
+            && !roadmapConfirmationReply
+            && await IsRoadmapRefinementSemanticAsync(query, conversationContextText, cancellationToken);
 
         // A short confirmation answer ("yes", "نعم") should still execute roadmap flow
         // when the current session is already in roadmap context.
@@ -863,7 +866,10 @@ public class CustomerService(
             var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
             var hasRoadmapContext = RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
             var roadmapConfirmationReply = HasRoadmapConfirmation(query) && hasRoadmapContext;
-            var roadmapRefinementReply = hasRoadmapContext && RoadmapIntentHelper.IsRoadmapRefinementRequest(query);
+            var roadmapRefinementReply = hasRoadmapContext
+                && !explicitRoadmapRequest
+                && !roadmapConfirmationReply
+                && await IsRoadmapRefinementSemanticAsync(query, conversationContextText, CancellationToken.None);
             var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply || roadmapRefinementReply;
 
             if (forceRoadmapFlow && interactionType != LLMInteractionType.RoadmapGeneration)
@@ -1245,6 +1251,64 @@ public class CustomerService(
         return questions.Any(q =>
             ContainsRoadmapIntakeTerms(q.Text)
             || q.Options?.Any(ContainsRoadmapIntakeTerms) == true);
+    }
+
+    private async Task<bool> IsRoadmapRefinementSemanticAsync(string query, string conversationContext, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(query) || string.IsNullOrWhiteSpace(conversationContext))
+            return false;
+
+        try
+        {
+            var prompt = $"""
+You are a strict classifier.
+
+Task:
+Decide if the latest user message is asking to regenerate, modify, constrain, or refine an already existing roadmap in this conversation.
+
+Return JSON only:
+is_refinement: true|false, confidence: 0-100
+
+Guidelines:
+- true when the user is changing roadmap preferences (budget/free-only, language, sources, difficulty, timeline, role focus) for an existing roadmap.
+- false when the user is asking a general question unrelated to updating/regenerating roadmap output.
+
+Conversation context:
+{conversationContext}
+
+Latest user message:
+{query}
+""";
+
+            var (Response, ModelName, ThinkingContent) = await customerHelper.SendRequestWithModel(
+                prompt,
+                options.CurrentValue.Llm.Model,
+                useThinking: false,
+                isSuperAdmin: IsSuperAdmin());
+
+            var responseText = Response;
+
+            if (string.IsNullOrWhiteSpace(responseText))
+                return false;
+
+            var start = responseText.IndexOf('{');
+            var end = responseText.LastIndexOf('}');
+            if (start < 0 || end <= start)
+                return false;
+
+            var json = responseText[start..(end + 1)];
+            using var doc = JsonDocument.Parse(json);
+
+            if (!doc.RootElement.TryGetProperty("is_refinement", out var refinementProp))
+                return false;
+
+            return refinementProp.ValueKind == JsonValueKind.True;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Semantic roadmap refinement classification failed; falling back to default routing.");
+            return false;
+        }
     }
 
     public async Task<APIResponse> GetCustomerProfileAsync(string customerId)

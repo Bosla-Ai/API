@@ -51,45 +51,6 @@ public static class RoadmapIntentHelper
                || normalized.Contains("رودماب");
     }
 
-    public static bool IsRoadmapRefinementRequest(string query)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-            return false;
-
-        var normalized = query.Trim().ToLowerInvariant();
-
-        var refinementTerms = new[]
-        {
-            "update roadmap",
-            "refine roadmap",
-            "regenerate roadmap",
-            "new roadmap",
-            "another roadmap",
-            "edit roadmap",
-            "all resources",
-            "free resources",
-            "only free",
-            "no paid",
-            "budget",
-            "sources",
-            "udemy",
-            "youtube",
-            "خليها",
-            "عدّل",
-            "غير",
-            "تعديل",
-            "مجاني",
-            "مجانا",
-            "بدون مدفوع",
-            "مش مدفوع",
-            "مصادر",
-            "يوتيوب",
-            "udemy"
-        };
-
-        return refinementTerms.Any(normalized.Contains);
-    }
-
     public static RoadmapRequestDTO BuildRoadmapFallbackRequest(string query, string conversationContext)
     {
         var combined = string.IsNullOrWhiteSpace(conversationContext)
