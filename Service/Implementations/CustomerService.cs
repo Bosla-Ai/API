@@ -93,6 +93,7 @@ public class CustomerService(
         var addMessageTask = conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, query, "user");
         await Task.WhenAll(contextTask, addMessageTask);
         var conversationContext = await contextTask;
+        var conversationContextText = conversationContext.ToString();
 
         // Drain any buffered SSE events (e.g. compaction)
         while (pendingSseEvents.TryDequeue(out var sseEvent))
@@ -114,7 +115,7 @@ public class CustomerService(
 
         string marketContext = "";
         MarketInsightDTO? fetchedMarketInsight = null;
-        var marketKeywords = ExtractKeywordsFromQuery(query);
+        var marketKeywords = RoadmapIntentHelper.ExtractKeywordsFromText(query);
         if (marketKeywords.Length > 0)
         {
             yield return FormatSse("tool", new { name = "MarketAnalysis", state = "start", summary = $"Scanning labor market for: {string.Join(", ", marketKeywords)}..." });
@@ -217,6 +218,15 @@ public class CustomerService(
         var wordCount = queryForWordCount.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
         var minWordThreshold = options.CurrentValue.Llm.MinimalInputWordThreshold;
         var skipIntentDetection = wordCount < minWordThreshold;
+        var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
+        var roadmapConfirmationReply = HasRoadmapConfirmation(query) && RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+
+        // A short confirmation answer ("yes", "نعم") should still execute roadmap flow
+        // when the current session is already in roadmap context.
+        if (skipIntentDetection && roadmapConfirmationReply)
+        {
+            skipIntentDetection = false;
+        }
 
         var enableModeClassification = options.CurrentValue.Llm.EnableModeClassification;
         var sessionMessageThreshold = options.CurrentValue.Llm.NewSessionMessageThreshold;
@@ -238,7 +248,7 @@ public class CustomerService(
         // Generate profile summary for prompts
         var profileSummary = userProfile?.ToPromptSummary() ?? "No profile data yet";
 
-        if (enableModeClassification && !skipIntentDetection && chatMode != ChatMode.Powerful)
+        if (enableModeClassification && !skipIntentDetection && chatMode != ChatMode.Powerful && !explicitRoadmapRequest)
         {
             yield return FormatSse("status", new { message = "Understanding your request...", step = "mode_classification" });
 
@@ -328,7 +338,7 @@ public class CustomerService(
         if (!skipIntentDetection)
         {
             var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
-                (!string.IsNullOrEmpty(conversationContext.ToString()) ? $"Conversation History:\n{conversationContext}\n\n" : ""),
+                (!string.IsNullOrEmpty(conversationContextText) ? $"Conversation History:\n{conversationContextText}\n\n" : ""),
                 query);
 
             var detectionJsonBuilder = new StringBuilder();
@@ -460,10 +470,23 @@ public class CustomerService(
             targetRole,
         });
 
-        var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
+        var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply;
+
+        // Safety net: explicit roadmap intent or explicit roadmap confirmation should
+        // always route to roadmap flow, even if intent parsing drifted.
+        if (forceRoadmapFlow && interactionType != LLMInteractionType.RoadmapGeneration)
+        {
+            interactionType = LLMInteractionType.RoadmapGeneration;
+            confidence = Math.Max(confidence, 75);
+        }
+
+        if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments == null)
+        {
+            toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(query, conversationContextText);
+        }
 
         // Safety net: avoid roadmap hijacking unless user explicitly asked for roadmap/path/plan.
-        if (interactionType == LLMInteractionType.RoadmapGeneration && !explicitRoadmapRequest)
+        if (interactionType == LLMInteractionType.RoadmapGeneration && !forceRoadmapFlow)
         {
             interactionType = LLMInteractionType.ChatWithAI;
             toolArguments = null;
@@ -740,7 +763,7 @@ public class CustomerService(
                     resultData = JsonSerializer.Deserialize<JsonElement>(resultJsonString);
                 }
 
-                finalResponse = $"[SYSTEM]: Roadmap generated successfully.\nDetails: {resultJsonString}";
+                finalResponse = $"Roadmap generated successfully. Generation ID: {generationId}.";
 
                 yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "end", summary = "Roadmap generated" });
 
@@ -831,11 +854,26 @@ public class CustomerService(
 
             await Task.WhenAll(contextTask, addMessageTask);
             var conversationContext = await contextTask;
+            var conversationContextText = conversationContext.ToString();
 
-            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, _) = await DetectIntentAsync(query, conversationContext.ToString());
+            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, _) = await DetectIntentAsync(query, conversationContextText);
 
             var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
-            if (interactionType == LLMInteractionType.RoadmapGeneration && !explicitRoadmapRequest)
+            var roadmapConfirmationReply = HasRoadmapConfirmation(query) && RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+            var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply;
+
+            if (forceRoadmapFlow && interactionType != LLMInteractionType.RoadmapGeneration)
+            {
+                interactionType = LLMInteractionType.RoadmapGeneration;
+                confidence = Math.Max(confidence, 75);
+            }
+
+            if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments == null)
+            {
+                toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(query, conversationContextText);
+            }
+
+            if (interactionType == LLMInteractionType.RoadmapGeneration && !forceRoadmapFlow)
             {
                 interactionType = LLMInteractionType.ChatWithAI;
                 toolArguments = null;
@@ -872,7 +910,9 @@ public class CustomerService(
             {
                 toolArguments.JobId = Guid.NewGuid().ToString("N")[..12];
                 var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments);
-                aiResponse += $"\n\n[SYSTEM]: Roadmap generated successfully.\nDetails: {apiResponse}";
+                aiResponse = string.IsNullOrEmpty(aiResponse)
+                    ? "Roadmap generated successfully."
+                    : $"{aiResponse}\n\nRoadmap generated successfully.";
             }
 
             if (toolArguments?.Tags != null)
@@ -1285,40 +1325,6 @@ public class CustomerService(
     {
         var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         return $"event: {eventName}\ndata: {json}";
-    }
-
-    private static string[] ExtractKeywordsFromQuery(string query)
-    {
-        if (string.IsNullOrWhiteSpace(query) || query.Length < 10)
-            return [];
-
-        var words = query.Split([' ', ',', '.', '!', '?', '\n', '\r', '\t'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-        var keywords = new List<string>();
-
-        foreach (var word in words)
-        {
-            var clean = word.Trim('\'', '"', '(', ')', '[', ']');
-            if (clean.Length < 2) continue;
-
-            var found = SkillDictionary.ExtractSkills(clean);
-            if (found.Count > 0)
-            {
-                keywords.AddRange(found.Keys);
-            }
-        }
-
-        // Multi-word combinations (e.g. "React Native", "Spring Boot")
-        var fullText = string.Join(" ", words);
-        var multiWordSkills = SkillDictionary.ExtractSkills(fullText);
-        foreach (var (skill, _) in multiWordSkills)
-        {
-            if (!keywords.Contains(skill, StringComparer.OrdinalIgnoreCase))
-                keywords.Add(skill);
-        }
-
-        return [.. keywords.Distinct(StringComparer.OrdinalIgnoreCase).Take(5)];
     }
 
     private static string InjectGenerationId(string json, string generationId)
