@@ -75,7 +75,7 @@ public class ChatHistoryService(
                     Title = title,
                     LastMessageAt = latestMessage.CreatedAt,
                     LastMessagePreview = TruncatePreview(previewMessage.Message),
-                    MessageCount = messages.Count(m => m.Role != "title")
+                    MessageCount = messages.Count(m => m.Role != "title" && m.Role != "summary" && m.Role != "state")
                 };
             })
             .OrderByDescending(s => s.LastMessageAt)
@@ -108,7 +108,7 @@ public class ChatHistoryService(
             {
                 SessionId = sessionId,
                 Messages = [.. messages
-                    .Where(m => m.Role != "title" && m.Role != "summary")
+                    .Where(m => m.Role != "title" && m.Role != "summary" && m.Role != "state")
                     .Select(m => new ChatMessageDTO
                     {
                         Role = m.Role,
