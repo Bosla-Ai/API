@@ -1403,6 +1403,9 @@ public class CustomerHelper
     public Task<string> SummarizeConversationAsync(string conversationHistory)
         => CompactConversationAsync(conversationHistory);
 
+    private static string EscapeBraces(string? input)
+        => input?.Replace("{", "{{").Replace("}", "}}") ?? string.Empty;
+
     public async Task<string> ClassifyModeAsync(string query, int sessionMessageCount, bool profileComplete)
     {
         var template = _options.CurrentValue.Prompts.ModeClassificationPrompt;
@@ -1414,7 +1417,7 @@ public class CustomerHelper
         }
 
         var profileStatus = profileComplete ? "complete" : "incomplete";
-        var prompt = string.Format(template, query, sessionMessageCount, profileStatus);
+        var prompt = string.Format(template, EscapeBraces(query), sessionMessageCount, profileStatus);
 
         try
         {
@@ -1432,6 +1435,7 @@ public class CustomerHelper
             _logger.LogWarning("Mode classification returned unexpected value: {Response}. Defaulting to ACTION.", response);
             return "ACTION";
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Mode classification failed. Defaulting to ACTION.");
@@ -1450,7 +1454,7 @@ public class CustomerHelper
             return (LLMInteractionType.ChatWithAI, 50, null);
         }
 
-        var prompt = string.Format(template, query, profileSummary ?? "No profile data available");
+        var prompt = string.Format(template, EscapeBraces(query), EscapeBraces(profileSummary ?? "No profile data available"));
 
         try
         {
@@ -1486,6 +1490,7 @@ public class CustomerHelper
 
             return (intent, parsed.confidence, parsed.target_role);
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Simplified intent classification failed. Defaulting to ChatWithAI.");
@@ -1502,7 +1507,7 @@ public class CustomerHelper
             return null;
         }
 
-        var prompt = string.Format(template, conversationHistory);
+        var prompt = string.Format(template, EscapeBraces(conversationHistory));
 
         try
         {
@@ -1516,9 +1521,10 @@ public class CustomerHelper
 
             return JsonConvert.DeserializeObject<UserProfileExtraction>(cleanJson);
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Profile extraction failed.");
+            _logger.LogWarning(ex, "Profile extraction failed for conversation.");
             return null;
         }
     }
