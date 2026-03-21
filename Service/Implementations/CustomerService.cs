@@ -219,11 +219,13 @@ public class CustomerService(
         var minWordThreshold = options.CurrentValue.Llm.MinimalInputWordThreshold;
         var skipIntentDetection = wordCount < minWordThreshold;
         var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
-        var roadmapConfirmationReply = HasRoadmapConfirmation(query) && RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+        var hasRoadmapContext = RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+        var roadmapConfirmationReply = HasRoadmapConfirmation(query) && hasRoadmapContext;
+        var roadmapRefinementReply = hasRoadmapContext && RoadmapIntentHelper.IsRoadmapRefinementRequest(query);
 
         // A short confirmation answer ("yes", "نعم") should still execute roadmap flow
         // when the current session is already in roadmap context.
-        if (skipIntentDetection && roadmapConfirmationReply)
+        if (skipIntentDetection && (roadmapConfirmationReply || roadmapRefinementReply))
         {
             skipIntentDetection = false;
         }
@@ -470,7 +472,7 @@ public class CustomerService(
             targetRole,
         });
 
-        var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply;
+        var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply || roadmapRefinementReply;
 
         // Safety net: explicit roadmap intent or explicit roadmap confirmation should
         // always route to roadmap flow, even if intent parsing drifted.
@@ -859,8 +861,10 @@ public class CustomerService(
             var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, _) = await DetectIntentAsync(query, conversationContextText);
 
             var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
-            var roadmapConfirmationReply = HasRoadmapConfirmation(query) && RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
-            var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply;
+            var hasRoadmapContext = RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+            var roadmapConfirmationReply = HasRoadmapConfirmation(query) && hasRoadmapContext;
+            var roadmapRefinementReply = hasRoadmapContext && RoadmapIntentHelper.IsRoadmapRefinementRequest(query);
+            var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply || roadmapRefinementReply;
 
             if (forceRoadmapFlow && interactionType != LLMInteractionType.RoadmapGeneration)
             {
