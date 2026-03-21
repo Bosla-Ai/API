@@ -58,6 +58,8 @@ public class LlmOptions
     public string ReasoningModel { get; set; } = "gpt-oss-120b";
     public int MinimalInputWordThreshold { get; set; } = 3;
     public int SummarizationThreshold { get; set; } = 10;
+    public int ContextMaxMessageLength { get; set; } = 8000;
+    public int ContextCompactionCharThreshold { get; set; } = 30000;
 
     // Smart Discovery Funnel settings
     public int NewSessionMessageThreshold { get; set; } = 3;

@@ -14,6 +14,8 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
     private readonly CustomerHelper _customerHelper = customerHelper;
     private readonly TimeSpan _hotCacheExpiration = TimeSpan.FromMinutes(10);
     private int CompactionThreshold => aiOptions.CurrentValue.Llm.SummarizationThreshold;
+    private int MaxContextMessageLength => Math.Clamp(aiOptions.CurrentValue.Llm.ContextMaxMessageLength, 1000, 50000);
+    private int ContextCompactionCharThreshold => Math.Clamp(aiOptions.CurrentValue.Llm.ContextCompactionCharThreshold, 8000, 300000);
 
     public Action<string, object>? OnSseEvent { get; set; }
 
@@ -43,15 +45,14 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
             return cachedContext;
         }
 
-        var dbMessages = await _chatRepository
-            .GetMessagesAsync(userId, sessionId, CompactionThreshold + 5);
+        var dbMessages = await _chatRepository.GetMessagesAsync(userId, sessionId, CompactionThreshold + 5);
 
         if (!dbMessages.Any())
         {
             return string.Empty;
         }
 
-        var regularMessages = dbMessages.Where(m => m.Role != "summary").ToList();
+        var regularMessages = dbMessages.Where(m => m.Role != "summary" && m.Role != "title").ToList();
         var existingCompactContext = dbMessages.FirstOrDefault(m => m.Role == "summary");
 
         if (regularMessages.Count >= CompactionThreshold && existingCompactContext == null)
@@ -60,28 +61,25 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
             dbMessages = await _chatRepository.GetMessagesAsync(userId, sessionId, CompactionThreshold + 5);
         }
 
-        var sb = new StringBuilder();
+        var context = BuildContext(dbMessages);
 
-        var compactContext = dbMessages.FirstOrDefault(m => m.Role == "summary");
-        if (compactContext != null)
+        // Edge-case guard: compact if assembled context exceeds safe threshold.
+        if (context.Length > ContextCompactionCharThreshold)
         {
-            sb.AppendLine($"[Previous Compacted Context]: {compactContext.Message}");
-            sb.AppendLine();
-        }
+            var messagesToCompact = dbMessages
+                .Where(m => m.Role != "summary" && m.Role != "title")
+                .OrderBy(m => m.CreatedAt)
+                .ToList();
 
-        var recentMessages = dbMessages.Where(m => m.Role != "summary").ToList();
-        if (recentMessages.Any())
-        {
-            sb.AppendLine("Recent Conversation:");
-            foreach (var msg in recentMessages)
+            if (messagesToCompact.Count > 0)
             {
-                sb.AppendLine($"[{msg.Role}]: {msg.Message}");
+                await CompactConversationContextAsync(userId, sessionId, messagesToCompact);
+                dbMessages = await _chatRepository.GetMessagesAsync(userId, sessionId, CompactionThreshold + 5);
+                context = BuildContext(dbMessages);
             }
         }
 
-        var context = sb.ToString();
         _cache.Set(key, context, _hotCacheExpiration);
-
         return context;
     }
 
@@ -92,7 +90,11 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
         var conversationText = new StringBuilder();
         foreach (var msg in messages)
         {
-            conversationText.AppendLine($"[{msg.Role}]: {msg.Message}");
+            var sanitized = SanitizeMessageForContext(msg.Role, msg.Message, MaxContextMessageLength);
+            if (string.IsNullOrWhiteSpace(sanitized))
+                continue;
+
+            conversationText.AppendLine($"[{msg.Role}]: {sanitized}");
         }
 
         var compactContext = await _customerHelper.CompactConversationAsync(conversationText.ToString());
@@ -105,6 +107,19 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
             Role = "summary",
             CreatedAt = DateTime.UtcNow
         };
+
+        // Keep full user-visible chat intact; rotate only summary snapshots used by AI context.
+        var existingMessages = await _chatRepository.GetMessagesAsync(userId, sessionId, 200);
+        var summaryIds = existingMessages
+            .Where(m => m.Role == "summary")
+            .Select(m => m.Id)
+            .ToList();
+
+        if (summaryIds.Count > 0)
+        {
+            await _chatRepository.DeleteMessagesAsync(userId, sessionId, summaryIds);
+        }
+
         await _chatRepository.AddMessageAsync(summaryEntity);
 
         OnSseEvent?.Invoke("tool", new { name = "Compaction", state = "end", summary = "Conversation context compacted." });
@@ -123,5 +138,57 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
         return messages.Count(m => m.Role != "summary" && m.Role != "title");
     }
 
+    private static string? SanitizeMessageForContext(string? role, string? message, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return null;
+
+        var text = message.Trim();
+
+        // Strip internal system payloads from roadmap generation to avoid prompt bloat.
+        if (role == "assistant" && text.StartsWith("[SYSTEM]: Roadmap generated successfully.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Roadmap generated successfully. Detailed payload is stored separately.";
+        }
+
+        if (text.Length > maxLength)
+        {
+            return text[..maxLength] + " ...[truncated]";
+        }
+
+        return text;
+    }
+
     private static string GetCacheKey(string userId, string sessionId) => $"chat_{userId}_{sessionId}";
+
+    private string BuildContext(List<ChatMessageEntity> dbMessages)
+    {
+        var sb = new StringBuilder();
+
+        var compactContext = dbMessages.FirstOrDefault(m => m.Role == "summary");
+        if (compactContext != null)
+        {
+            sb.AppendLine($"[Previous Compacted Context]: {compactContext.Message}");
+        }
+
+        var recentMessages = dbMessages.Where(m => m.Role != "summary" && m.Role != "title")
+            .OrderBy(m => m.CreatedAt)
+            .TakeLast(5)
+            .ToList();
+
+        if (recentMessages.Any())
+        {
+            sb.AppendLine("Recent Conversation:");
+            foreach (var msg in recentMessages)
+            {
+                var sanitized = SanitizeMessageForContext(msg.Role, msg.Message, MaxContextMessageLength);
+                if (string.IsNullOrWhiteSpace(sanitized))
+                    continue;
+
+                sb.AppendLine($"[{msg.Role}]: {sanitized}");
+            }
+        }
+
+        return sb.ToString();
+    }
 }

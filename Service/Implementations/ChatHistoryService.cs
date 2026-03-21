@@ -5,7 +5,6 @@ using System.Text.RegularExpressions;
 using Domain.Exceptions;
 using Domain.Responses;
 using Microsoft.Extensions.Logging;
-using Microsoft.IdentityModel.Protocols.Configuration;
 using Service.Abstraction;
 using Shared.DTOs;
 
@@ -109,7 +108,7 @@ public class ChatHistoryService(
             {
                 SessionId = sessionId,
                 Messages = [.. messages
-                    .Where(m => m.Role != "title")
+                    .Where(m => m.Role != "title" && m.Role != "summary")
                     .Select(m => new ChatMessageDTO
                     {
                         Role = m.Role,
