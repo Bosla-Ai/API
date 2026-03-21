@@ -50,6 +50,27 @@ public class CustomerServiceTests
         result.Should().Be(expected);
     }
 
+    [Theory]
+    [InlineData("not now", true)]
+    [InlineData("No, skip this", true)]
+    [InlineData("مش دلوقتي", true)]
+    [InlineData("لا", true)]
+    [InlineData("Yes, continue", false)]
+    [InlineData("Generate roadmap now", false)]
+    public void HasRoadmapDecline_DetectsDeclineReplies(string query, bool expected)
+    {
+        // Arrange
+        var method = typeof(CustomerService).GetMethod(
+            "HasRoadmapDecline",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        // Act
+        var result = (bool)method!.Invoke(null, [query])!;
+
+        // Assert
+        result.Should().Be(expected);
+    }
+
     [Fact]
     public void IsRoadmapIntakeQuestionSet_ReturnsTrue_ForRoadmapIntakeQuestions()
     {
