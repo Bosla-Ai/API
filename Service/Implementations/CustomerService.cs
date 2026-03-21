@@ -218,13 +218,27 @@ public class CustomerService(
         var wordCount = queryForWordCount.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
         var minWordThreshold = options.CurrentValue.Llm.MinimalInputWordThreshold;
         var skipIntentDetection = wordCount < minWordThreshold;
+        var roadmapFlowState = await GetRoadmapFlowStateAsync(userId, actualSessionId);
+        var hasPendingRoadmapConfirmation = roadmapFlowState == RoadmapIntentHelper.RoadmapStatePendingConfirmation;
+
         var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
-        var hasRoadmapContext = RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+        var hasRoadmapContext = hasPendingRoadmapConfirmation || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+        var roadmapDeclineReply = HasRoadmapDecline(query) && hasRoadmapContext;
         var roadmapConfirmationReply = HasRoadmapConfirmation(query) && hasRoadmapContext;
+        var roadmapStateFollowUp = hasPendingRoadmapConfirmation
+            && !roadmapDeclineReply
+            && !roadmapConfirmationReply
+            && !explicitRoadmapRequest;
         var roadmapRefinementReply = hasRoadmapContext
             && !explicitRoadmapRequest
+            && !roadmapDeclineReply
             && !roadmapConfirmationReply
             && await IsRoadmapRefinementSemanticAsync(query, conversationContextText, cancellationToken);
+
+        if (roadmapDeclineReply)
+        {
+            await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
+        }
 
         // A short confirmation answer ("yes", "نعم") should still execute roadmap flow
         // when the current session is already in roadmap context.
@@ -475,7 +489,7 @@ public class CustomerService(
             targetRole,
         });
 
-        var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply;
+        var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply || roadmapStateFollowUp || roadmapRefinementReply;
 
         // Safety net: explicit roadmap intent or explicit roadmap confirmation should
         // always route to roadmap flow, even if intent parsing drifted.
@@ -500,7 +514,9 @@ public class CustomerService(
         }
 
         var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
-            && !HasRoadmapConfirmation(query);
+            && !roadmapConfirmationReply
+            && !roadmapStateFollowUp
+            && !roadmapRefinementReply;
 
         if (roadmapNeedsConfirmation)
         {
@@ -513,6 +529,8 @@ public class CustomerService(
                 yield return FormatSse("suggestions", new { items = followUpSuggestions });
 
             yield return FormatSse("done", new { message = "Roadmap confirmation requested" });
+
+            await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
 
             await conversationContextManager.AddMessageToContextAsync(
                 userId,
@@ -779,6 +797,8 @@ public class CustomerService(
                 }
 
                 yield return FormatSse("result", new { status = "success", data = resultData });
+
+                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateCompleted);
             }
             else if (interactionType == LLMInteractionType.ChooseTrack)
             {
@@ -863,14 +883,28 @@ public class CustomerService(
 
             var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, _) = await DetectIntentAsync(query, conversationContextText);
 
+            var roadmapFlowState = await GetRoadmapFlowStateAsync(userId, actualSessionId);
+            var hasPendingRoadmapConfirmation = roadmapFlowState == RoadmapIntentHelper.RoadmapStatePendingConfirmation;
+
             var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
-            var hasRoadmapContext = RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+            var hasRoadmapContext = hasPendingRoadmapConfirmation || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+            var roadmapDeclineReply = HasRoadmapDecline(query) && hasRoadmapContext;
             var roadmapConfirmationReply = HasRoadmapConfirmation(query) && hasRoadmapContext;
+            var roadmapStateFollowUp = hasPendingRoadmapConfirmation
+                && !roadmapDeclineReply
+                && !roadmapConfirmationReply
+                && !explicitRoadmapRequest;
             var roadmapRefinementReply = hasRoadmapContext
                 && !explicitRoadmapRequest
+                && !roadmapDeclineReply
                 && !roadmapConfirmationReply
                 && await IsRoadmapRefinementSemanticAsync(query, conversationContextText, CancellationToken.None);
-            var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply || roadmapRefinementReply;
+            var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply || roadmapStateFollowUp || roadmapRefinementReply;
+
+            if (roadmapDeclineReply)
+            {
+                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
+            }
 
             if (forceRoadmapFlow && interactionType != LLMInteractionType.RoadmapGeneration)
             {
@@ -890,7 +924,9 @@ public class CustomerService(
             }
 
             var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
-                && !HasRoadmapConfirmation(query);
+                && !roadmapConfirmationReply
+                && !roadmapStateFollowUp
+                && !roadmapRefinementReply;
 
             if (roadmapNeedsConfirmation)
             {
@@ -899,6 +935,7 @@ public class CustomerService(
                     : "I can generate your roadmap. Please confirm to continue.";
 
                 await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, confirmMessage, "assistant");
+                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
 
                 return new APIResponse<AiIntentDetectionResponse>()
                 {
@@ -923,6 +960,8 @@ public class CustomerService(
                 aiResponse = string.IsNullOrEmpty(aiResponse)
                     ? "Roadmap generated successfully."
                     : $"{aiResponse}\n\nRoadmap generated successfully.";
+
+                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateCompleted);
             }
 
             if (toolArguments?.Tags != null)
@@ -1185,6 +1224,35 @@ public class CustomerService(
         return hasRoadmapTerm || normalized is "yes" or "نعم" or "أكيد" or "تمام";
     }
 
+    private static bool HasRoadmapDecline(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return false;
+
+        var normalized = query.Trim().ToLowerInvariant();
+        var declinePhrases = new[]
+        {
+            "not now",
+            "cancel",
+            "skip",
+            "later",
+            "don't",
+            "do not",
+            "مش دلوقتي",
+            "الغاء",
+            "إلغاء",
+            "بعدين"
+        };
+
+        if (declinePhrases.Any(normalized.Contains))
+            return true;
+
+        var tokens = normalized
+            .Split([' ', '\t', '\n', '\r', '.', ',', '!', '?', ';', ':'], StringSplitOptions.RemoveEmptyEntries);
+
+        return tokens.Contains("no") || tokens.Contains("لا") || tokens.Contains("لأ");
+    }
+
     private static AskUserQuestion[] BuildRoadmapConfirmationQuestions()
     {
         return
@@ -1445,5 +1513,27 @@ Latest user message:
             logger.LogWarning(ex, "Mode classification failed, defaulting to ACTION");
             return ("ACTION", ex.Message);
         }
+    }
+
+    private async Task SaveRoadmapFlowStateAsync(string userId, string sessionId, string state)
+    {
+        await conversationContextManager.AddMessageToContextAsync(
+            userId,
+            sessionId,
+            RoadmapIntentHelper.BuildRoadmapStateMessage(state),
+            "state");
+    }
+
+    private async Task<string?> GetRoadmapFlowStateAsync(string userId, string sessionId)
+    {
+        var messages = await chatRepository.GetMessagesAsync(userId, sessionId, 30);
+        var latestStateMessage = messages
+            .Where(m => m.Role == "state")
+            .OrderByDescending(m => m.CreatedAt)
+            .FirstOrDefault();
+
+        return latestStateMessage is null
+            ? null
+            : RoadmapIntentHelper.ExtractRoadmapState(latestStateMessage.Message);
     }
 }
