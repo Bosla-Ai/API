@@ -62,47 +62,47 @@ public class CosmosUserProfileRepository(
         {
             return null;
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving profile for user {UserId}", userId);
-            return null;
-        }
+        // Let other exceptions propagate - don't mask network/auth/throttling errors
     }
 
     public async Task UpsertAsync(UserProfileEntity profile)
     {
+        var container = await GetContainerAsync();
+
+        // Ensure id matches userId for consistent retrieval
+        profile.Id = profile.UserId;
+        profile.UpdatedAt = DateTime.UtcNow;
+
+        // Try to get existing profile for smart merge
+        UserProfileEntity? existing = null;
         try
         {
-            var container = await GetContainerAsync();
-
-            // Ensure id matches userId for consistent retrieval
-            profile.Id = profile.UserId;
-            profile.UpdatedAt = DateTime.UtcNow;
-
-            // Try to get existing profile for smart merge
-            var existing = await GetByUserIdAsync(profile.UserId);
-
-            if (existing != null)
-            {
-                // Smart merge: combine arrays, prefer newer non-null scalars
-                existing.MergeFrom(profile);
-                await container.UpsertItemAsync(existing, new PartitionKey(profile.UserId));
-                _logger.LogDebug("Merged and updated profile for user {UserId}, extraction count: {Count}",
-                    profile.UserId, existing.ExtractionCount);
-            }
-            else
-            {
-                // First profile for this user
-                profile.CreatedAt = DateTime.UtcNow;
-                profile.ExtractionCount = 1;
-                await container.CreateItemAsync(profile, new PartitionKey(profile.UserId));
-                _logger.LogDebug("Created new profile for user {UserId}", profile.UserId);
-            }
+            var response = await container.ReadItemAsync<UserProfileEntity>(
+                profile.UserId,
+                new PartitionKey(profile.UserId));
+            existing = response.Resource;
         }
-        catch (Exception ex)
+        catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            _logger.LogError(ex, "Error upserting profile for user {UserId}", profile.UserId);
-            throw;
+            // Profile doesn't exist yet, will create new
+        }
+        // Let other exceptions propagate
+
+        if (existing != null)
+        {
+            // Smart merge: combine arrays, prefer newer non-null scalars
+            existing.MergeFrom(profile);
+            await container.UpsertItemAsync(existing, new PartitionKey(profile.UserId));
+            _logger.LogDebug("Merged and updated profile for user {UserId}, extraction count: {Count}",
+                profile.UserId, existing.ExtractionCount);
+        }
+        else
+        {
+            // First profile for this user
+            profile.CreatedAt = DateTime.UtcNow;
+            profile.ExtractionCount = 1;
+            await container.CreateItemAsync(profile, new PartitionKey(profile.UserId));
+            _logger.LogDebug("Created new profile for user {UserId}", profile.UserId);
         }
     }
 
