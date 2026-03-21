@@ -232,7 +232,7 @@ public class CustomerService(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to fetch user profile for {UserId}", userId);
+            _logger.LogWarning(ex, "Failed to fetch user profile for {UserId}, continuing without profile", userId);
         }
 
         // Generate profile summary for prompts
@@ -807,7 +807,7 @@ public class CustomerService(
                 }
                 catch (Exception ex)
                 {
-                    capturedLogger.LogDebug(ex, "Background profile extraction failed for user {UserId}", capturedUserId);
+                    capturedLogger.LogWarning(ex, "Background profile extraction failed for user {UserId}", capturedUserId);
                 }
             });
         }
