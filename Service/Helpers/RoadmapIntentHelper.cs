@@ -4,6 +4,11 @@ namespace Service.Helpers;
 
 public static class RoadmapIntentHelper
 {
+    public const string RoadmapStatePrefix = "roadmap_state:";
+    public const string RoadmapStatePendingConfirmation = "pending_confirmation";
+    public const string RoadmapStateCompleted = "completed";
+    public const string RoadmapStateIdle = "idle";
+
     public static string[] ExtractKeywordsFromText(string text)
     {
         if (string.IsNullOrWhiteSpace(text) || text.Length < 10)
@@ -129,5 +134,21 @@ public static class RoadmapIntentHelper
         }
 
         return false;
+    }
+
+    public static string BuildRoadmapStateMessage(string state)
+    {
+        return $"{RoadmapStatePrefix}{state}";
+    }
+
+    public static string? ExtractRoadmapState(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return null;
+
+        if (!message.StartsWith(RoadmapStatePrefix, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return message[RoadmapStatePrefix.Length..].Trim().ToLowerInvariant();
     }
 }

@@ -52,7 +52,7 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
             return string.Empty;
         }
 
-        var regularMessages = dbMessages.Where(m => m.Role != "summary" && m.Role != "title").ToList();
+        var regularMessages = dbMessages.Where(m => m.Role != "summary" && m.Role != "title" && m.Role != "state").ToList();
         var existingCompactContext = dbMessages.FirstOrDefault(m => m.Role == "summary");
 
         if (regularMessages.Count >= CompactionThreshold && existingCompactContext == null)
@@ -67,7 +67,7 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
         if (context.Length > ContextCompactionCharThreshold)
         {
             var messagesToCompact = dbMessages
-                .Where(m => m.Role != "summary" && m.Role != "title")
+                .Where(m => m.Role != "summary" && m.Role != "title" && m.Role != "state")
                 .OrderBy(m => m.CreatedAt)
                 .ToList();
 
@@ -135,7 +135,7 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
     public async Task<int> GetMessageCountAsync(string userId, string sessionId)
     {
         var messages = await _chatRepository.GetMessagesAsync(userId, sessionId, 100);
-        return messages.Count(m => m.Role != "summary" && m.Role != "title");
+        return messages.Count(m => m.Role != "summary" && m.Role != "title" && m.Role != "state");
     }
 
     private static string? SanitizeMessageForContext(string? role, string? message, int maxLength)
@@ -171,7 +171,7 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
             sb.AppendLine($"[Previous Compacted Context]: {compactContext.Message}");
         }
 
-        var recentMessages = dbMessages.Where(m => m.Role != "summary" && m.Role != "title")
+        var recentMessages = dbMessages.Where(m => m.Role != "summary" && m.Role != "title" && m.Role != "state")
             .OrderBy(m => m.CreatedAt)
             .TakeLast(5)
             .ToList();
