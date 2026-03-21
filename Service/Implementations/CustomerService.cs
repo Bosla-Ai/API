@@ -772,7 +772,7 @@ public class CustomerService(
                     resultData = apiResponse;
                 }
 
-                // Inject generationId into result data so it's stored in Cosmos and sent via SSE
+                // Inject generationId into result data so it's stored in Cosmos and sent via SSE.
                 string resultJsonString;
                 try
                 {
@@ -786,7 +786,8 @@ public class CustomerService(
                     resultData = JsonSerializer.Deserialize<JsonElement>(resultJsonString);
                 }
 
-                finalResponse = $"[SYSTEM]: Roadmap generated successfully. Generation ID: {generationId}.";
+                // Persist parseable roadmap payload for refresh hydration.
+                finalResponse = $"[SYSTEM] {resultJsonString}";
 
                 yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "end", summary = "Roadmap generated" });
 

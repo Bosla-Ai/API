@@ -145,8 +145,8 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
 
         var text = message.Trim();
 
-        // Strip internal system payloads from roadmap generation to avoid prompt bloat.
-        if (role == "assistant" && text.StartsWith("[SYSTEM]: Roadmap generated successfully.", StringComparison.OrdinalIgnoreCase))
+        // Strip internal roadmap system payloads from context to avoid prompt bloat.
+        if (role == "assistant" && text.StartsWith("[SYSTEM]", StringComparison.OrdinalIgnoreCase))
         {
             return "Roadmap generated successfully. Detailed payload is stored separately.";
         }
