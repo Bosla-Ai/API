@@ -768,7 +768,7 @@ public class CustomerService(
                     resultData = JsonSerializer.Deserialize<JsonElement>(resultJsonString);
                 }
 
-                finalResponse = $"Roadmap generated successfully. Generation ID: {generationId}.";
+                finalResponse = $"[SYSTEM]: Roadmap generated successfully. Generation ID: {generationId}.";
 
                 yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "end", summary = "Roadmap generated" });
 
