@@ -1,10 +1,10 @@
+using Domain.Exceptions;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Service.Abstraction;
 using Service.Implementations;
 using Shared.DTOs;
-using Domain.Exceptions;
 
 namespace BoslaAPI.Tests.Services;
 
@@ -85,6 +85,30 @@ public class ChatHistoryServiceTests
         result.Messages.Should().HaveCount(2);
         result.Messages[0].Role.Should().Be("user");
         result.Messages[1].Role.Should().Be("assistant");
+    }
+
+    [Fact]
+    public async Task GetSessionMessagesAsync_FiltersInternalStateMessages()
+    {
+        // Arrange
+        var messages = new List<ChatMessageEntity>
+        {
+            new() { UserId = "u1", SessionId = "s1", Message = "Hello", Role = "user", CreatedAt = DateTime.UtcNow.AddMinutes(-3) },
+            new() { UserId = "u1", SessionId = "s1", Message = "roadmap_state:pending_confirmation", Role = "state", CreatedAt = DateTime.UtcNow.AddMinutes(-2) },
+            new() { UserId = "u1", SessionId = "s1", Message = "Hi!", Role = "assistant", CreatedAt = DateTime.UtcNow.AddMinutes(-1) },
+        };
+
+        _chatRepoMock
+            .Setup(r => r.GetMessagesAsync("u1", "s1", 100))
+            .ReturnsAsync(messages);
+
+        // Act
+        var response = await _sut.GetSessionMessagesAsync("u1", "s1");
+        var result = response.Data!;
+
+        // Assert
+        result.Messages.Should().HaveCount(2);
+        result.Messages.Select(m => m.Role).Should().NotContain("state");
     }
 
     [Fact]
