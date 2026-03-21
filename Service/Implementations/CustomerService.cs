@@ -1159,7 +1159,11 @@ public class CustomerService(
         var confirmTerms = new[]
         {
             "yes",
+            "ok",
+            "okay",
             "confirm",
+            "continue",
+            "go on",
             "go ahead",
             "proceed",
             "generate now",
@@ -1167,6 +1171,7 @@ public class CustomerService(
             "نعم",
             "أكيد",
             "تمام",
+            "تابع",
             "ابدأ",
             "وافق"
         };
