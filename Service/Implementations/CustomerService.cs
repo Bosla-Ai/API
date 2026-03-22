@@ -358,7 +358,8 @@ public class CustomerService(
         {
             var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
                 (!string.IsNullOrEmpty(conversationContextText) ? $"Conversation History:\n{conversationContextText}\n\n" : ""),
-                query);
+                query,
+                profileSummary);
 
             var detectionJsonBuilder = new StringBuilder();
             string detectionModel = "Unknown";
@@ -489,10 +490,8 @@ public class CustomerService(
             targetRole,
         });
 
-        var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply || roadmapStateFollowUp || roadmapRefinementReply;
+        var forceRoadmapFlow = roadmapConfirmationReply || roadmapStateFollowUp || roadmapRefinementReply;
 
-        // Safety net: explicit roadmap intent or explicit roadmap confirmation should
-        // always route to roadmap flow, even if intent parsing drifted.
         if (forceRoadmapFlow && interactionType != LLMInteractionType.RoadmapGeneration)
         {
             interactionType = LLMInteractionType.RoadmapGeneration;
@@ -504,18 +503,8 @@ public class CustomerService(
             toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(query, conversationContextText);
         }
 
-        // Safety net: avoid roadmap hijacking unless user explicitly asked for roadmap/path/plan.
-        if (interactionType == LLMInteractionType.RoadmapGeneration && !forceRoadmapFlow)
-        {
-            interactionType = LLMInteractionType.ChatWithAI;
-            toolArguments = null;
-            if (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions))
-                questions = null;
-        }
-
         var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
             && !roadmapConfirmationReply
-            && !roadmapStateFollowUp
             && !roadmapRefinementReply;
 
         if (roadmapNeedsConfirmation)
@@ -523,7 +512,11 @@ public class CustomerService(
             if (!string.IsNullOrEmpty(aiResponse))
                 yield return FormatSse("text", new { delta = aiResponse });
 
-            yield return FormatSse("ask_user", new { questions = BuildRoadmapConfirmationQuestions() });
+            var confirmQuestions = (questions is { Length: > 0 })
+                ? questions
+                : BuildRoadmapConfirmationQuestions();
+
+            yield return FormatSse("ask_user", new { questions = confirmQuestions });
 
             if (followUpSuggestions is { Length: > 0 })
                 yield return FormatSse("suggestions", new { items = followUpSuggestions });
@@ -540,11 +533,6 @@ public class CustomerService(
 
             yield break;
         }
-
-        // If the AI decided to ask the user questions, emit ask_user and stop.
-        // Ignore roadmap-intake question sets unless roadmap was explicitly requested.
-        if (questions is { Length: > 0 } && !explicitRoadmapRequest && IsRoadmapIntakeQuestionSet(questions))
-            questions = null;
 
         if (questions is { Length: > 0 })
         {
@@ -610,18 +598,26 @@ public class CustomerService(
             if (!string.IsNullOrEmpty(resolvedVideoUrl))
             {
                 yield return FormatSse("tool", new { name = "VideoSearch", state = "end", summary = !string.IsNullOrEmpty(videoTitle) ? $"Found: {videoTitle}" : "Video found" });
+
+                if (!string.IsNullOrEmpty(aiResponse))
+                    yield return FormatSse("text", new { delta = aiResponse });
+
                 yield return FormatSse("video", new { url = resolvedVideoUrl, message = previewMessage });
 
+                var contextMessage = !string.IsNullOrEmpty(aiResponse)
+                    ? $"{aiResponse}\n[Video: {resolvedVideoUrl}]"
+                    : $"{previewMessage}\n[Video: {resolvedVideoUrl}]";
                 await conversationContextManager
-                    .AddMessageToContextAsync(userId, actualSessionId, $"{previewMessage}\n[Video: {resolvedVideoUrl}]", "assistant");
+                    .AddMessageToContextAsync(userId, actualSessionId, contextMessage, "assistant");
             }
             else
             {
                 yield return FormatSse("tool", new { name = "VideoSearch", state = "end", summary = "No embeddable video found" });
+                interactionType = LLMInteractionType.ChatWithAI;
             }
         }
-        else if (interactionType == LLMInteractionType.ChatWithAI
-                 || interactionType == LLMInteractionType.TopicPreview)
+
+        if (interactionType == LLMInteractionType.ChatWithAI)
         {
             var (chatSystemPrompt, chatPrompt) = BuildChatPrompt(conversationContext.ToString(), query, profileSummary);
 
@@ -681,7 +677,7 @@ public class CustomerService(
                 }
             }
         }
-        else
+        else if (interactionType != LLMInteractionType.ChatWithAI)
         {
             string finalResponse = "";
 
@@ -791,10 +787,10 @@ public class CustomerService(
 
                 yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "end", summary = "Roadmap generated" });
 
-                // Emit LLM text response alongside roadmap result
                 if (!string.IsNullOrEmpty(aiResponse))
                 {
                     yield return FormatSse("text", new { delta = aiResponse });
+                    await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, aiResponse, "assistant");
                 }
 
                 yield return FormatSse("result", new { status = "success", data = resultData });
@@ -823,7 +819,8 @@ public class CustomerService(
             yield return FormatSse("suggestions", new { items = followUpSuggestions });
         }
 
-        if (options.CurrentValue.Llm.EnableBackgroundProfileExtraction && classifiedMode == "FRIEND")
+        if (options.CurrentValue.Llm.EnableBackgroundProfileExtraction
+            && (classifiedMode == "FRIEND" || interactionType == LLMInteractionType.RoadmapGeneration))
         {
             // Capture dependencies for closure (avoid capturing 'this' for fire-and-forget)
             var capturedUserId = userId;
@@ -877,12 +874,15 @@ public class CustomerService(
 
             var contextTask = conversationContextManager.GetConversationContextAsync(userId, actualSessionId);
             var addMessageTask = conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, query, "user");
+            var profileTask = userProfileRepository.GetByUserIdAsync(userId);
 
-            await Task.WhenAll(contextTask, addMessageTask);
+            await Task.WhenAll(contextTask, addMessageTask, profileTask);
             var conversationContext = await contextTask;
             var conversationContextText = conversationContext.ToString();
+            var userProfile = await profileTask;
+            var profileSummary = userProfile?.ToPromptSummary() ?? "No profile data yet";
 
-            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, _) = await DetectIntentAsync(query, conversationContextText);
+            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, _) = await DetectIntentAsync(query, conversationContextText, profileSummary);
 
             var roadmapFlowState = await GetRoadmapFlowStateAsync(userId, actualSessionId);
             var hasPendingRoadmapConfirmation = roadmapFlowState == RoadmapIntentHelper.RoadmapStatePendingConfirmation;
@@ -900,7 +900,7 @@ public class CustomerService(
                 && !roadmapDeclineReply
                 && !roadmapConfirmationReply
                 && await IsRoadmapRefinementSemanticAsync(query, conversationContextText, CancellationToken.None);
-            var forceRoadmapFlow = explicitRoadmapRequest || roadmapConfirmationReply || roadmapStateFollowUp || roadmapRefinementReply;
+            var forceRoadmapFlow = roadmapConfirmationReply || roadmapStateFollowUp || roadmapRefinementReply;
 
             if (roadmapDeclineReply)
             {
@@ -918,15 +918,8 @@ public class CustomerService(
                 toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(query, conversationContextText);
             }
 
-            if (interactionType == LLMInteractionType.RoadmapGeneration && !forceRoadmapFlow)
-            {
-                interactionType = LLMInteractionType.ChatWithAI;
-                toolArguments = null;
-            }
-
             var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
                 && !roadmapConfirmationReply
-                && !roadmapStateFollowUp
                 && !roadmapRefinementReply;
 
             if (roadmapNeedsConfirmation)
@@ -1009,12 +1002,13 @@ public class CustomerService(
         }
     }
 
-    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)> DetectIntentAsync(string query, string conversationContext)
+    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)> DetectIntentAsync(string query, string conversationContext, string? profileSummary = null)
     {
         var prompts = options.CurrentValue.Prompts;
         var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
             (!string.IsNullOrEmpty(conversationContext) ? $"Conversation History:\n{conversationContext}\n\n" : ""),
-            query);
+            query,
+            profileSummary ?? "No profile data yet");
         // Non-stream path: prepend system prompt since SendRequestWithModel doesn't support system role
         var fullDetectionPrompt = prompts.IntentDetectionSystemPrompt + "\n\n" + detectionPrompt;
         try
@@ -1491,20 +1485,10 @@ Latest user message:
         {
             var classifiedMode = await customerHelper.ClassifyModeAsync(query, sessionMessageCount, profileComplete);
 
-            // Apply bias if applicable
-            if (applyFriendBias && classifiedMode == "ACTION")
+            if (applyFriendBias && classifiedMode == "ACTION" && !profileComplete)
             {
-                // For new sessions, only keep ACTION if it's a very explicit request
-                var hasExplicitActionKeyword = IsExplicitRoadmapRequest(query)
-                    || query.Contains("CV", StringComparison.OrdinalIgnoreCase)
-                    || query.Contains("resume", StringComparison.OrdinalIgnoreCase)
-                    || query.Contains("market report", StringComparison.OrdinalIgnoreCase);
-
-                if (!hasExplicitActionKeyword)
-                {
-                    classifiedMode = "FRIEND";
-                    logger.LogDebug("Applied FRIEND bias for new session. Original: ACTION, Query: {Query}", query);
-                }
+                classifiedMode = "FRIEND";
+                logger.LogDebug("Applied FRIEND bias for new session with incomplete profile. Original: ACTION, Query: {Query}", query);
             }
 
             return (classifiedMode, null);
