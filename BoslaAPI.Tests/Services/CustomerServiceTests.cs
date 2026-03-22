@@ -273,6 +273,183 @@ public class CustomerServiceTests
 
     #endregion
 
+    #region ForceRoadmapFlow Tests (Refactored — no longer includes explicitRoadmapRequest)
+
+    [Theory]
+    [InlineData("yes", true)]
+    [InlineData("نعم", true)]
+    [InlineData("أكيد", true)]
+    [InlineData("تمام", true)]
+    [InlineData("Yes, generate the roadmap now", true)]
+    [InlineData("no", false)]
+    [InlineData("Create a roadmap for backend", false)]
+    [InlineData("I want to learn React", false)]
+    [InlineData("Yes, go ahead", false)]
+    public void HasRoadmapConfirmation_DetectsConfirmationReplies(string query, bool expected)
+    {
+        var method = typeof(CustomerService).GetMethod(
+            "HasRoadmapConfirmation",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        var result = (bool)method!.Invoke(null, [query])!;
+
+        result.Should().Be(expected);
+    }
+
+    [Fact]
+    public void BuildRoadmapConfirmationQuestions_ReturnsValidFallbackQuestions()
+    {
+        var method = typeof(CustomerService).GetMethod(
+            "BuildRoadmapConfirmationQuestions",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        var result = (AskUserQuestion[])method!.Invoke(null, [])!;
+
+        result.Should().NotBeNull();
+        result.Should().HaveCountGreaterThan(0);
+        result[0].Id.Should().NotBeNullOrEmpty();
+        result[0].Text.Should().NotBeNullOrEmpty();
+        result[0].Type.Should().Be("checkbox");
+        result[0].Options.Should().NotBeNull();
+    }
+
+    #endregion
+
+    #region UserProfileEntity Tests
+
+    [Fact]
+    public void UserProfileEntity_ToPromptSummary_WithCompleteProfile_ReturnsFormattedSummary()
+    {
+        var profile = new Shared.DTOs.UserProfileEntity
+        {
+            UserId = "user1",
+            Interests = ["React", "Node.js"],
+            ExperienceLevel = "beginner",
+            TargetRole = "Frontend Developer",
+            Constraints = ["free courses only"],
+            PersonalityHints = ["visual learner"]
+        };
+
+        var summary = profile.ToPromptSummary();
+
+        summary.Should().Contain("Interests: React, Node.js");
+        summary.Should().Contain("Experience: beginner");
+        summary.Should().Contain("Target Role: Frontend Developer");
+        summary.Should().Contain("Constraints: free courses only");
+        summary.Should().Contain("Learning Style: visual learner");
+    }
+
+    [Fact]
+    public void UserProfileEntity_ToPromptSummary_WithEmptyProfile_ReturnsNoProfileMessage()
+    {
+        var profile = new Shared.DTOs.UserProfileEntity { UserId = "user1" };
+
+        var summary = profile.ToPromptSummary();
+
+        summary.Should().Be("No profile data yet");
+    }
+
+    [Fact]
+    public void UserProfileEntity_MergeFrom_CombinesInterests()
+    {
+        var existing = new Shared.DTOs.UserProfileEntity
+        {
+            UserId = "user1",
+            Interests = ["React"],
+            ExperienceLevel = "beginner"
+        };
+
+        var newer = new Shared.DTOs.UserProfileEntity
+        {
+            UserId = "user1",
+            Interests = ["React", "Node.js", "TypeScript"],
+            ExperienceLevel = "intermediate"
+        };
+
+        existing.MergeFrom(newer);
+
+        existing.Interests.Should().Contain("React");
+        existing.Interests.Should().Contain("Node.js");
+        existing.Interests.Should().Contain("TypeScript");
+        existing.Interests.Should().HaveCount(3);
+        existing.ExperienceLevel.Should().Be("intermediate");
+    }
+
+    [Fact]
+    public void UserProfileEntity_MergeFrom_PreservesExistingWhenNewerIsNull()
+    {
+        var existing = new Shared.DTOs.UserProfileEntity
+        {
+            UserId = "user1",
+            TargetRole = "Backend Developer",
+            Interests = ["Python"]
+        };
+
+        var newer = new Shared.DTOs.UserProfileEntity
+        {
+            UserId = "user1",
+            TargetRole = null,
+            Interests = null
+        };
+
+        existing.MergeFrom(newer);
+
+        existing.TargetRole.Should().Be("Backend Developer");
+        existing.Interests.Should().Contain("Python");
+    }
+
+    [Fact]
+    public void UserProfileEntity_FromExtraction_MapsCorrectly()
+    {
+        var extraction = new Shared.DTOs.UserProfileExtraction
+        {
+            Interests = ["AI", "ML"],
+            ExperienceLevel = "advanced",
+            TargetRole = "ML Engineer",
+            Constraints = ["Arabic language"],
+            PersonalityHints = ["hands-on"]
+        };
+
+        var entity = Shared.DTOs.UserProfileEntity.FromExtraction("user1", extraction);
+
+        entity.UserId.Should().Be("user1");
+        entity.Interests.Should().BeEquivalentTo(["AI", "ML"]);
+        entity.ExperienceLevel.Should().Be("advanced");
+        entity.TargetRole.Should().Be("ML Engineer");
+        entity.ExtractionCount.Should().Be(1);
+    }
+
+    #endregion
+
+    #region Prompt Template Format Tests
+
+    [Fact]
+    public void IntentDetectionUserPromptTemplate_AcceptsThreeParameters()
+    {
+        var template = "{0}\n\nUser Profile: {2}\n\nCurrent User Query: \"{1}\"";
+
+        var result = string.Format(template,
+            "Conversation History:\nHello\n\n",
+            "I want to learn React",
+            "Interests: Python | Experience: beginner");
+
+        result.Should().Contain("Conversation History:");
+        result.Should().Contain("I want to learn React");
+        result.Should().Contain("Interests: Python | Experience: beginner");
+    }
+
+    [Fact]
+    public void IntentDetectionUserPromptTemplate_HandlesEmptyProfile()
+    {
+        var template = "{0}\n\nUser Profile: {2}\n\nCurrent User Query: \"{1}\"";
+
+        var result = string.Format(template, "", "hello", "No profile data yet");
+
+        result.Should().Contain("No profile data yet");
+    }
+
+    #endregion
+
     // Helper to create service - CustomerHelper and ConversationContextManager have constructor dependencies
     // so we skip testing methods that require them
     private CustomerService CreateServiceWithMockedDependencies(IMapper mapper)
