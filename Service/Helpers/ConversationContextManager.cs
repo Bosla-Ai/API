@@ -173,7 +173,7 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
 
         var recentMessages = dbMessages.Where(m => m.Role != "summary" && m.Role != "title" && m.Role != "state")
             .OrderBy(m => m.CreatedAt)
-            .TakeLast(5)
+            .TakeLast(CompactionThreshold)
             .ToList();
 
         if (recentMessages.Any())
