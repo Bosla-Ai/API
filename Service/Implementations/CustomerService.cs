@@ -58,9 +58,12 @@ public class CustomerService(
 
         var conversationContext = await conversationContextManager.GetConversationContextAsync(userId, actualSessionId);
 
+        var prompts = options.CurrentValue.Prompts;
+        var chatSystemPrompt = prompts.ChatSystemPrompt;
+
         string aiPrompt = $"Context:\n{conversationContext}\n\nCurrent User Query: {query}\n\nPlease provide a helpful response considering the conversation history if relevant.";
 
-        var (geminiResponse, _, _) = await customerHelper.SendRequestToGemini(aiPrompt, useThinking: false, userId: userId, isSuperAdmin: IsSuperAdmin());
+        var (geminiResponse, _, _) = await customerHelper.SendRequestToGemini(aiPrompt, useThinking: false, userId: userId, isSuperAdmin: IsSuperAdmin(), systemPrompt: chatSystemPrompt);
         string responseText = geminiResponse;
 
         await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, responseText, "assistant");
@@ -89,10 +92,10 @@ public class CustomerService(
             pendingSseEvents.Enqueue(FormatSse(eventName, data));
         };
 
-        var contextTask = conversationContextManager.GetConversationContextAsync(userId, actualSessionId);
-        var addMessageTask = conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, query, "user");
-        await Task.WhenAll(contextTask, addMessageTask);
-        var conversationContext = await contextTask;
+        await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, query, "user");
+        await TryPersistProfileFromLatestMessageAsync(userId, query);
+
+        var conversationContext = await conversationContextManager.GetConversationContextAsync(userId, actualSessionId);
         var conversationContextText = conversationContext.ToString();
 
         // Drain any buffered SSE events (e.g. compaction)
@@ -220,12 +223,13 @@ public class CustomerService(
         var skipIntentDetection = wordCount < minWordThreshold;
         var roadmapFlowState = await GetRoadmapFlowStateAsync(userId, actualSessionId);
         var hasPendingRoadmapConfirmation = roadmapFlowState == RoadmapIntentHelper.RoadmapStatePendingConfirmation;
+        var hasAskedDiscovery = roadmapFlowState == RoadmapIntentHelper.RoadmapStateDiscoveryAsked;
 
         var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
-        var hasRoadmapContext = hasPendingRoadmapConfirmation || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+        var hasRoadmapContext = hasPendingRoadmapConfirmation || hasAskedDiscovery || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
         var roadmapDeclineReply = HasRoadmapDecline(query) && hasRoadmapContext;
         var roadmapConfirmationReply = HasRoadmapConfirmation(query) && hasRoadmapContext;
-        var roadmapStateFollowUp = hasPendingRoadmapConfirmation
+        var roadmapStateFollowUp = (hasPendingRoadmapConfirmation || hasAskedDiscovery)
             && !roadmapDeclineReply
             && !roadmapConfirmationReply
             && !explicitRoadmapRequest;
@@ -266,6 +270,7 @@ public class CustomerService(
 
         // Generate profile summary for prompts
         var profileSummary = userProfile?.ToPromptSummary() ?? "No profile data yet";
+        var hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
 
         if (enableModeClassification && !skipIntentDetection && chatMode != ChatMode.Powerful && !explicitRoadmapRequest)
         {
@@ -329,8 +334,10 @@ public class CustomerService(
         // Intent Detection (only for ACTION mode)
         var prompts = options.CurrentValue.Prompts;
 
-        // Inject market context into system prompt
-        var systemPrompt = prompts.IntentDetectionSystemPrompt;
+        var systemPrompt = chatMode == ChatMode.Powerful
+            && !string.IsNullOrEmpty(prompts.IntentDetectionSystemPromptPowerful)
+            ? prompts.IntentDetectionSystemPromptPowerful
+            : prompts.IntentDetectionSystemPrompt;
         if (!string.IsNullOrEmpty(marketContext))
         {
             systemPrompt = systemPrompt.Replace("{MARKET_CONTEXT}", marketContext);
@@ -509,6 +516,35 @@ public class CustomerService(
 
         if (roadmapNeedsConfirmation)
         {
+            if (!hasSufficientRoadmapProfile && !hasAskedDiscovery)
+            {
+                var discoveryQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions))
+                    ? questions
+                    : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+
+                var discoveryIntro = !string.IsNullOrWhiteSpace(aiResponse)
+                    ? aiResponse
+                    : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
+
+                yield return FormatSse("text", new { delta = discoveryIntro });
+                yield return FormatSse("ask_user", new { questions = discoveryQuestions });
+
+                if (followUpSuggestions is { Length: > 0 })
+                    yield return FormatSse("suggestions", new { items = followUpSuggestions });
+
+                yield return FormatSse("done", new { message = "Roadmap discovery questions requested" });
+
+                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+
+                await conversationContextManager.AddMessageToContextAsync(
+                    userId,
+                    actualSessionId,
+                    discoveryIntro,
+                    "assistant");
+
+                yield break;
+            }
+
             if (!string.IsNullOrEmpty(aiResponse))
                 yield return FormatSse("text", new { delta = aiResponse });
 
@@ -534,7 +570,11 @@ public class CustomerService(
             yield break;
         }
 
-        if (questions is { Length: > 0 })
+        var shouldEmitQuestions = questions is { Length: > 0 }
+            && !(interactionType == LLMInteractionType.RoadmapGeneration
+                 && (roadmapConfirmationReply || roadmapRefinementReply));
+
+        if (shouldEmitQuestions)
         {
             // Emit the response text first (introduces the questions)
             if (!string.IsNullOrEmpty(aiResponse))
@@ -619,7 +659,7 @@ public class CustomerService(
 
         if (interactionType == LLMInteractionType.ChatWithAI)
         {
-            var (chatSystemPrompt, chatPrompt) = BuildChatPrompt(conversationContext.ToString(), query, profileSummary);
+            var (chatSystemPrompt, chatPrompt) = BuildChatPrompt(conversationContext.ToString(), query, profileSummary, chatMode);
 
             var fullResponseBuilder = new StringBuilder();
             var chatThinkingLog = "";
@@ -872,26 +912,30 @@ public class CustomerService(
         {
             var actualSessionId = !string.IsNullOrEmpty(sessionId) ? sessionId : GenerateSessionId(userId);
 
-            var contextTask = conversationContextManager.GetConversationContextAsync(userId, actualSessionId);
-            var addMessageTask = conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, query, "user");
-            var profileTask = userProfileRepository.GetByUserIdAsync(userId);
+            await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, query, "user");
+            await TryPersistProfileFromLatestMessageAsync(userId, query);
 
-            await Task.WhenAll(contextTask, addMessageTask, profileTask);
+            var contextTask = conversationContextManager.GetConversationContextAsync(userId, actualSessionId);
+            var profileTask = userProfileRepository.GetByUserIdAsync(userId);
+            await Task.WhenAll(contextTask, profileTask);
+
             var conversationContext = await contextTask;
             var conversationContextText = conversationContext.ToString();
             var userProfile = await profileTask;
             var profileSummary = userProfile?.ToPromptSummary() ?? "No profile data yet";
+            var hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
 
-            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, _) = await DetectIntentAsync(query, conversationContextText, profileSummary);
+            var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, questions) = await DetectIntentAsync(query, conversationContextText, profileSummary);
 
             var roadmapFlowState = await GetRoadmapFlowStateAsync(userId, actualSessionId);
             var hasPendingRoadmapConfirmation = roadmapFlowState == RoadmapIntentHelper.RoadmapStatePendingConfirmation;
+            var hasAskedDiscovery = roadmapFlowState == RoadmapIntentHelper.RoadmapStateDiscoveryAsked;
 
             var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
-            var hasRoadmapContext = hasPendingRoadmapConfirmation || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+            var hasRoadmapContext = hasPendingRoadmapConfirmation || hasAskedDiscovery || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
             var roadmapDeclineReply = HasRoadmapDecline(query) && hasRoadmapContext;
             var roadmapConfirmationReply = HasRoadmapConfirmation(query) && hasRoadmapContext;
-            var roadmapStateFollowUp = hasPendingRoadmapConfirmation
+            var roadmapStateFollowUp = (hasPendingRoadmapConfirmation || hasAskedDiscovery)
                 && !roadmapDeclineReply
                 && !roadmapConfirmationReply
                 && !explicitRoadmapRequest;
@@ -924,12 +968,25 @@ public class CustomerService(
 
             if (roadmapNeedsConfirmation)
             {
-                var confirmMessage = !string.IsNullOrEmpty(aiResponse)
+                var shouldAskDiscoveryFirst = !hasSufficientRoadmapProfile && !hasAskedDiscovery;
+                var responseMessage = !string.IsNullOrEmpty(aiResponse)
                     ? aiResponse
-                    : "I can generate your roadmap. Please confirm to continue.";
+                    : shouldAskDiscoveryFirst
+                        ? "Before I generate a personalized roadmap, I need a bit more about your background and goals."
+                        : "I can generate your roadmap. Please confirm to continue.";
 
-                await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, confirmMessage, "assistant");
-                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
+                var responseQuestions = shouldAskDiscoveryFirst
+                    ? (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions)
+                        ? questions
+                        : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText))
+                    : BuildRoadmapConfirmationQuestions();
+
+                var nextState = shouldAskDiscoveryFirst
+                    ? RoadmapIntentHelper.RoadmapStateDiscoveryAsked
+                    : RoadmapIntentHelper.RoadmapStatePendingConfirmation;
+
+                await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, responseMessage, "assistant");
+                await SaveRoadmapFlowStateAsync(userId, actualSessionId, nextState);
 
                 return new APIResponse<AiIntentDetectionResponse>()
                 {
@@ -939,10 +996,10 @@ public class CustomerService(
                         InteractionType = LLMInteractionType.RoadmapGeneration,
                         Confidence = confidence,
                         Success = true,
-                        Answer = confirmMessage,
+                        Answer = responseMessage,
                         Thinking = !string.IsNullOrEmpty(thinkingContent),
                         ThinkingLog = thinkingContent,
-                        Questions = BuildRoadmapConfirmationQuestions()
+                        Questions = responseQuestions
                     }
                 };
             }
@@ -1002,18 +1059,24 @@ public class CustomerService(
         }
     }
 
-    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)> DetectIntentAsync(string query, string conversationContext, string? profileSummary = null)
+    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)> DetectIntentAsync(string query, string conversationContext, string? profileSummary = null, ChatMode chatMode = ChatMode.Normal)
     {
         var prompts = options.CurrentValue.Prompts;
         var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
             (!string.IsNullOrEmpty(conversationContext) ? $"Conversation History:\n{conversationContext}\n\n" : ""),
             query,
             profileSummary ?? "No profile data yet");
-        // Non-stream path: prepend system prompt since SendRequestWithModel doesn't support system role
-        var fullDetectionPrompt = prompts.IntentDetectionSystemPrompt + "\n\n" + detectionPrompt;
+
+        var intentSystemPrompt = chatMode == ChatMode.Powerful
+            && !string.IsNullOrEmpty(prompts.IntentDetectionSystemPromptPowerful)
+            ? prompts.IntentDetectionSystemPromptPowerful
+            : prompts.IntentDetectionSystemPrompt;
+
         try
         {
-            var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestWithModel(fullDetectionPrompt, options.CurrentValue.Llm.Model, useThinking: true);
+            var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestWithModel(
+                detectionPrompt, options.CurrentValue.Llm.Model, useThinking: true,
+                systemPrompt: intentSystemPrompt);
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
                 return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName, thinkingContent, parsed.Value.targetRole, parsed.Value.followUpSuggestions, parsed.Value.videoUrl, parsed.Value.videoSearchQuery, parsed.Value.questions);
@@ -1026,21 +1089,25 @@ public class CustomerService(
         }
     }
 
-    private (string SystemPrompt, string UserPrompt) BuildChatPrompt(string context, string query, string? profileSummary = null)
+    private (string SystemPrompt, string UserPrompt) BuildChatPrompt(string context, string query, string? profileSummary = null, ChatMode chatMode = ChatMode.Normal)
     {
         var prompts = options.CurrentValue.Prompts;
 
-        // Inject profile summary into context if available
         var enrichedContext = context;
         if (!string.IsNullOrEmpty(profileSummary) && profileSummary != "No profile data yet")
         {
             enrichedContext = $"[User Profile: {profileSummary}]\n\n{context}";
         }
 
+        var chatSystemPrompt = chatMode == ChatMode.Powerful
+            && !string.IsNullOrEmpty(prompts.ChatSystemPromptPowerful)
+            ? prompts.ChatSystemPromptPowerful
+            : prompts.ChatSystemPrompt;
+
         var userPrompt = string.Format(prompts.ChatUserPromptTemplate,
             enrichedContext,
             query);
-        return (prompts.ChatSystemPrompt, userPrompt);
+        return (chatSystemPrompt, userPrompt);
     }
 
     private (LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions, string? coachMonologue, string? title)? ParseCombinedResponse(string? responseText)
@@ -1248,6 +1315,120 @@ public class CustomerService(
         return tokens.Contains("no") || tokens.Contains("لا") || tokens.Contains("لأ");
     }
 
+    private static bool HasSufficientRoadmapProfile(UserProfileEntity? userProfile)
+    {
+        if (userProfile is null)
+            return false;
+
+        return !string.IsNullOrWhiteSpace(userProfile.TargetRole)
+               && !string.IsNullOrWhiteSpace(userProfile.ExperienceLevel);
+    }
+
+    private static AskUserQuestion[] BuildRoadmapDiscoveryQuestions(UserProfileEntity? userProfile, string query, string conversationContext)
+    {
+        var combinedContext = $"{conversationContext}\n{query}".ToLowerInvariant();
+        var isArabic = ContainsArabic(query) || ContainsArabic(conversationContext);
+        var casualTone = LooksCasualTone(query);
+
+        var hasExperience = !string.IsNullOrWhiteSpace(userProfile?.ExperienceLevel)
+            || ContainsAny(combinedContext, "beginner", "intermediate", "advanced", "junior", "mid", "senior", "مبتدئ", "متوسط", "متقدم");
+
+        var hasTargetRole = !string.IsNullOrWhiteSpace(userProfile?.TargetRole)
+            || ContainsAny(combinedContext, "software engineer", "backend", "frontend", "fullstack", "devops", "data", "qa", "role", "job", "مهندس", "مطور", "وظيفة", "منصب");
+
+        var hasResourcePreference = (userProfile?.Constraints?.Any(c => !string.IsNullOrWhiteSpace(c)) ?? false)
+            || ContainsAny(combinedContext, "free", "paid", "budget", "no paid", "free only", "مجاني", "مدفوع", "ميزانية");
+
+        var questions = new List<AskUserQuestion>();
+
+        if (!hasExperience)
+        {
+            questions.Add(new AskUserQuestion
+            {
+                Id = "roadmap_experience",
+                Text = isArabic
+                    ? (casualTone ? "مستواك الحالي إيه في المجال؟" : "ما مستوى خبرتك الحالي؟")
+                    : (casualTone ? "What level are you at right now?" : "What is your current experience level?"),
+                Type = "checkbox",
+                Options = isArabic
+                    ? ["مبتدئ", "متوسط", "متقدم"]
+                    : ["Beginner", "Intermediate", "Advanced"],
+                Required = true
+            });
+        }
+
+        if (!hasTargetRole)
+        {
+            questions.Add(new AskUserQuestion
+            {
+                Id = "roadmap_target_role",
+                Text = isArabic
+                    ? (casualTone ? "حابب توصل لأنهي دور/وظيفة؟" : "ما الدور المستهدف من هذه الخطة؟")
+                    : (casualTone ? "Which role are you aiming for with this roadmap?" : "Which role are you targeting with this roadmap?"),
+                Type = "text",
+                Placeholder = isArabic ? "مثال: Software Engineer" : "Example: Software Engineer",
+                Required = true
+            });
+        }
+
+        if (!hasResourcePreference)
+        {
+            questions.Add(new AskUserQuestion
+            {
+                Id = "roadmap_budget",
+                Text = isArabic
+                    ? (casualTone ? "تفضّل مصادر مجانية بس ولا عادي المدفوع؟" : "ما تفضيلك للمصادر التعليمية؟")
+                    : (casualTone ? "Do you want free resources only, or is paid okay too?" : "Which learning resources do you prefer?"),
+                Type = "checkbox",
+                Options = isArabic
+                    ? ["مجاني فقط", "المدفوع مناسب"]
+                    : ["Free only", "Paid is okay"],
+                Required = true
+            });
+        }
+
+        if (questions.Count == 0)
+        {
+            questions.Add(new AskUserQuestion
+            {
+                Id = "roadmap_focus",
+                Text = isArabic
+                    ? "ما الجوانب التي تريد التركيز عليها أولًا في الخطة؟"
+                    : "Which topics should this roadmap prioritize first?",
+                Type = "text",
+                Placeholder = isArabic
+                    ? "مثال: Algorithms, System Design"
+                    : "Example: Algorithms, System Design",
+                Required = true
+            });
+        }
+
+        return [.. questions.Take(3)];
+    }
+
+    private static bool ContainsAny(string text, params string[] terms)
+        => terms.Any(term => text.Contains(term, StringComparison.OrdinalIgnoreCase));
+
+    private static bool ContainsArabic(string text)
+        => !string.IsNullOrWhiteSpace(text) && text.Any(ch => ch >= '\u0600' && ch <= '\u06FF');
+
+    private static bool LooksCasualTone(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var normalized = text.ToLowerInvariant();
+        return normalized.Contains("wanna")
+               || normalized.Contains("gonna")
+               || normalized.Contains("pls")
+               || normalized.Contains("bro")
+               || normalized.Contains("ya ")
+               || normalized.Contains("عايز")
+               || normalized.Contains("محتاج")
+               || normalized.Contains("ايه")
+               || normalized.Contains("؟");
+    }
+
     private static AskUserQuestion[] BuildRoadmapConfirmationQuestions()
     {
         return
@@ -1328,14 +1509,12 @@ public class CustomerService(
 
         try
         {
+            var classifierSystem = "You are a strict binary classifier. Return JSON only. No explanation.";
             var prompt = $"""
-You are a strict classifier.
-
 Task:
 Decide if the latest user message is asking to regenerate, modify, constrain, or refine an already existing roadmap in this conversation.
 
-Return JSON only:
-is_refinement: true|false, confidence: 0-100
+Return JSON with fields: is_refinement (true or false), confidence (0-100)
 
 Guidelines:
 - true when the user is changing roadmap preferences (budget/free-only, language, sources, difficulty, timeline, role focus) for an existing roadmap.
@@ -1352,7 +1531,8 @@ Latest user message:
                 prompt,
                 options.CurrentValue.Llm.Model,
                 useThinking: false,
-                isSuperAdmin: IsSuperAdmin());
+                isSuperAdmin: IsSuperAdmin(),
+                systemPrompt: classifierSystem);
 
             var responseText = Response;
 
@@ -1520,5 +1700,97 @@ Latest user message:
         return latestStateMessage is null
             ? null
             : RoadmapIntentHelper.ExtractRoadmapState(latestStateMessage.Message);
+    }
+
+    private async Task TryPersistProfileFromLatestMessageAsync(string userId, string query)
+    {
+        var extracted = ExtractProfileFromUserMessage(userId, query);
+        if (extracted is null)
+            return;
+
+        try
+        {
+            await userProfileRepository.UpsertAsync(extracted);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to persist profile signals from latest message for user {UserId}", userId);
+        }
+    }
+
+    private static UserProfileEntity? ExtractProfileFromUserMessage(string userId, string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return null;
+
+        var profile = new UserProfileEntity
+        {
+            UserId = userId,
+            Interests = [],
+            Constraints = []
+        };
+
+        var lines = query
+            .Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .ToArray();
+
+        foreach (var line in lines)
+        {
+            var separatorIdx = line.IndexOf(':');
+            if (separatorIdx <= 0 || separatorIdx >= line.Length - 1)
+                continue;
+
+            var label = line[..separatorIdx].Trim().ToLowerInvariant();
+            var answer = line[(separatorIdx + 1)..].Trim();
+            if (string.IsNullOrWhiteSpace(answer))
+                continue;
+
+            if (ContainsAny(label, "experience", "level", "roadmap_experience", "مستواك", "خبر", "مستوى"))
+            {
+                profile.ExperienceLevel = answer;
+                continue;
+            }
+
+            if (ContainsAny(label, "role", "job", "target", "roadmap_target_role", "وظيفة", "دور", "منصب", "حابب توصل"))
+            {
+                profile.TargetRole = answer;
+                continue;
+            }
+
+            if (ContainsAny(label, "resource", "budget", "free", "paid", "roadmap_budget", "مصادر", "ميزانية", "مجاني", "مدفوع", "تفضّل مصادر"))
+            {
+                profile.Constraints!.Add(answer);
+                continue;
+            }
+
+            if (ContainsAny(label, "focus", "topic", "interest", "roadmap_focus", "prioritize", "تركيز", "موضوع", "اهتم"))
+            {
+                var interests = answer
+                    .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(x => !string.IsNullOrWhiteSpace(x));
+
+                profile.Interests!.AddRange(interests);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.ExperienceLevel)
+            || !string.IsNullOrWhiteSpace(profile.TargetRole)
+            || profile.Constraints!.Count > 0
+            || profile.Interests!.Count > 0)
+        {
+            profile.Constraints = [.. profile.Constraints!.Distinct(StringComparer.OrdinalIgnoreCase)];
+            profile.Interests = [.. profile.Interests!.Distinct(StringComparer.OrdinalIgnoreCase)];
+            return profile;
+        }
+
+        var lower = query.ToLowerInvariant();
+        if (ContainsAny(lower, "free only", "no paid", "مجاني فقط", "بدون مدفوع"))
+        {
+            profile.Constraints!.Add("Free only");
+            return profile;
+        }
+
+        return null;
     }
 }
