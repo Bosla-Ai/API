@@ -6,6 +6,7 @@ public static class RoadmapIntentHelper
 {
     public const string RoadmapStatePrefix = "roadmap_state:";
     public const string RoadmapStatePendingConfirmation = "pending_confirmation";
+    public const string RoadmapStateDiscoveryAsked = "discovery_asked";
     public const string RoadmapStateCompleted = "completed";
     public const string RoadmapStateIdle = "idle";
 

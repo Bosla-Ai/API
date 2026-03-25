@@ -121,7 +121,7 @@ public class CustomerHelper
     public int GetGeminiRemainingQuota(string userId, bool isSuperAdmin)
         => _rateLimiter.GetRemainingRequests(userId, isSuperAdmin);
 
-    public async Task<(string Response, string ModelName, string? ThinkingContent)> SendRequestToGemini(string prompt, bool useThinking = false, string? userId = null, bool isSuperAdmin = false)
+    public async Task<(string Response, string ModelName, string? ThinkingContent)> SendRequestToGemini(string prompt, bool useThinking = false, string? userId = null, bool isSuperAdmin = false, string? systemPrompt = null)
     {
         if (_geminiApiKeys.Any())
         {
@@ -133,7 +133,7 @@ public class CustomerHelper
             {
                 try
                 {
-                    return await ExecuteGeminiRequestWithRotation(prompt, useThinking);
+                    return await ExecuteGeminiRequestWithRotation(prompt, useThinking, systemPrompt);
                 }
                 catch (Exception ex)
                 {
@@ -147,40 +147,37 @@ public class CustomerHelper
         }
 
         // Fallback to Cerebras
-        return await ExecuteLlmRequestWithKeyRotation(prompt, useThinking);
+        return await ExecuteLlmRequestWithKeyRotation(prompt, useThinking, systemPrompt: systemPrompt);
     }
 
     public async Task<(string Response, string ModelName, string? ThinkingContent)> SendRequestByTask(
         string prompt, LLMInteractionType taskType, bool useThinking = false,
-        string? userId = null, bool isSuperAdmin = false, ChatMode chatMode = ChatMode.Normal)
+        string? userId = null, bool isSuperAdmin = false, ChatMode chatMode = ChatMode.Normal, string? systemPrompt = null)
     {
         var targetModel = GetModelForTask(taskType);
 
-        // Powerful mode: route all tasks to Gemini (intent detection bypasses this via SendStreamRequestWithModel)
         if (chatMode == ChatMode.Powerful)
         {
-            return await SendRequestToGemini(prompt, useThinking, userId, isSuperAdmin);
+            return await SendRequestToGemini(prompt, useThinking, userId, isSuperAdmin, systemPrompt);
         }
 
-        // Normal mode: CVAnalysis → Mistral (specialist) → Cerebras → Groq
         if (taskType == LLMInteractionType.CVAnalysis)
         {
-            return await ExecuteMistralRequestWithKeyRotation(prompt, useThinking);
+            return await ExecuteMistralRequestWithKeyRotation(prompt, useThinking, systemPrompt);
         }
 
-        // Normal mode: Cerebras (primary) → Groq (fallback)
-        return await ExecuteLlmRequestWithKeyRotation(prompt, useThinking, targetModel);
+        return await ExecuteLlmRequestWithKeyRotation(prompt, useThinking, targetModel, systemPrompt);
     }
 
     public async Task<(string Response, string ModelName, string? ThinkingContent)> SendRequestWithModel(
-        string prompt, string model, bool useThinking = false, string? userId = null, bool isSuperAdmin = false)
+        string prompt, string model, bool useThinking = false, string? userId = null, bool isSuperAdmin = false, string? systemPrompt = null)
     {
-        return await ExecuteLlmRequestWithKeyRotation(prompt, useThinking, model);
+        return await ExecuteLlmRequestWithKeyRotation(prompt, useThinking, model, systemPrompt);
     }
 
     // Cerebras: try all API keys with key rotation
     private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteLlmRequestWithKeyRotation(
-        string prompt, bool useThinking, string? modelOverride = null)
+        string prompt, bool useThinking, string? modelOverride = null, string? systemPrompt = null)
     {
         if (!_llmApiKeys.Any())
             throw new InternalServerErrorException($"{_llmProvider} API keys are not configured.");
@@ -194,7 +191,7 @@ public class CustomerHelper
 
             try
             {
-                var result = await ExecuteLlmRequest(prompt, useThinking, model, currentKey);
+                var result = await ExecuteLlmRequest(prompt, useThinking, model, currentKey, systemPrompt);
                 Interlocked.Exchange(ref _currentLlmKeyIndex, keyIndex);
                 return result;
             }
@@ -207,12 +204,12 @@ public class CustomerHelper
 
         // All Cerebras keys exhausted, fall back to Groq
         _logger.LogWarning("All {Provider} API keys exhausted. Falling back to Groq...", _llmProvider);
-        return await ExecuteGroqRequestWithKeyRotation(prompt, useThinking);
+        return await ExecuteGroqRequestWithKeyRotation(prompt, useThinking, systemPrompt);
     }
 
     // Groq: try all API keys with key rotation
     private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteGroqRequestWithKeyRotation(
-        string prompt, bool useThinking)
+        string prompt, bool useThinking, string? systemPrompt = null)
     {
         if (!_groqApiKeys.Any())
             throw new InternalServerErrorException("All AI provider keys exhausted (Cerebras and Groq).");
@@ -224,7 +221,7 @@ public class CustomerHelper
 
             try
             {
-                var result = await ExecuteGroqRequest(prompt, useThinking, currentKey);
+                var result = await ExecuteGroqRequest(prompt, useThinking, currentKey, systemPrompt);
                 Interlocked.Exchange(ref _currentGroqKeyIndex, keyIndex);
                 return result;
             }
@@ -238,9 +235,8 @@ public class CustomerHelper
         throw new InternalServerErrorException("All AI provider keys exhausted (Cerebras and Groq).");
     }
 
-    private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteGeminiRequestWithRotation(string prompt, bool useThinking)
+    private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteGeminiRequestWithRotation(string prompt, bool useThinking, string? systemPrompt = null)
     {
-        // Try primary model first, then fallback models — each with all keys
         var modelsToTry = new List<string> { _geminiModel };
         modelsToTry.AddRange(_geminiFallbackModels.Where(m =>
             !string.IsNullOrWhiteSpace(m) &&
@@ -261,8 +257,13 @@ public class CustomerHelper
                 {
                     var enableThinking = (_geminiIncludeThoughts || IsReasoningModel(model)) && useThinking;
 
+                    object? systemInstruction = !string.IsNullOrWhiteSpace(systemPrompt)
+                        ? new { parts = new[] { new { text = systemPrompt } } }
+                        : null;
+
                     var requestBody = new
                     {
+                        system_instruction = systemInstruction,
                         contents = new[] { new { parts = new[] { new { text = prompt } } } },
                         generationConfig = enableThinking ? new { thinking_config = new { include_thoughts = true } } : null
                     };
@@ -302,12 +303,12 @@ public class CustomerHelper
 
     // Cerebras: single request with a specific key
     private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteLlmRequest(
-        string prompt, bool useThinking, string model, string apiKey)
+        string prompt, bool useThinking, string model, string apiKey, string? systemPrompt = null)
     {
         var requestBody = new
         {
             model,
-            messages = new[] { new { role = "user", content = prompt } }
+            messages = BuildOpenAiMessages(systemPrompt, prompt)
         };
 
         var requestJson = JsonConvert.SerializeObject(requestBody);
@@ -333,9 +334,9 @@ public class CustomerHelper
 
     // Groq: single request with a specific key
     private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteGroqRequest(
-        string prompt, bool useThinking, string apiKey)
+        string prompt, bool useThinking, string apiKey, string? systemPrompt = null)
     {
-        var requestBody = new { model = _groqModel, messages = new[] { new { role = "user", content = prompt } } };
+        var requestBody = new { model = _groqModel, messages = BuildOpenAiMessages(systemPrompt, prompt) };
 
         var requestJson = JsonConvert.SerializeObject(requestBody);
         using var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
@@ -360,9 +361,9 @@ public class CustomerHelper
 
     // Mistral: single request with a specific key (OpenAI-compatible)
     private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteMistralRequest(
-        string prompt, bool useThinking, string apiKey)
+        string prompt, bool useThinking, string apiKey, string? systemPrompt = null)
     {
-        var requestBody = new { model = _mistralModel, messages = new[] { new { role = "user", content = prompt } } };
+        var requestBody = new { model = _mistralModel, messages = BuildOpenAiMessages(systemPrompt, prompt) };
 
         var requestJson = JsonConvert.SerializeObject(requestBody);
         using var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
@@ -387,12 +388,12 @@ public class CustomerHelper
 
     // Mistral: try all API keys with key rotation, falls back to Cerebras→Groq cascade
     private async Task<(string Response, string ModelName, string? ThinkingContent)> ExecuteMistralRequestWithKeyRotation(
-        string prompt, bool useThinking)
+        string prompt, bool useThinking, string? systemPrompt = null)
     {
         if (!_mistralApiKeys.Any())
         {
             _logger.LogWarning("Mistral API keys not configured. Falling back to {Provider}.", _llmProvider);
-            return await ExecuteLlmRequestWithKeyRotation(prompt, useThinking);
+            return await ExecuteLlmRequestWithKeyRotation(prompt, useThinking, systemPrompt: systemPrompt);
         }
 
         for (int i = 0; i < _mistralApiKeys.Count; i++)
@@ -402,7 +403,7 @@ public class CustomerHelper
 
             try
             {
-                var result = await ExecuteMistralRequest(prompt, useThinking, currentKey);
+                var result = await ExecuteMistralRequest(prompt, useThinking, currentKey, systemPrompt);
                 Interlocked.Exchange(ref _currentMistralKeyIndex, keyIndex);
                 return result;
             }
@@ -415,7 +416,7 @@ public class CustomerHelper
 
         // All Mistral keys exhausted, fall back to Cerebras→Groq cascade
         _logger.LogWarning("All Mistral API keys exhausted. Falling back to {Provider}...", _llmProvider);
-        return await ExecuteLlmRequestWithKeyRotation(prompt, useThinking);
+        return await ExecuteLlmRequestWithKeyRotation(prompt, useThinking, systemPrompt: systemPrompt);
     }
 
     private string ExtractTextFromOpenAIResponse(string json, out string? reasoning)
