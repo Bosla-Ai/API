@@ -222,6 +222,11 @@ public class CustomerService(
         var minWordThreshold = options.CurrentValue.Llm.MinimalInputWordThreshold;
         var skipIntentDetection = wordCount < minWordThreshold;
         var roadmapFlowState = await GetRoadmapFlowStateAsync(userId, actualSessionId);
+        if (roadmapFlowState == RoadmapIntentHelper.RoadmapStateCompleted)
+        {
+            await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
+            roadmapFlowState = RoadmapIntentHelper.RoadmapStateIdle;
+        }
         var hasPendingRoadmapConfirmation = roadmapFlowState == RoadmapIntentHelper.RoadmapStatePendingConfirmation;
         var hasAskedDiscovery = roadmapFlowState == RoadmapIntentHelper.RoadmapStateDiscoveryAsked;
 
@@ -927,6 +932,11 @@ public class CustomerService(
             var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, questions) = await DetectIntentAsync(query, conversationContextText, profileSummary);
 
             var roadmapFlowState = await GetRoadmapFlowStateAsync(userId, actualSessionId);
+            if (roadmapFlowState == RoadmapIntentHelper.RoadmapStateCompleted)
+            {
+                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
+                roadmapFlowState = RoadmapIntentHelper.RoadmapStateIdle;
+            }
             var hasPendingRoadmapConfirmation = roadmapFlowState == RoadmapIntentHelper.RoadmapStatePendingConfirmation;
             var hasAskedDiscovery = roadmapFlowState == RoadmapIntentHelper.RoadmapStateDiscoveryAsked;
 
