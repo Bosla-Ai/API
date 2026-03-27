@@ -142,7 +142,7 @@ public static class SkillDictionary
                 if (results.ContainsKey(skill))
                     continue;
 
-                bool matched = skill.Length <= 2
+                bool matched = skill.Length <= 2 && skill.All(char.IsLetterOrDigit)
                     ? Regex.IsMatch(description, @$"\b{Regex.Escape(skill)}\b", RegexOptions.IgnoreCase)
                     : description.Contains(skill, StringComparison.OrdinalIgnoreCase);
 

@@ -32,4 +32,15 @@ public class SkillDictionaryTests
         Assert.True(result.ContainsKey("React"));
         Assert.True(result.ContainsKey("TypeScript"));
     }
+
+    [Theory]
+    [InlineData("I want to learn C# development", true)]
+    [InlineData("C# and .NET Core backend", true)]
+    [InlineData("learn C++ for game dev", true)]
+    public void ExtractSkills_SymbolSkills_FallBackToContains(string input, bool expected)
+    {
+        var result = SkillDictionary.ExtractSkills(input);
+        var skill = input.Contains("C#") ? "C#" : "C++";
+        Assert.Equal(expected, result.ContainsKey(skill));
+    }
 }
