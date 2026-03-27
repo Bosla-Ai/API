@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Service.Helpers;
 
 public static class SkillDictionary
@@ -140,7 +142,11 @@ public static class SkillDictionary
                 if (results.ContainsKey(skill))
                     continue;
 
-                if (description.Contains(skill, StringComparison.OrdinalIgnoreCase))
+                bool matched = skill.Length <= 2
+                    ? Regex.IsMatch(description, @$"\b{Regex.Escape(skill)}\b", RegexOptions.IgnoreCase)
+                    : description.Contains(skill, StringComparison.OrdinalIgnoreCase);
+
+                if (matched)
                 {
                     results[skill] = category;
                 }
