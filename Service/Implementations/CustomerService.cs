@@ -373,8 +373,7 @@ public class CustomerService(
             string thinkingLog = "";
             bool titleExtracted = false;
 
-            // Stream intent detection — internal task, uses intent model directly
-            await foreach (var chunk in customerHelper.SendStreamRequestWithModel(detectionPrompt, options.CurrentValue.Llm.Model, useThinking: true, cancellationToken: cancellationToken, userId: userId, isSuperAdmin: IsSuperAdmin(), systemPrompt: systemPrompt))
+            await foreach (var chunk in customerHelper.SendStreamRequestByTask(detectionPrompt, LLMInteractionType.ChatWithAI, useThinking: true, cancellationToken: cancellationToken, userId: userId, isSuperAdmin: IsSuperAdmin(), chatMode: chatMode, systemPrompt: systemPrompt))
             {
                 if (chunk.StartsWith("__FALLBACK__:"))
                 {
@@ -1074,9 +1073,9 @@ public class CustomerService(
 
         try
         {
-            var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestWithModel(
-                detectionPrompt, options.CurrentValue.Llm.Model, useThinking: true,
-                systemPrompt: intentSystemPrompt);
+            var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestByTask(
+                detectionPrompt, LLMInteractionType.ChatWithAI, useThinking: true,
+                chatMode: chatMode, systemPrompt: intentSystemPrompt);
             var parsed = ParseCombinedResponse(responseText);
             if (parsed.HasValue)
                 return (parsed.Value.intent, parsed.Value.confidence, parsed.Value.response, parsed.Value.toolArguments, modelName, thinkingContent, parsed.Value.targetRole, parsed.Value.followUpSuggestions, parsed.Value.videoUrl, parsed.Value.videoSearchQuery, parsed.Value.questions);
