@@ -86,10 +86,7 @@ public class CustomerService(
 
         var actualSessionId = !string.IsNullOrEmpty(sessionId) ? sessionId : GenerateSessionId(userId);
 
-        // ── Change F: Parse & strip [Active Mode: X] prefix ──
-        // The frontend prepends "[Active Mode: Roadmap Builder]\n" etc.
-        // Extract the mode name for intent routing, then strip it from the query
-        // so it doesn't pollute conversation context or LLM prompts.
+        // Strip [Active Mode: X] prefix sent by the frontend; extract mode for intent routing.
         string? uiSelectedMode = null;
         var modeMatch = System.Text.RegularExpressions.Regex.Match(query, @"^\[Active Mode:\s*(.+?)\]\s*\n?");
         if (modeMatch.Success)
@@ -226,10 +223,7 @@ public class CustomerService(
             }
         }
 
-        // ── Minimal input guard ──
-        // Very short queries (e.g., "hi", "hello") crash some LLM providers during intent detection.
-        // Skip the expensive intent detection and route directly to ChatWithAI.
-        // Note: [Active Mode: X] prefix is already stripped above (Change F).
+        // Skip intent detection for very short inputs to avoid LLM provider errors.
         var wordCount = query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
         var minWordThreshold = options.CurrentValue.Llm.MinimalInputWordThreshold;
         var skipIntentDetection = wordCount < minWordThreshold;
@@ -261,8 +255,7 @@ public class CustomerService(
             await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
         }
 
-        // A short confirmation answer ("yes", "نعم") should still execute roadmap flow
-        // when the current session is already in roadmap context.
+        // Short confirmations ("yes", "نعم") must still execute roadmap flow.
         if (skipIntentDetection && (roadmapConfirmationReply || roadmapRefinementReply))
         {
             skipIntentDetection = false;
@@ -275,7 +268,6 @@ public class CustomerService(
         string? modeClassificationError = null;
         UserProfileEntity? userProfile = null;
 
-        // Fetch user profile from Cosmos DB for personalization
         try
         {
             userProfile = await userProfileRepository.GetByUserIdAsync(userId);
@@ -285,7 +277,6 @@ public class CustomerService(
             _logger.LogWarning(ex, "Failed to fetch user profile for {UserId}, continuing without profile", userId);
         }
 
-        // Generate profile summary for prompts
         var profileSummary = userProfile?.ToPromptSummary() ?? "No profile data yet";
         var hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
 
@@ -296,25 +287,21 @@ public class CustomerService(
             // Get session message count for context
             sessionMessageCount = await conversationContextManager.GetMessageCountAsync(userId, actualSessionId);
 
-            // Check if profile is complete (has target role or interests)
             var profileComplete = userProfile != null
                 && (!string.IsNullOrEmpty(userProfile.TargetRole) || userProfile.Interests?.Count > 0);
 
-            // Apply new-session bias: lean toward FRIEND mode for new sessions with incomplete profiles
+            // New sessions with incomplete profiles lean toward FRIEND mode.
             var applyFriendBias = sessionMessageCount < sessionMessageThreshold && !profileComplete;
 
-            // Classify mode (wrapped to avoid yield in try-catch)
             (classifiedMode, modeClassificationError) = await ClassifyModeWithFallbackAsync(
                 customerHelper, query, sessionMessageCount, profileComplete, applyFriendBias, _logger);
         }
 
-        // Emit mode classification result
         if (sessionMessageCount > 0)
         {
             yield return FormatSse("mode", new { classified = classifiedMode, sessionMessages = sessionMessageCount });
         }
 
-        // Emit profile info if available
         if (userProfile != null)
         {
             yield return FormatSse("profile", new
@@ -328,8 +315,7 @@ public class CustomerService(
 
 
         // ── Change F (continued): UI mode override routing ──
-        // When the frontend sends a specific mode selection, override the LLM mode classification.
-        // Intent detection still runs so the LLM can generate tags/response, but routing is forced.
+        // Map UI mode selection to forced intent; intent detection still runs for tags/response.
         LLMInteractionType? uiForcedIntent = null;
         string? canonicalUiMode = null;
         if (!string.IsNullOrEmpty(uiSelectedMode))
@@ -340,8 +326,7 @@ public class CustomerService(
                 uiForcedIntent = LLMInteractionType.RoadmapGeneration;
                 canonicalUiMode = "Roadmap Builder";
                 classifiedMode = "ACTION";
-                // Only re-enable intent detection when input is long enough — preserve short-input guard
-                if (wordCount >= minWordThreshold) skipIntentDetection = false;
+                if (wordCount >= minWordThreshold) skipIntentDetection = false; // preserve short-input guard
                 explicitRoadmapRequest = true;
                 _logger.LogDebug("UI mode override: Roadmap Builder → forcing RoadmapGeneration intent");
             }
@@ -402,15 +387,10 @@ public class CustomerService(
                 "No real-time market data available. Use your knowledge of current labor market trends.");
         }
 
-        // ── Change B: Inject dynamic profile gap instruction ──
-        // When the user has an active roadmap flow AND their profile is missing critical fields,
-        // append a dynamic instruction telling the LLM exactly what data to ask for.
-        // This lets the LLM formulate natural, conversational questions instead of hardcoded ones.
+        // Inject UI mode context using canonical server-side label (prevents prompt injection).
         var missingProfileFields = GetMissingProfileFields(userProfile);
         var discoveryAttemptCount = 0;
 
-        // ── Fix 2: Inject UI mode hint so LLM generates appropriate response/tags ──
-        // Use the server-side canonical label (not raw user input) to prevent prompt injection.
         if (!string.IsNullOrEmpty(canonicalUiMode))
         {
             systemPrompt += $"\n\nUI MODE CONTEXT: The user has explicitly selected \"{canonicalUiMode}\" mode. " +
@@ -589,11 +569,7 @@ public class CustomerService(
             targetRole,
         });
 
-        // ── Bug 2 fix: explicit UI mode selection must win over stale DB roadmap state ──
-        // roadmapStateFollowUp is computed from the DB state BEFORE uiForcedIntent is known.
-        // If the user switched to a different mode (CV Analyzer, Career Coach), the stale
-        // discovery_asked/pending_confirmation state must not hijack the new intent.
-        // Clear the DB state to idle so it doesn't contaminate the next turn either.
+        // Explicit UI mode wins over stale roadmap DB state; reset to idle to avoid next-turn contamination.
         var uiOverridesRoadmapState = uiForcedIntent.HasValue
             && uiForcedIntent.Value != LLMInteractionType.RoadmapGeneration;
 
@@ -619,17 +595,12 @@ public class CustomerService(
             toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(query, conversationContextText);
         }
 
-        // ── Changes A+B: Rewritten state machine with profile-aware gating ──
-        // The old logic used a one-shot `!hasAskedDiscovery` gate that allowed the pipeline
-        // to execute with an incomplete profile after a single failed discovery attempt.
-        // New logic: ALWAYS check profile sufficiency. If profile is still missing critical
-        // fields after discovery, re-ask (up to 2 attempts). Let the LLM formulate questions.
+        // Requires confirmed profile before proceeding; re-asks discovery if fields are still missing.
         var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
             && !roadmapConfirmationReply
             && !roadmapRefinementReply;
 
-        // Re-fetch profile to capture any fields parsed from this turn's message
-        // (TryPersistProfileFromLatestMessageAsync ran at line 108 before profile fetch at line 291)
+        // Re-fetch to pick up fields persisted by TryPersistProfileFromLatestMessageAsync this turn.
         if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile)
         {
             try
@@ -650,9 +621,7 @@ public class CustomerService(
 
         if (roadmapNeedsConfirmation)
         {
-            // Profile incomplete → always ask discovery questions regardless of cap.
-            // The cap only prevents sending the exact same intake question set repeatedly;
-            // it NEVER allows progression to confirmation with a missing profile.
+            // Profile gate: incomplete profile always asks discovery; cap only governs question reuse.
             if (!hasSufficientRoadmapProfile)
             {
                 var discoveryQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions) && discoveryAttemptCount < 2)
@@ -708,8 +677,7 @@ public class CustomerService(
             yield break;
         }
 
-        // ── Change A: Pre-pipeline profile re-validation safety net ──
-        // hasSufficientRoadmapProfile is the sole gate — never allow pipeline with incomplete profile.
+        // Safety net: incomplete profile must never reach the pipeline.
         if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile)
         {
             _logger.LogInformation("Pre-pipeline safety net: profile still incomplete for {UserId}, re-entering discovery", userId);
@@ -985,11 +953,7 @@ public class CustomerService(
 
                 yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "end", summary = "Roadmap generated" });
 
-                // ── Change C: Suppress stale aiResponse when forceRoadmapFlow overrode intent ──
-                // When the C# state machine forces roadmap execution (via confirmation/refinement reply),
-                // the LLM's aiResponse was generated BEFORE the pipeline decision and may contain
-                // contradictory text like "let me gather more info". Only emit aiResponse when it
-                // came from a genuine LLM intent detection that also chose RoadmapGeneration.
+                // Suppress pre-decision aiResponse when forceRoadmapFlow overrode intent.
                 if (!string.IsNullOrEmpty(aiResponse) && !forceRoadmapFlow)
                 {
                     yield return FormatSse("text", new { delta = aiResponse });
@@ -1025,7 +989,6 @@ public class CustomerService(
         if (options.CurrentValue.Llm.EnableBackgroundProfileExtraction
             && (classifiedMode == "FRIEND" || interactionType == LLMInteractionType.RoadmapGeneration))
         {
-            // Capture dependencies for closure (avoid capturing 'this' for fire-and-forget)
             var capturedUserId = userId;
             var capturedSessionId = actualSessionId;
             var capturedContextManager = conversationContextManager;
@@ -1033,8 +996,7 @@ public class CustomerService(
             var capturedProfileRepo = userProfileRepository;
             var capturedLogger = _logger;
 
-            // Fire-and-forget profile extraction (don't block response)
-            _ = Task.Run(async () =>
+            _ = Task.Run(async () => // fire-and-forget; don't capture 'this'
             {
                 try
                 {
@@ -1075,7 +1037,7 @@ public class CustomerService(
         {
             var actualSessionId = !string.IsNullOrEmpty(sessionId) ? sessionId : GenerateSessionId(userId);
 
-            // ── Change F: Strip [Active Mode: X] prefix in non-streaming path too ──
+            // Strip [Active Mode: X] prefix; extract mode for intent routing.
             string? uiSelectedMode = null;
             LLMInteractionType? uiForcedIntent = null;
             var nonStreamModeMatch = System.Text.RegularExpressions.Regex.Match(query, @"^\[Active Mode:\s*(.+?)\]\s*\n?");
@@ -1118,7 +1080,6 @@ public class CustomerService(
 
             var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, questions) = await DetectIntentAsync(query, conversationContextText, profileSummary);
 
-            // Apply UI forced intent override
             if (uiForcedIntent.HasValue && interactionType != uiForcedIntent.Value)
             {
                 _logger.LogDebug("Overriding LLM intent {LlmIntent} → {ForcedIntent} from UI mode selection",
@@ -1150,7 +1111,7 @@ public class CustomerService(
                 && !roadmapConfirmationReply
                 && await IsRoadmapRefinementSemanticAsync(query, conversationContextText, CancellationToken.None);
 
-            // ── Bug 2 fix (non-streaming mirror): explicit UI mode wins over stale roadmap state ──
+            // Explicit UI mode wins over stale roadmap state; reset to idle.
             var uiOverridesRoadmapState = uiForcedIntent.HasValue
                 && uiForcedIntent.Value != LLMInteractionType.RoadmapGeneration;
 
@@ -1185,15 +1146,11 @@ public class CustomerService(
                 && !roadmapConfirmationReply
                 && !roadmapRefinementReply;
 
-            // ── Changes A+B (non-streaming mirror): Profile-aware gating ──
-            // Same logic as streaming path — removed one-shot hasAskedDiscovery guard,
-            // added discovery retry cap, profile re-validation.
             var discoveryAttempts = await GetDiscoveryAttemptCountAsync(userId, actualSessionId);
 
             if (roadmapNeedsConfirmation)
             {
-                // hasSufficientRoadmapProfile is the sole gate for confirmation.
-                // The cap only governs which question set to reuse — never allows bypassing profile check.
+                // Profile gate: incomplete profile asks discovery; cap only governs question reuse.
                 if (!hasSufficientRoadmapProfile)
                 {
                     var responseMessage = !string.IsNullOrEmpty(aiResponse)
@@ -1251,8 +1208,7 @@ public class CustomerService(
                 };
             }
 
-            // ── Change A (non-streaming mirror): Pre-pipeline profile re-validation ──
-            // hasSufficientRoadmapProfile is the sole gate — never allow pipeline with incomplete profile.
+            // Safety net: incomplete profile must never reach the pipeline.
             if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile)
             {
                 var safetyMessage = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
@@ -1281,7 +1237,7 @@ public class CustomerService(
             {
                 toolArguments.JobId = Guid.NewGuid().ToString("N")[..12];
                 var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments);
-                // ── Change C (non-streaming mirror): Suppress stale aiResponse when forceRoadmapFlow overrode intent ──
+                // Suppress pre-decision aiResponse when forceRoadmapFlow overrode intent.
                 if (forceRoadmapFlow)
                 {
                     aiResponse = "Roadmap generated successfully.";
@@ -1980,16 +1936,11 @@ Latest user message:
             "state");
     }
 
-    /// <summary>
-    /// Count how many times the system has entered discovery_asked state in the CURRENT roadmap cycle.
-    /// A new cycle begins after the most recent idle or completed state.
-    /// This prevents a long-lived session's historical discovery attempts from capping a fresh roadmap request.
-    /// </summary>
+    // Counts discovery_asked states only within the current cycle (since last idle/completed).
     private async Task<int> GetDiscoveryAttemptCountAsync(string userId, string sessionId)
     {
         var messages = await chatRepository.GetMessagesAsync(userId, sessionId, 50);
-        // GetMessagesAsync returns newest-first; sort ascending so index order = chronological order.
-        var messageList = messages.OrderBy(m => m.CreatedAt).ToList();
+        var messageList = messages.OrderBy(m => m.CreatedAt).ToList(); // ascending = chronological
 
         var lastCycleResetIndex = -1;
         for (var i = messageList.Count - 1; i >= 0; i--)
@@ -2011,11 +1962,6 @@ Latest user message:
                 && m.Message?.Contains(RoadmapIntentHelper.RoadmapStateDiscoveryAsked, StringComparison.OrdinalIgnoreCase) == true);
     }
 
-    /// <summary>
-    /// Returns a human-readable list of missing profile fields required for roadmap generation.
-    /// Used to inject dynamic instructions into the LLM system prompt so it can ask
-    /// natural, conversational questions about the specific missing data.
-    /// </summary>
     private static List<string> GetMissingProfileFields(UserProfileEntity? userProfile)
     {
         var missing = new List<string>();
@@ -2077,16 +2023,14 @@ Latest user message:
 
         foreach (var line in lines)
         {
-            // Handle both "label: answer" and "Question text?: answer" formats.
-            // The frontend AskUserBlock formats answers as "Question text?: Answer"
-            // so we check for "?:" first, then fall back to plain ":".
+            // Supports "label: answer" and "Question?: answer" (AskUserBlock format).
             int separatorIdx;
             int answerStart;
             var qColonIdx = line.IndexOf("?: ", StringComparison.Ordinal);
             if (qColonIdx > 0)
             {
                 separatorIdx = qColonIdx;
-                answerStart = qColonIdx + 3; // skip "?: "
+                answerStart = qColonIdx + 3;
             }
             else
             {
@@ -2102,9 +2046,6 @@ Latest user message:
             if (string.IsNullOrWhiteSpace(answer))
                 continue;
 
-            // Enhanced keyword matching to handle LLM-generated question phrasing.
-            // The LLM may ask "What is your programming background?" or "How experienced are you?"
-            // instead of the hardcoded "What is your current experience level?" pattern.
             if (ContainsAny(label, "experience", "level", "background", "skill level", "proficiency",
                 "roadmap_experience", "how far along", "where are you",
                 "مستواك", "خبر", "مستوى", "مستواك الحالي"))
@@ -2142,8 +2083,7 @@ Latest user message:
 
                 profile.Interests!.AddRange(interests);
 
-                // Only promote to TargetRole if the answer looks like a job role, not a topic.
-                // Prevents "Algorithms" or "System Design" from satisfying HasSufficientRoadmapProfile.
+                // Only promote single-value focus answers to TargetRole if they look like a role.
                 if (string.IsNullOrWhiteSpace(profile.TargetRole)
                     && interests.Count == 1
                     && LooksLikeRole(interests[0]))
