@@ -348,8 +348,6 @@ public class CustomerService(
 
             yield return FormatSse("mode", new { classified = classifiedMode, uiOverride = canonicalUiMode ?? uiSelectedMode });
 
-            // Issue 2 fix: when the UI switches away from Roadmap, immediately clear the stale
-            // in-memory flags so downstream prompt injection and flow guards don't fire.
             if (uiForcedIntent.HasValue && uiForcedIntent.Value != LLMInteractionType.RoadmapGeneration)
             {
                 hasAskedDiscovery = false;
@@ -1138,7 +1136,6 @@ public class CustomerService(
                     uiForcedIntent, roadmapFlowState, userId);
                 await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
 
-                // Issue 2 fix: clear in-memory flags so downstream guards don't use stale state
                 hasAskedDiscovery = false;
                 hasPendingRoadmapConfirmation = false;
                 roadmapStateFollowUp = false;
@@ -1601,10 +1598,6 @@ public class CustomerService(
         var isArabic = ContainsArabic(query) || ContainsArabic(conversationContext);
         var casualTone = LooksCasualTone(query);
 
-        // Strict DB-only checks: only skip a question if the field is actually persisted.
-        // Context heuristics were causing false positives — e.g. "SWE" in the query satisfied
-        // hasTargetRole via context keywords, making the function generate the generic
-        // roadmap_focus fallback whose answer was never mapped back to TargetRole/ExperienceLevel.
         var hasExperience = !string.IsNullOrWhiteSpace(userProfile?.ExperienceLevel);
         var hasTargetRole = !string.IsNullOrWhiteSpace(userProfile?.TargetRole);
 
@@ -1661,10 +1654,6 @@ public class CustomerService(
 
         if (questions.Count == 0)
         {
-            // All required fields are present — ask experience level as a tie-breaker so the
-            // profile gate (which requires ExperienceLevel) can always be satisfied. This
-            // replaces the old "roadmap_focus" fallback whose answer was never parsed back into
-            // the profile and caused an infinite re-ask loop.
             questions.Add(new AskUserQuestion
             {
                 Id = "roadmap_experience",
@@ -2139,8 +2128,6 @@ Latest user message:
             return profile;
         }
 
-        // Handle bare checkbox answers sent by the UI widget (no label prefix).
-        // These are single-line responses matching known option values exactly.
         var trimmed = query.Trim();
         var trimmedLower = trimmed.ToLowerInvariant();
         if (ContainsAny(trimmedLower, "beginner", "intermediate", "advanced",
@@ -2150,7 +2137,6 @@ Latest user message:
             return profile;
         }
 
-        // Bare paid/free budget answer from checkbox widget
         if (ContainsAny(trimmedLower, "paid is okay", "free only", "المدفوع مناسب", "مجاني فقط"))
         {
             profile.Constraints!.Add(trimmed);
