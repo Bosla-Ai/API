@@ -1510,13 +1510,13 @@ public class CustomerHelper
         }
 
         var prompt = string.Format(template, EscapeBraces(conversationHistory));
-        _logger.LogInformation("Profile Extraction Prompt: {Prompt}", prompt);
+        _logger.LogDebug("Running profile extraction for {ConversationLength} chars", conversationHistory.Length);
 
         try
         {
             var (response, _, _) = await SendRequestWithModel(prompt, _chatModel, useThinking: false);
 
-            _logger.LogInformation("Profile Extraction Raw Response: {Response}", response);
+            _logger.LogDebug("Profile extraction returned {ResponseLength} chars", response.Length);
 
             var cleanJson = response.Trim();
             if (cleanJson.StartsWith("```"))
@@ -1525,7 +1525,11 @@ public class CustomerHelper
             }
 
             var result = JsonConvert.DeserializeObject<UserProfileExtraction>(cleanJson);
-            _logger.LogInformation("Profile Extraction Deserialized: {Result}", JsonConvert.SerializeObject(result));
+            _logger.LogDebug(
+                "Profile extraction parsed. HasInterests={HasInterests}, HasExperience={HasExperience}, HasTargetRole={HasTargetRole}",
+                result?.Interests?.Count > 0,
+                !string.IsNullOrWhiteSpace(result?.ExperienceLevel),
+                !string.IsNullOrWhiteSpace(result?.TargetRole));
             return result;
         }
         catch (OperationCanceledException) { throw; }

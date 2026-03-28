@@ -56,7 +56,7 @@ public class RoadmapGeneratorController(
                      ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         if (string.IsNullOrEmpty(userId))
-            return Unauthorized("User ID not found in token.");
+            return Unauthorized("User ID claim not found");
 
         var success = await serviceManager.Roadmap.SaveRoadmapAsync(userId, request);
 
@@ -71,7 +71,7 @@ public class RoadmapGeneratorController(
                      ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         if (string.IsNullOrEmpty(userId))
-            return Unauthorized("User ID not found in token.");
+            return Unauthorized("User ID claim not found");
 
         var result = await serviceManager.Roadmap.GetAllUserRoadmapsAsync(userId);
         return Ok(result);
@@ -85,7 +85,7 @@ public class RoadmapGeneratorController(
                      ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         if (string.IsNullOrEmpty(userId))
-            return Unauthorized("User ID not found in token.");
+            return Unauthorized("User ID claim not found");
 
         var result = await serviceManager.Roadmap.GetRoadmapDetailsAsync(id, userId);
         return Ok(result);
