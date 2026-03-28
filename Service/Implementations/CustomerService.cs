@@ -402,6 +402,16 @@ public class CustomerService(
         // This lets the LLM formulate natural, conversational questions instead of hardcoded ones.
         var missingProfileFields = GetMissingProfileFields(userProfile);
         var discoveryAttemptCount = 0;
+
+        // ── Fix 2: Inject UI mode hint so LLM generates appropriate response/tags ──
+        // Even when profile is complete, the LLM needs to know the user's selected mode
+        // so it generates roadmap-relevant content rather than generic chat responses.
+        if (!string.IsNullOrEmpty(uiSelectedMode))
+        {
+            systemPrompt += $"\n\nUI MODE CONTEXT: The user has explicitly selected \"{uiSelectedMode}\" mode. " +
+                $"Generate your response, questions, and tags appropriate for this mode.";
+        }
+
         if (missingProfileFields.Count > 0
             && (hasAskedDiscovery || hasPendingRoadmapConfirmation || explicitRoadmapRequest
                 || (uiForcedIntent == LLMInteractionType.RoadmapGeneration)))
@@ -618,14 +628,12 @@ public class CustomerService(
 
         if (roadmapNeedsConfirmation)
         {
-            // Profile is incomplete → ask LLM-driven discovery questions
-            // Removed the old `!hasAskedDiscovery` one-shot guard.
-            // Now capped at 2 discovery attempts to prevent infinite loops.
-            if (!hasSufficientRoadmapProfile && discoveryAttemptCount < 2)
+            // Profile incomplete → always ask discovery questions regardless of cap.
+            // The cap only prevents sending the exact same intake question set repeatedly;
+            // it NEVER allows progression to confirmation with a missing profile.
+            if (!hasSufficientRoadmapProfile)
             {
-                // Prefer LLM-generated questions if they look like intake questions,
-                // otherwise fall back to BuildRoadmapDiscoveryQuestions as a safety net.
-                var discoveryQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions))
+                var discoveryQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions) && discoveryAttemptCount < 2)
                     ? questions
                     : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
 
@@ -652,7 +660,7 @@ public class CustomerService(
                 yield break;
             }
 
-            // Profile is sufficient (or max discovery attempts reached) → ask for confirmation
+            // Profile is sufficient → ask for confirmation
             if (!string.IsNullOrEmpty(aiResponse))
                 yield return FormatSse("text", new { delta = aiResponse });
 
@@ -679,12 +687,8 @@ public class CustomerService(
         }
 
         // ── Change A: Pre-pipeline profile re-validation safety net ──
-        // Even when roadmapConfirmationReply/roadmapRefinementReply bypasses the confirmation gate,
-        // verify profile is sufficient before executing the pipeline.
-        // If still incomplete after 2 discovery attempts, proceed anyway with best-effort tags.
-        if (interactionType == LLMInteractionType.RoadmapGeneration
-            && !hasSufficientRoadmapProfile
-            && discoveryAttemptCount < 2)
+        // hasSufficientRoadmapProfile is the sole gate — never allow pipeline with incomplete profile.
+        if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile)
         {
             _logger.LogInformation("Pre-pipeline safety net: profile still incomplete for {UserId}, re-entering discovery", userId);
 
@@ -1070,6 +1074,11 @@ public class CustomerService(
                     uiForcedIntent = LLMInteractionType.CVAnalysis;
                     _logger.LogDebug("UI mode override: CV Analyzer → forcing CVAnalysis intent");
                 }
+                else if (modeLower.Contains("career") || modeLower.Contains("coach"))
+                {
+                    uiForcedIntent = LLMInteractionType.ChatWithAI;
+                    _logger.LogDebug("UI mode override: Career Coach → forcing ChatWithAI intent");
+                }
             }
 
             await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, query, "user");
@@ -1147,26 +1156,48 @@ public class CustomerService(
 
             if (roadmapNeedsConfirmation)
             {
-                // Profile incomplete + under retry cap → ask discovery questions
-                var shouldAskDiscovery = !hasSufficientRoadmapProfile && discoveryAttempts < 2;
-                var responseMessage = !string.IsNullOrEmpty(aiResponse)
-                    ? aiResponse
-                    : shouldAskDiscovery
-                        ? "Before I generate a personalized roadmap, I need a bit more about your background and goals."
-                        : "I can generate your roadmap. Please confirm to continue.";
+                // hasSufficientRoadmapProfile is the sole gate for confirmation.
+                // The cap only governs which question set to reuse — never allows bypassing profile check.
+                if (!hasSufficientRoadmapProfile)
+                {
+                    var responseMessage = !string.IsNullOrEmpty(aiResponse)
+                        ? aiResponse
+                        : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
 
-                var responseQuestions = shouldAskDiscovery
-                    ? (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions)
+                    var responseQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions) && discoveryAttempts < 2)
                         ? questions
-                        : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText))
+                        : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+
+                    await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, responseMessage, "assistant");
+                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+
+                    return new APIResponse<AiIntentDetectionResponse>()
+                    {
+                        StatusCode = HttpStatusCode.OK,
+                        Data = new AiIntentDetectionResponse
+                        {
+                            InteractionType = LLMInteractionType.RoadmapGeneration,
+                            Confidence = confidence,
+                            Success = true,
+                            Answer = responseMessage,
+                            Thinking = !string.IsNullOrEmpty(thinkingContent),
+                            ThinkingLog = thinkingContent,
+                            Questions = responseQuestions
+                        }
+                    };
+                }
+
+                // Profile is sufficient → ask for confirmation
+                var confirmMessage = !string.IsNullOrEmpty(aiResponse)
+                    ? aiResponse
+                    : "I can generate your roadmap. Please confirm to continue.";
+
+                var confirmQuestions = (questions is { Length: > 0 } && !IsRoadmapIntakeQuestionSet(questions))
+                    ? questions
                     : BuildRoadmapConfirmationQuestions();
 
-                var nextState = shouldAskDiscovery
-                    ? RoadmapIntentHelper.RoadmapStateDiscoveryAsked
-                    : RoadmapIntentHelper.RoadmapStatePendingConfirmation;
-
-                await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, responseMessage, "assistant");
-                await SaveRoadmapFlowStateAsync(userId, actualSessionId, nextState);
+                await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, confirmMessage, "assistant");
+                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
 
                 return new APIResponse<AiIntentDetectionResponse>()
                 {
@@ -1176,18 +1207,17 @@ public class CustomerService(
                         InteractionType = LLMInteractionType.RoadmapGeneration,
                         Confidence = confidence,
                         Success = true,
-                        Answer = responseMessage,
+                        Answer = confirmMessage,
                         Thinking = !string.IsNullOrEmpty(thinkingContent),
                         ThinkingLog = thinkingContent,
-                        Questions = responseQuestions
+                        Questions = confirmQuestions
                     }
                 };
             }
 
             // ── Change A (non-streaming mirror): Pre-pipeline profile re-validation ──
-            if (interactionType == LLMInteractionType.RoadmapGeneration
-                && !hasSufficientRoadmapProfile
-                && discoveryAttempts < 2)
+            // hasSufficientRoadmapProfile is the sole gate — never allow pipeline with incomplete profile.
+            if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile)
             {
                 var safetyMessage = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
                 var safetyQuestions = BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
@@ -1905,15 +1935,33 @@ Latest user message:
     }
 
     /// <summary>
-    /// Count how many times the system has entered discovery_asked state in this session.
-    /// Used to cap discovery retries and avoid infinite loops (max 2 attempts).
+    /// Count how many times the system has entered discovery_asked state in the CURRENT roadmap cycle.
+    /// A new cycle begins after the most recent idle or completed state.
+    /// This prevents a long-lived session's historical discovery attempts from capping a fresh roadmap request.
     /// </summary>
     private async Task<int> GetDiscoveryAttemptCountAsync(string userId, string sessionId)
     {
         var messages = await chatRepository.GetMessagesAsync(userId, sessionId, 50);
-        return messages.Count(m =>
-            m.Role == "state"
-            && m.Message?.Contains(RoadmapIntentHelper.RoadmapStateDiscoveryAsked, StringComparison.OrdinalIgnoreCase) == true);
+        var messageList = messages.ToList();
+
+        var lastCycleResetIndex = -1;
+        for (var i = messageList.Count - 1; i >= 0; i--)
+        {
+            var m = messageList[i];
+            if (m.Role == "state" && m.Message != null &&
+                (m.Message.Contains(RoadmapIntentHelper.RoadmapStateIdle, StringComparison.OrdinalIgnoreCase)
+                 || m.Message.Contains(RoadmapIntentHelper.RoadmapStateCompleted, StringComparison.OrdinalIgnoreCase)))
+            {
+                lastCycleResetIndex = i;
+                break;
+            }
+        }
+
+        return messageList
+            .Skip(lastCycleResetIndex + 1)
+            .Count(m =>
+                m.Role == "state"
+                && m.Message?.Contains(RoadmapIntentHelper.RoadmapStateDiscoveryAsked, StringComparison.OrdinalIgnoreCase) == true);
     }
 
     /// <summary>
