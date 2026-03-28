@@ -618,6 +618,28 @@ public class CustomerService(
         // Re-fetch to pick up fields persisted by TryPersistProfileFromLatestMessageAsync this turn.
         if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile)
         {
+            // When the user is answering discovery questions, run AI-powered profile extraction
+            // synchronously. The static parser may miss free-form answers like "I'm a beginner SWE"
+            // or "target role : swe". The AI extractor understands any format.
+            if (hasAskedDiscovery)
+            {
+                try
+                {
+                    var contextForExtraction = $"{conversationContextText}\n[user]: {query}";
+                    var aiExtracted = await customerHelper.ExtractProfileAsync(contextForExtraction);
+                    if (aiExtracted != null)
+                    {
+                        var aiProfileEntity = UserProfileEntity.FromExtraction(userId, aiExtracted);
+                        await userProfileRepository.UpsertAsync(aiProfileEntity);
+                        _logger.LogDebug("Synchronous AI profile extraction succeeded for {UserId} during discovery", userId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Synchronous AI profile extraction failed for {UserId}, continuing with static extraction", userId);
+                }
+            }
+
             try
             {
                 var refreshedProfile = await userProfileRepository.GetByUserIdAsync(userId);
@@ -1195,6 +1217,43 @@ public class CustomerService(
                 && !roadmapRefinementReply;
 
             var discoveryAttempts = await GetDiscoveryAttemptCountAsync(userId, actualSessionId);
+
+            // When the user is answering discovery questions, run AI-powered profile extraction
+            // synchronously. The static parser may miss free-form answers.
+            if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile && hasAskedDiscovery)
+            {
+                try
+                {
+                    var contextForExtraction = $"{conversationContextText}\n[user]: {query}";
+                    var aiExtracted = await customerHelper.ExtractProfileAsync(contextForExtraction);
+                    if (aiExtracted != null)
+                    {
+                        var aiProfileEntity = UserProfileEntity.FromExtraction(userId, aiExtracted);
+                        await userProfileRepository.UpsertAsync(aiProfileEntity);
+                        _logger.LogDebug("Synchronous AI profile extraction succeeded for {UserId} during discovery (non-streaming)", userId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Synchronous AI profile extraction failed for {UserId} (non-streaming), continuing with static extraction", userId);
+                }
+
+                // Re-fetch to pick up newly extracted profile data
+                try
+                {
+                    var refreshedProfile = await userProfileRepository.GetByUserIdAsync(userId);
+                    if (refreshedProfile != null)
+                    {
+                        userProfile = refreshedProfile;
+                        hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
+                        profileSummary = userProfile.ToPromptSummary();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to re-fetch profile during roadmap discovery for {UserId}", userId);
+                }
+            }
 
             if (roadmapNeedsConfirmation)
             {
