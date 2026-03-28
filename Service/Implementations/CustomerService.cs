@@ -96,7 +96,7 @@ public class CustomerService(
         {
             uiSelectedMode = modeMatch.Groups[1].Value.Trim();
             query = query[modeMatch.Length..].TrimStart();
-            _logger.LogDebug("UI mode override detected: {Mode}, cleaned query: {Query}", uiSelectedMode, query);
+            _logger.LogDebug("UI mode override detected: {Mode}", uiSelectedMode);
         }
 
         var pendingSseEvents = new ConcurrentQueue<string>();
@@ -656,7 +656,7 @@ public class CustomerService(
             if (!string.IsNullOrEmpty(aiResponse))
                 yield return FormatSse("text", new { delta = aiResponse });
 
-            var confirmQuestions = (questions is { Length: > 0 })
+            var confirmQuestions = (questions is { Length: > 0 } && !IsRoadmapIntakeQuestionSet(questions))
                 ? questions
                 : BuildRoadmapConfirmationQuestions();
 
@@ -1050,10 +1050,26 @@ public class CustomerService(
             var actualSessionId = !string.IsNullOrEmpty(sessionId) ? sessionId : GenerateSessionId(userId);
 
             // ── Change F: Strip [Active Mode: X] prefix in non-streaming path too ──
+            string? uiSelectedMode = null;
+            LLMInteractionType? uiForcedIntent = null;
             var nonStreamModeMatch = System.Text.RegularExpressions.Regex.Match(query, @"^\[Active Mode:\s*(.+?)\]\s*\n?");
             if (nonStreamModeMatch.Success)
             {
+                uiSelectedMode = nonStreamModeMatch.Groups[1].Value.Trim();
                 query = query[nonStreamModeMatch.Length..].TrimStart();
+                _logger.LogDebug("UI mode override detected in non-streaming: {Mode}", uiSelectedMode);
+
+                var modeLower = uiSelectedMode.ToLowerInvariant();
+                if (modeLower.Contains("roadmap"))
+                {
+                    uiForcedIntent = LLMInteractionType.RoadmapGeneration;
+                    _logger.LogDebug("UI mode override: Roadmap Builder → forcing RoadmapGeneration intent");
+                }
+                else if (modeLower.Contains("cv") || modeLower.Contains("resume"))
+                {
+                    uiForcedIntent = LLMInteractionType.CVAnalysis;
+                    _logger.LogDebug("UI mode override: CV Analyzer → forcing CVAnalysis intent");
+                }
             }
 
             await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, query, "user");
@@ -1070,6 +1086,15 @@ public class CustomerService(
             var hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
 
             var (interactionType, confidence, aiResponse, toolArguments, _, thinkingContent, _, _, videoUrl, videoSearchQuery, questions) = await DetectIntentAsync(query, conversationContextText, profileSummary);
+
+            // Apply UI forced intent override
+            if (uiForcedIntent.HasValue && interactionType != uiForcedIntent.Value)
+            {
+                _logger.LogDebug("Overriding LLM intent {LlmIntent} → {ForcedIntent} from UI mode selection",
+                    interactionType, uiForcedIntent.Value);
+                interactionType = uiForcedIntent.Value;
+                confidence = Math.Max(confidence, 80);
+            }
 
             var roadmapFlowState = await GetRoadmapFlowStateAsync(userId, actualSessionId);
             if (roadmapFlowState == RoadmapIntentHelper.RoadmapStateCompleted)
@@ -1190,9 +1215,17 @@ public class CustomerService(
             {
                 toolArguments.JobId = Guid.NewGuid().ToString("N")[..12];
                 var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments);
-                aiResponse = string.IsNullOrEmpty(aiResponse)
-                    ? "Roadmap generated successfully."
-                    : $"{aiResponse}\n\nRoadmap generated successfully.";
+                // ── Change C (non-streaming mirror): Suppress stale aiResponse when forceRoadmapFlow overrode intent ──
+                if (forceRoadmapFlow)
+                {
+                    aiResponse = "Roadmap generated successfully.";
+                }
+                else
+                {
+                    aiResponse = string.IsNullOrEmpty(aiResponse)
+                        ? "Roadmap generated successfully."
+                        : $"{aiResponse}\n\nRoadmap generated successfully.";
+                }
 
                 await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateCompleted);
             }
