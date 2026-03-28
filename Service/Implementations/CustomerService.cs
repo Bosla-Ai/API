@@ -341,8 +341,7 @@ public class CustomerService(
                 canonicalUiMode = "Roadmap Builder";
                 classifiedMode = "ACTION";
                 // Only re-enable intent detection when input is long enough — preserve short-input guard
-                if (!skipIntentDetection) skipIntentDetection = false;
-                else if (wordCount >= minWordThreshold) skipIntentDetection = false;
+                if (wordCount >= minWordThreshold) skipIntentDetection = false;
                 explicitRoadmapRequest = true;
                 _logger.LogDebug("UI mode override: Roadmap Builder → forcing RoadmapGeneration intent");
             }
