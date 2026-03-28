@@ -347,6 +347,15 @@ public class CustomerService(
             }
 
             yield return FormatSse("mode", new { classified = classifiedMode, uiOverride = canonicalUiMode ?? uiSelectedMode });
+
+            // Issue 2 fix: when the UI switches away from Roadmap, immediately clear the stale
+            // in-memory flags so downstream prompt injection and flow guards don't fire.
+            if (uiForcedIntent.HasValue && uiForcedIntent.Value != LLMInteractionType.RoadmapGeneration)
+            {
+                hasAskedDiscovery = false;
+                hasPendingRoadmapConfirmation = false;
+                roadmapStateFollowUp = false;
+            }
         }
 
         // FRIEND mode: Skip intent detection, go directly to warm chat
@@ -397,7 +406,11 @@ public class CustomerService(
                 $"Generate your response, questions, and tags appropriate for this mode.";
         }
 
+        var isNonRoadmapUiOverride = uiForcedIntent.HasValue
+            && uiForcedIntent.Value != LLMInteractionType.RoadmapGeneration;
+
         if (missingProfileFields.Count > 0
+            && !isNonRoadmapUiOverride
             && (hasAskedDiscovery || hasPendingRoadmapConfirmation || explicitRoadmapRequest
                 || (uiForcedIntent == LLMInteractionType.RoadmapGeneration)))
         {
@@ -1124,6 +1137,11 @@ public class CustomerService(
                     "UI mode {Mode} overrides stale roadmap state {State} for {UserId} — resetting to idle",
                     uiForcedIntent, roadmapFlowState, userId);
                 await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
+
+                // Issue 2 fix: clear in-memory flags so downstream guards don't use stale state
+                hasAskedDiscovery = false;
+                hasPendingRoadmapConfirmation = false;
+                roadmapStateFollowUp = false;
             }
 
             var forceRoadmapFlow = !uiOverridesRoadmapState
