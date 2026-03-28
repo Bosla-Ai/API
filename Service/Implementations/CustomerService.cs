@@ -588,7 +588,24 @@ public class CustomerService(
             targetRole,
         });
 
-        var forceRoadmapFlow = roadmapConfirmationReply || roadmapStateFollowUp || roadmapRefinementReply;
+        // ── Bug 2 fix: explicit UI mode selection must win over stale DB roadmap state ──
+        // roadmapStateFollowUp is computed from the DB state BEFORE uiForcedIntent is known.
+        // If the user switched to a different mode (CV Analyzer, Career Coach), the stale
+        // discovery_asked/pending_confirmation state must not hijack the new intent.
+        // Clear the DB state to idle so it doesn't contaminate the next turn either.
+        var uiOverridesRoadmapState = uiForcedIntent.HasValue
+            && uiForcedIntent.Value != LLMInteractionType.RoadmapGeneration;
+
+        if (uiOverridesRoadmapState && (hasAskedDiscovery || hasPendingRoadmapConfirmation))
+        {
+            _logger.LogInformation(
+                "UI mode {Mode} overrides stale roadmap state {State} for {UserId} — resetting to idle",
+                canonicalUiMode, roadmapFlowState, userId);
+            await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
+        }
+
+        var forceRoadmapFlow = !uiOverridesRoadmapState
+            && (roadmapConfirmationReply || roadmapStateFollowUp || roadmapRefinementReply);
 
         if (forceRoadmapFlow && interactionType != LLMInteractionType.RoadmapGeneration)
         {
@@ -1131,7 +1148,21 @@ public class CustomerService(
                 && !roadmapDeclineReply
                 && !roadmapConfirmationReply
                 && await IsRoadmapRefinementSemanticAsync(query, conversationContextText, CancellationToken.None);
-            var forceRoadmapFlow = roadmapConfirmationReply || roadmapStateFollowUp || roadmapRefinementReply;
+
+            // ── Bug 2 fix (non-streaming mirror): explicit UI mode wins over stale roadmap state ──
+            var uiOverridesRoadmapState = uiForcedIntent.HasValue
+                && uiForcedIntent.Value != LLMInteractionType.RoadmapGeneration;
+
+            if (uiOverridesRoadmapState && (hasAskedDiscovery || hasPendingRoadmapConfirmation))
+            {
+                _logger.LogInformation(
+                    "UI mode {Mode} overrides stale roadmap state {State} for {UserId} — resetting to idle",
+                    uiForcedIntent, roadmapFlowState, userId);
+                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
+            }
+
+            var forceRoadmapFlow = !uiOverridesRoadmapState
+                && (roadmapConfirmationReply || roadmapStateFollowUp || roadmapRefinementReply);
 
             if (roadmapDeclineReply)
             {
@@ -1579,11 +1610,12 @@ public class CustomerService(
         var isArabic = ContainsArabic(query) || ContainsArabic(conversationContext);
         var casualTone = LooksCasualTone(query);
 
-        var hasExperience = !string.IsNullOrWhiteSpace(userProfile?.ExperienceLevel)
-            || ContainsAny(combinedContext, "beginner", "intermediate", "advanced", "junior", "mid", "senior", "مبتدئ", "متوسط", "متقدم");
-
-        var hasTargetRole = !string.IsNullOrWhiteSpace(userProfile?.TargetRole)
-            || ContainsAny(combinedContext, "software engineer", "backend", "frontend", "fullstack", "devops", "data", "qa", "role", "job", "مهندس", "مطور", "وظيفة", "منصب");
+        // Strict DB-only checks: only skip a question if the field is actually persisted.
+        // Context heuristics were causing false positives — e.g. "SWE" in the query satisfied
+        // hasTargetRole via context keywords, making the function generate the generic
+        // roadmap_focus fallback whose answer was never mapped back to TargetRole/ExperienceLevel.
+        var hasExperience = !string.IsNullOrWhiteSpace(userProfile?.ExperienceLevel);
+        var hasTargetRole = !string.IsNullOrWhiteSpace(userProfile?.TargetRole);
 
         var hasResourcePreference = (userProfile?.Constraints?.Any(c => !string.IsNullOrWhiteSpace(c)) ?? false)
             || ContainsAny(combinedContext, "free", "paid", "budget", "no paid", "free only", "مجاني", "مدفوع", "ميزانية");
@@ -2090,13 +2122,23 @@ Latest user message:
 
             if (ContainsAny(label, "focus", "topic", "interest", "prioritize", "speciali",
                 "roadmap_focus", "area", "domain", "field",
-                "تركيز", "موضوع", "اهتم", "مجال", "تخصص"))
+                "تركيز", "موضوع", "اهتم", "مجال", "تخصص",
+                "الجوانب", "تريد التركيز", "which topics", "prioritize first"))
             {
                 var interests = answer
                     .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .Where(x => !string.IsNullOrWhiteSpace(x));
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToList();
 
                 profile.Interests!.AddRange(interests);
+
+                // roadmap_focus fires only when TargetRole is already set in the DB but
+                // ExperienceLevel is missing — or vice versa. However, if TargetRole is
+                // still empty (e.g. user answered the focus question before the role question
+                // was asked), promote the first focus answer to TargetRole so
+                // HasSufficientRoadmapProfile can progress past the gate.
+                if (string.IsNullOrWhiteSpace(profile.TargetRole) && interests.Count > 0)
+                    profile.TargetRole = interests[0];
             }
         }
 
