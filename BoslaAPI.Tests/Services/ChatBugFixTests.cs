@@ -389,7 +389,7 @@ public class ChatBugFixTests
         var result = (AskUserQuestion[])method!.Invoke(null, [profile, "I want a roadmap", ""])!;
 
         result.Should().HaveCount(1);
-        result[0].Id.Should().Be("roadmap_focus");
+        result[0].Id.Should().Be("roadmap_experience");
     }
 
     #endregion
