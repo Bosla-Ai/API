@@ -319,6 +319,25 @@ public class ChatBugFixTests
         result.Should().BeTrue();
     }
 
+    [Fact]
+    public void HasSufficientRoadmapProfile_ReturnsTrue_WhenRoleAndInterestsPresentWithoutExperience()
+    {
+        var profile = new UserProfileEntity
+        {
+            UserId = "u1",
+            ExperienceLevel = null,
+            TargetRole = "Backend Developer",
+            Interests = ["React", "Node.js"]
+        };
+
+        var method = typeof(CustomerService).GetMethod(
+            "HasSufficientRoadmapProfile",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        var result = (bool)method!.Invoke(null, [profile])!;
+        result.Should().BeTrue();
+    }
+
     #endregion
 
     #region BuildRoadmapDiscoveryQuestions Tests
@@ -372,7 +391,7 @@ public class ChatBugFixTests
     }
 
     [Fact]
-    public void BuildRoadmapDiscoveryQuestions_AllFieldsKnown_ReturnsFocusQuestion()
+    public void BuildRoadmapDiscoveryQuestions_AllFieldsKnown_ReturnsExperienceQuestion()
     {
         var profile = new UserProfileEntity
         {

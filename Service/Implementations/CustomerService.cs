@@ -350,6 +350,10 @@ public class CustomerService(
 
             if (uiForcedIntent.HasValue && uiForcedIntent.Value != LLMInteractionType.RoadmapGeneration)
             {
+                if (hasAskedDiscovery || hasPendingRoadmapConfirmation)
+                {
+                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
+                }
                 hasAskedDiscovery = false;
                 hasPendingRoadmapConfirmation = false;
                 roadmapStateFollowUp = false;
@@ -1987,7 +1991,8 @@ Latest user message:
         if (string.IsNullOrWhiteSpace(userProfile?.TargetRole))
             missing.Add("Target Role (what job/role are they aiming for?)");
 
-        if (string.IsNullOrWhiteSpace(userProfile?.ExperienceLevel))
+        var hasInterests = userProfile?.Interests?.Count > 0;
+        if (string.IsNullOrWhiteSpace(userProfile?.ExperienceLevel) && !hasInterests)
             missing.Add("Experience Level (beginner, intermediate, or advanced?)");
 
         return missing;
@@ -2121,28 +2126,36 @@ Latest user message:
             return profile;
         }
 
-        var lower = query.ToLowerInvariant();
-        if (ContainsAny(lower, "free only", "no paid", "مجاني فقط", "بدون مدفوع"))
+        var trimmedLower = query.Trim().ToLowerInvariant();
+        var bareSignalFound = false;
+
+        if (ContainsAny(trimmedLower, "beginner", "مبتدئ"))
+        {
+            profile.ExperienceLevel = "Beginner";
+            bareSignalFound = true;
+        }
+        else if (ContainsAny(trimmedLower, "intermediate", "متوسط"))
+        {
+            profile.ExperienceLevel = "Intermediate";
+            bareSignalFound = true;
+        }
+        else if (ContainsAny(trimmedLower, "advanced", "متقدم"))
+        {
+            profile.ExperienceLevel = "Advanced";
+            bareSignalFound = true;
+        }
+
+        if (ContainsAny(trimmedLower, "paid is okay", "المدفوع مناسب"))
+        {
+            profile.Constraints!.Add("Paid is okay");
+            bareSignalFound = true;
+        }
+        else if (ContainsAny(trimmedLower, "free only", "no paid", "مجاني فقط", "بدون مدفوع"))
         {
             profile.Constraints!.Add("Free only");
-            return profile;
+            bareSignalFound = true;
         }
 
-        var trimmed = query.Trim();
-        var trimmedLower = trimmed.ToLowerInvariant();
-        if (ContainsAny(trimmedLower, "beginner", "intermediate", "advanced",
-            "مبتدئ", "متوسط", "متقدم"))
-        {
-            profile.ExperienceLevel = trimmed;
-            return profile;
-        }
-
-        if (ContainsAny(trimmedLower, "paid is okay", "free only", "المدفوع مناسب", "مجاني فقط"))
-        {
-            profile.Constraints!.Add(trimmed);
-            return profile;
-        }
-
-        return null;
+        return bareSignalFound ? profile : null;
     }
 }
