@@ -30,7 +30,7 @@ public class UserController(
 
         if (userId != null) return userId;
 
-        throw new UnauthorizedException("User ID not found in token");
+        throw new UnauthorizedException("User ID claim not found");
     }
 
     [EnableRateLimiting("AiPolicy")]

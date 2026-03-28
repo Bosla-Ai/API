@@ -1505,14 +1505,18 @@ public class CustomerHelper
 
         if (string.IsNullOrWhiteSpace(template))
         {
+            _logger.LogWarning("ProfileExtractionPrompt is missing or empty.");
             return null;
         }
 
         var prompt = string.Format(template, EscapeBraces(conversationHistory));
+        _logger.LogInformation("Profile Extraction Prompt: {Prompt}", prompt);
 
         try
         {
             var (response, _, _) = await SendRequestWithModel(prompt, _chatModel, useThinking: false);
+
+            _logger.LogInformation("Profile Extraction Raw Response: {Response}", response);
 
             var cleanJson = response.Trim();
             if (cleanJson.StartsWith("```"))
@@ -1520,7 +1524,9 @@ public class CustomerHelper
                 cleanJson = cleanJson.Replace("```json", "").Replace("```", "").Trim();
             }
 
-            return JsonConvert.DeserializeObject<UserProfileExtraction>(cleanJson);
+            var result = JsonConvert.DeserializeObject<UserProfileExtraction>(cleanJson);
+            _logger.LogInformation("Profile Extraction Deserialized: {Result}", JsonConvert.SerializeObject(result));
+            return result;
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
