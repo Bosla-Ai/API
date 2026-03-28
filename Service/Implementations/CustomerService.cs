@@ -355,6 +355,7 @@ public class CustomerService(
             }
             else if (modeLower.Contains("career") || modeLower.Contains("coach"))
             {
+                uiForcedIntent = LLMInteractionType.ChatWithAI;
                 canonicalUiMode = "Career Coach";
                 classifiedMode = "FRIEND";
                 _logger.LogDebug("UI mode override: Career Coach → forcing FRIEND mode");
@@ -1604,6 +1605,15 @@ public class CustomerService(
                && !string.IsNullOrWhiteSpace(userProfile.ExperienceLevel);
     }
 
+    private static bool LooksLikeRole(string value)
+    {
+        var normalized = value.Trim().ToLowerInvariant();
+        return ContainsAny(normalized,
+            "engineer", "developer", "architect", "analyst", "scientist",
+            "designer", "manager", "lead", "devops", "qa", "tester",
+            "مهندس", "مطور", "محلل", "مصمم", "مدير");
+    }
+
     private static AskUserQuestion[] BuildRoadmapDiscoveryQuestions(UserProfileEntity? userProfile, string query, string conversationContext)
     {
         var combinedContext = $"{conversationContext}\n{query}".ToLowerInvariant();
@@ -2132,13 +2142,14 @@ Latest user message:
 
                 profile.Interests!.AddRange(interests);
 
-                // roadmap_focus fires only when TargetRole is already set in the DB but
-                // ExperienceLevel is missing — or vice versa. However, if TargetRole is
-                // still empty (e.g. user answered the focus question before the role question
-                // was asked), promote the first focus answer to TargetRole so
-                // HasSufficientRoadmapProfile can progress past the gate.
-                if (string.IsNullOrWhiteSpace(profile.TargetRole) && interests.Count > 0)
+                // Only promote to TargetRole if the answer looks like a job role, not a topic.
+                // Prevents "Algorithms" or "System Design" from satisfying HasSufficientRoadmapProfile.
+                if (string.IsNullOrWhiteSpace(profile.TargetRole)
+                    && interests.Count == 1
+                    && LooksLikeRole(interests[0]))
+                {
                     profile.TargetRole = interests[0];
+                }
             }
         }
 
