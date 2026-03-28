@@ -633,6 +633,48 @@ public class CustomerService(
                 _logger.LogDebug(ex, "Failed to re-fetch profile during roadmap flow for {UserId}", userId);
             }
 
+            // Fallback: recover roadmap profile fields from user turns already present in
+            // session context. This prevents repeated discovery loops when profile storage
+            // is temporarily unavailable.
+            if (!hasSufficientRoadmapProfile)
+            {
+                try
+                {
+                    var contextDerivedProfile = ExtractProfileFromConversationContext(userId, conversationContextText);
+                    if (contextDerivedProfile != null)
+                    {
+                        if (userProfile is null)
+                        {
+                            userProfile = contextDerivedProfile;
+                        }
+                        else
+                        {
+                            userProfile.MergeFrom(contextDerivedProfile);
+                        }
+
+                        hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
+                        profileSummary = userProfile.ToPromptSummary();
+
+                        try
+                        {
+                            await userProfileRepository.UpsertAsync(contextDerivedProfile);
+                        }
+                        catch (Exception persistEx)
+                        {
+                            _logger.LogDebug(persistEx,
+                                "Context-derived profile persistence failed for {UserId}; continuing with in-memory merge",
+                                userId);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex,
+                        "Failed to derive profile from conversation context for {UserId}",
+                        userId);
+                }
+            }
+
             // Only run the expensive AI extractor if the static parser failed to gather a sufficient profile.
             // This happens when users type free-form text instead of using the AskUserBlock UI.
             if (!hasSufficientRoadmapProfile && hasAskedDiscovery)
@@ -2204,6 +2246,48 @@ Latest user message:
         {
             _logger.LogDebug(ex, "Failed to persist profile signals from latest message for user {UserId}", userId);
         }
+    }
+
+    private static UserProfileEntity? ExtractProfileFromConversationContext(string userId, string conversationContext)
+    {
+        if (string.IsNullOrWhiteSpace(conversationContext))
+            return null;
+
+        var userOnlyText = new StringBuilder();
+        var inUserBlock = false;
+
+        var lines = conversationContext
+            .Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(l => !string.IsNullOrWhiteSpace(l));
+
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("[user]:", StringComparison.OrdinalIgnoreCase))
+            {
+                inUserBlock = true;
+                var payload = line[7..].Trim();
+                if (!string.IsNullOrWhiteSpace(payload))
+                    userOnlyText.AppendLine(payload);
+                continue;
+            }
+
+            if (line.StartsWith("[assistant]:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("[summary", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("[state", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("[title", StringComparison.OrdinalIgnoreCase))
+            {
+                inUserBlock = false;
+                continue;
+            }
+
+            if (inUserBlock)
+                userOnlyText.AppendLine(line);
+        }
+
+        if (userOnlyText.Length == 0)
+            return null;
+
+        return ExtractProfileFromUserMessage(userId, userOnlyText.ToString());
     }
 
     private static UserProfileEntity? ExtractProfileFromUserMessage(string userId, string query)
