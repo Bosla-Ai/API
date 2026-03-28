@@ -36,6 +36,15 @@ public class CosmosUserProfileRepository(
             var containerResponse = await database.CreateContainerIfNotExistsAsync(_containerName, "/UserId");
             _container = containerResponse.Container;
 
+            var containerProperties = await _container.ReadContainerAsync();
+            var partitionKeyPath = containerProperties.Resource.PartitionKeyPath;
+            if (!string.Equals(partitionKeyPath, "/UserId", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Cosmos container '{_containerName}' uses partition key '{partitionKeyPath}'. " +
+                    "Expected '/UserId'. Migrate the container before deploying this version.");
+            }
+
             _logger.LogInformation("Initialized Cosmos container '{ContainerName}' for user profiles", _containerName);
             return _container;
         }

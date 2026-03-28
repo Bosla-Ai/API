@@ -400,7 +400,7 @@ public class CustomerService(
 
         // Inject UI mode context using canonical server-side label (prevents prompt injection).
         var missingProfileFields = GetMissingProfileFields(userProfile);
-        var discoveryAttemptCount = 0;
+        var discoveryAttemptCount = await GetDiscoveryAttemptCountAsync(userId, actualSessionId);
 
         if (!string.IsNullOrEmpty(canonicalUiMode))
         {
@@ -411,12 +411,13 @@ public class CustomerService(
         var isNonRoadmapUiOverride = uiForcedIntent.HasValue
             && uiForcedIntent.Value != LLMInteractionType.RoadmapGeneration;
 
-        if (missingProfileFields.Count > 0
+        var shouldApplyRoadmapGapInstruction = missingProfileFields.Count > 0
             && !isNonRoadmapUiOverride
             && (hasAskedDiscovery || hasPendingRoadmapConfirmation || explicitRoadmapRequest
-                || (uiForcedIntent == LLMInteractionType.RoadmapGeneration)))
+                || (uiForcedIntent == LLMInteractionType.RoadmapGeneration));
+
+        if (shouldApplyRoadmapGapInstruction && discoveryAttemptCount < 2)
         {
-            discoveryAttemptCount = await GetDiscoveryAttemptCountAsync(userId, actualSessionId);
             var missingList = string.Join(", ", missingProfileFields);
             systemPrompt += $"\n\nDYNAMIC PROFILE GAP INSTRUCTION:\n" +
                 $"The user wants a roadmap but their profile is INCOMPLETE. Missing fields: [{missingList}].\n" +
@@ -425,6 +426,12 @@ public class CustomerService(
                 $"(\"checkbox\" for experience level, \"text\" for target role).\n" +
                 $"Set tool_arguments=null until these fields are provided.\n" +
                 $"Discovery attempt: {discoveryAttemptCount + 1} of 2 max.";
+        }
+        else if (shouldApplyRoadmapGapInstruction)
+        {
+            systemPrompt += "\n\nDYNAMIC PROFILE GAP INSTRUCTION:\n" +
+                "Max discovery attempts have been reached. Do NOT ask additional discovery questions. " +
+                "Proceed with partial profile and ask for roadmap confirmation.";
         }
 
         var interactionType = LLMInteractionType.ChatWithAI;
@@ -1014,9 +1021,13 @@ public class CustomerService(
                 var heartbeatSeconds = 0;
                 while (!apiResponseTask.IsCompleted)
                 {
-                    var completed = await Task.WhenAny(apiResponseTask, Task.Delay(TimeSpan.FromSeconds(8), cancellationToken));
+                    var delayTask = Task.Delay(TimeSpan.FromSeconds(8), cancellationToken);
+                    var completed = await Task.WhenAny(apiResponseTask, delayTask);
                     if (completed == apiResponseTask)
                         break;
+
+                    if (cancellationToken.IsCancellationRequested || delayTask.IsCanceled)
+                        throw new OperationCanceledException(cancellationToken);
 
                     heartbeatSeconds += 8;
                     yield return FormatSse("tool", new
@@ -1032,9 +1043,17 @@ public class CustomerService(
                     apiResponse = await apiResponseTask;
                     pipelineSuccess = true;
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
-                    pipelineError = ex.InnerException?.Message ?? ex.Message;
+                    _logger.LogError(ex,
+                        "Roadmap generation failed for user {UserId} in session {SessionId}",
+                        userId,
+                        actualSessionId);
+                    pipelineError = "I apologize, but I encountered an error while generating your roadmap. Please try again.";
                 }
 
                 if (!pipelineSuccess && pipelineError != null)
@@ -1042,9 +1061,9 @@ public class CustomerService(
                     yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "end", summary = "Generation failed" });
 
                     yield return FormatSse("result", new { status = "error", message = pipelineError });
-                    yield return FormatSse("text", new { delta = $"\n\nI apologize, but I encountered an error while generating your roadmap: {pipelineError}" });
+                    yield return FormatSse("text", new { delta = $"\n\n{pipelineError}" });
 
-                    finalResponse = $"I apologize, but I encountered an error while generating your roadmap: {pipelineError}";
+                    finalResponse = pipelineError;
                     await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
                 }
 
@@ -1476,8 +1495,13 @@ public class CustomerService(
                 }
                 catch (Exception ex)
                 {
-                    var errorMsg = ex.InnerException?.Message ?? ex.Message;
-                    aiResponse = $"I apologize, but I encountered an error while generating your roadmap: {errorMsg}";
+                    _logger.LogError(ex,
+                        "Roadmap generation failed for user {UserId} in session {SessionId} (non-streaming path)",
+                        userId,
+                        actualSessionId);
+
+                    var errorMsg = "I apologize, but I encountered an error while generating your roadmap. Please try again.";
+                    aiResponse = errorMsg;
                     await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
 
                     return new APIResponse<AiIntentDetectionResponse>()
@@ -1701,11 +1725,17 @@ public class CustomerService(
                 throw new InvalidOperationException($"Error: The roadmap service returned {response.StatusCode}. Details: {resultJson}");
             }
         }
-        catch (TaskCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            throw new TimeoutException("Error: The roadmap service request timed out. Please try again.");
+            throw;
         }
-        catch (Exception ex) when (ex is not InvalidOperationException && ex is not TimeoutException)
+        catch (TaskCanceledException ex)
+        {
+            throw new TimeoutException("Error: The roadmap service request timed out. Please try again.", ex);
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException
+            && ex is not TimeoutException
+            && ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Roadmap service call failed for request payload.");
             throw new Exception("Error: Unable to reach roadmap service right now. Please try again later.", ex);
@@ -2170,6 +2200,8 @@ Latest user message:
         }
     }
 
+    private const string RoadmapDiscoveryAttemptPrefix = "roadmap_discovery_attempt:";
+
     private async Task SaveRoadmapFlowStateAsync(string userId, string sessionId, string state)
     {
         await conversationContextManager.AddMessageToContextAsync(
@@ -2177,12 +2209,72 @@ Latest user message:
             sessionId,
             RoadmapIntentHelper.BuildRoadmapStateMessage(state),
             "state");
+
+        if (string.Equals(state, RoadmapIntentHelper.RoadmapStateDiscoveryAsked, StringComparison.OrdinalIgnoreCase))
+        {
+            var currentCount = await TryGetPersistedDiscoveryAttemptCountAsync(userId, sessionId) ?? 0;
+            var nextCount = currentCount + 1;
+
+            await conversationContextManager.AddMessageToContextAsync(
+                userId,
+                sessionId,
+                BuildRoadmapDiscoveryAttemptMessage(nextCount),
+                "state");
+        }
+        else if (string.Equals(state, RoadmapIntentHelper.RoadmapStateIdle, StringComparison.OrdinalIgnoreCase)
+                 || string.Equals(state, RoadmapIntentHelper.RoadmapStateCompleted, StringComparison.OrdinalIgnoreCase))
+        {
+            await conversationContextManager.AddMessageToContextAsync(
+                userId,
+                sessionId,
+                BuildRoadmapDiscoveryAttemptMessage(0),
+                "state");
+        }
+    }
+
+    private static string BuildRoadmapDiscoveryAttemptMessage(int attemptCount)
+    {
+        var normalized = Math.Max(0, attemptCount);
+        return $"{RoadmapDiscoveryAttemptPrefix}{normalized}";
+    }
+
+    private static int? ExtractRoadmapDiscoveryAttempt(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return null;
+
+        if (!message.StartsWith(RoadmapDiscoveryAttemptPrefix, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var rawValue = message[RoadmapDiscoveryAttemptPrefix.Length..].Trim();
+        return int.TryParse(rawValue, out var parsed) && parsed >= 0 ? parsed : null;
+    }
+
+    private async Task<int?> TryGetPersistedDiscoveryAttemptCountAsync(string userId, string sessionId)
+    {
+        var messages = await chatRepository.GetMessagesAsync(userId, sessionId, 200);
+        for (var i = messages.Count - 1; i >= 0; i--)
+        {
+            var message = messages[i];
+            if (!string.Equals(message.Role, "state", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var parsed = ExtractRoadmapDiscoveryAttempt(message.Message);
+            if (parsed.HasValue)
+                return parsed.Value;
+        }
+
+        return null;
     }
 
     // Counts discovery_asked states only within the current cycle (since last idle/completed).
     private async Task<int> GetDiscoveryAttemptCountAsync(string userId, string sessionId)
     {
-        var messages = await chatRepository.GetMessagesAsync(userId, sessionId, 50);
+        var persistedCount = await TryGetPersistedDiscoveryAttemptCountAsync(userId, sessionId);
+        if (persistedCount.HasValue)
+            return persistedCount.Value;
+
+        var messages = await chatRepository.GetMessagesAsync(userId, sessionId, 500);
         var messageList = messages.OrderBy(m => m.CreatedAt).ToList(); // ascending = chronological
 
         var lastCycleResetIndex = -1;
@@ -2221,15 +2313,19 @@ Latest user message:
 
     private async Task<string?> GetRoadmapFlowStateAsync(string userId, string sessionId)
     {
-        var messages = await chatRepository.GetMessagesAsync(userId, sessionId, 30);
-        var latestStateMessage = messages
-            .Where(m => m.Role == "state")
-            .OrderByDescending(m => m.CreatedAt)
-            .FirstOrDefault();
+        var messages = await chatRepository.GetMessagesAsync(userId, sessionId, 80);
 
-        return latestStateMessage is null
-            ? null
-            : RoadmapIntentHelper.ExtractRoadmapState(latestStateMessage.Message);
+        foreach (var message in messages.OrderByDescending(m => m.CreatedAt))
+        {
+            if (!string.Equals(message.Role, "state", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var extractedState = RoadmapIntentHelper.ExtractRoadmapState(message.Message);
+            if (!string.IsNullOrWhiteSpace(extractedState))
+                return extractedState;
+        }
+
+        return null;
     }
 
     private async Task TryPersistProfileFromLatestMessageAsync(string userId, string query)
