@@ -636,37 +636,49 @@ public class CustomerService(
 
         if (roadmapNeedsConfirmation)
         {
-            // Profile gate: incomplete profile always asks discovery; cap only governs question reuse.
+            // Profile gate: incomplete profile asks discovery unless max attempts reached.
             if (!hasSufficientRoadmapProfile)
             {
-                var discoveryQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions) && discoveryAttemptCount < 2)
-                    ? questions
-                    : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+                // Hard exit: after max attempts, accept partial profile and proceed to confirmation
+                // to prevent an infinite ask_user loop when the user's answers don't populate the profile.
+                if (discoveryAttemptCount >= 2)
+                {
+                    _logger.LogInformation(
+                        "Max discovery attempts ({Count}) reached for {UserId} — proceeding with partial profile",
+                        discoveryAttemptCount, userId);
+                    // Fall through to confirmation below
+                }
+                else
+                {
+                    var discoveryQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions))
+                        ? questions
+                        : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
 
-                var discoveryIntro = !string.IsNullOrWhiteSpace(aiResponse)
-                    ? aiResponse
-                    : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
+                    var discoveryIntro = !string.IsNullOrWhiteSpace(aiResponse)
+                        ? aiResponse
+                        : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
 
-                yield return FormatSse("text", new { delta = discoveryIntro });
-                yield return FormatSse("ask_user", new { questions = discoveryQuestions });
+                    yield return FormatSse("text", new { delta = discoveryIntro });
+                    yield return FormatSse("ask_user", new { questions = discoveryQuestions });
 
-                if (followUpSuggestions is { Length: > 0 })
-                    yield return FormatSse("suggestions", new { items = followUpSuggestions });
+                    if (followUpSuggestions is { Length: > 0 })
+                        yield return FormatSse("suggestions", new { items = followUpSuggestions });
 
-                yield return FormatSse("done", new { message = "Roadmap discovery questions requested" });
+                    yield return FormatSse("done", new { message = "Roadmap discovery questions requested" });
 
-                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
 
-                await conversationContextManager.AddMessageToContextAsync(
-                    userId,
-                    actualSessionId,
-                    discoveryIntro,
-                    "assistant");
+                    await conversationContextManager.AddMessageToContextAsync(
+                        userId,
+                        actualSessionId,
+                        discoveryIntro,
+                        "assistant");
 
-                yield break;
+                    yield break;
+                }
             }
 
-            // Profile is sufficient → ask for confirmation
+            // Profile is sufficient (or max attempts exhausted) → ask for confirmation
             if (!string.IsNullOrEmpty(aiResponse))
                 yield return FormatSse("text", new { delta = aiResponse });
 
@@ -692,23 +704,37 @@ public class CustomerService(
             yield break;
         }
 
-        // Safety net: incomplete profile must never reach the pipeline.
+        // Safety net: incomplete profile should not reach the pipeline, unless max discovery attempts have been exhausted.
+        // Respecting the max-attempts cap here prevents a second infinite-loop entry point.
         if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile)
         {
-            _logger.LogInformation("Pre-pipeline safety net: profile still incomplete for {UserId}, re-entering discovery", userId);
+            var safetyAttemptCount = await GetDiscoveryAttemptCountAsync(userId, actualSessionId);
+            if (safetyAttemptCount >= 2)
+            {
+                // Max attempts reached — let the pipeline proceed with the partial profile.
+                _logger.LogInformation(
+                    "Safety net: max discovery attempts ({Count}) exhausted for {UserId} — allowing pipeline to proceed",
+                    safetyAttemptCount, userId);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Pre-pipeline safety net: profile still incomplete for {UserId} (attempt {Count}), re-entering discovery",
+                    userId, safetyAttemptCount + 1);
 
-            var safetyQuestions = BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
-            var safetyIntro = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
+                var safetyQuestions = BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+                var safetyIntro = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
 
-            yield return FormatSse("text", new { delta = safetyIntro });
-            yield return FormatSse("ask_user", new { questions = safetyQuestions });
-            yield return FormatSse("done", new { message = "Roadmap discovery re-requested (safety net)" });
+                yield return FormatSse("text", new { delta = safetyIntro });
+                yield return FormatSse("ask_user", new { questions = safetyQuestions });
+                yield return FormatSse("done", new { message = "Roadmap discovery re-requested (safety net)" });
 
-            await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
-            await conversationContextManager.AddMessageToContextAsync(
-                userId, actualSessionId, safetyIntro, "assistant");
+                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+                await conversationContextManager.AddMessageToContextAsync(
+                    userId, actualSessionId, safetyIntro, "assistant");
 
-            yield break;
+                yield break;
+            }
         }
 
         var shouldEmitQuestions = questions is { Length: > 0 }
@@ -1172,37 +1198,48 @@ public class CustomerService(
 
             if (roadmapNeedsConfirmation)
             {
-                // Profile gate: incomplete profile asks discovery; cap only governs question reuse.
+                // Profile gate: incomplete profile asks discovery unless max attempts reached.
                 if (!hasSufficientRoadmapProfile)
                 {
-                    var responseMessage = !string.IsNullOrEmpty(aiResponse)
-                        ? aiResponse
-                        : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
-
-                    var responseQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions) && discoveryAttempts < 2)
-                        ? questions
-                        : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
-
-                    await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, responseMessage, "assistant");
-                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
-
-                    return new APIResponse<AiIntentDetectionResponse>()
+                    // Hard exit: after max attempts, proceed to confirmation to avoid an infinite ask_user loop.
+                    if (discoveryAttempts >= 2)
                     {
-                        StatusCode = HttpStatusCode.OK,
-                        Data = new AiIntentDetectionResponse
+                        _logger.LogInformation(
+                            "Max discovery attempts ({Count}) reached for {UserId} in non-streaming path — proceeding with partial profile",
+                            discoveryAttempts, userId);
+                        // Fall through to confirmation below
+                    }
+                    else
+                    {
+                        var responseMessage = !string.IsNullOrEmpty(aiResponse)
+                            ? aiResponse
+                            : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
+
+                        var responseQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions))
+                            ? questions
+                            : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+
+                        await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, responseMessage, "assistant");
+                        await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+
+                        return new APIResponse<AiIntentDetectionResponse>()
                         {
-                            InteractionType = LLMInteractionType.RoadmapGeneration,
-                            Confidence = confidence,
-                            Success = true,
-                            Answer = responseMessage,
-                            Thinking = !string.IsNullOrEmpty(thinkingContent),
-                            ThinkingLog = thinkingContent,
-                            Questions = responseQuestions
-                        }
-                    };
+                            StatusCode = HttpStatusCode.OK,
+                            Data = new AiIntentDetectionResponse
+                            {
+                                InteractionType = LLMInteractionType.RoadmapGeneration,
+                                Confidence = confidence,
+                                Success = true,
+                                Answer = responseMessage,
+                                Thinking = !string.IsNullOrEmpty(thinkingContent),
+                                ThinkingLog = thinkingContent,
+                                Questions = responseQuestions
+                            }
+                        };
+                    }
                 }
 
-                // Profile is sufficient → ask for confirmation
+                // Profile is sufficient (or max attempts exhausted) → ask for confirmation
                 var confirmMessage = !string.IsNullOrEmpty(aiResponse)
                     ? aiResponse
                     : "I can generate your roadmap. Please confirm to continue.";
@@ -1230,29 +1267,44 @@ public class CustomerService(
                 };
             }
 
-            // Safety net: incomplete profile must never reach the pipeline.
+            // Safety net: incomplete profile should not reach the pipeline, unless max discovery attempts are exhausted.
             if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile)
             {
-                var safetyMessage = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
-                var safetyQuestions = BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
-
-                await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, safetyMessage, "assistant");
-                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
-
-                return new APIResponse<AiIntentDetectionResponse>()
+                var safetyAttempts = await GetDiscoveryAttemptCountAsync(userId, actualSessionId);
+                if (safetyAttempts >= 2)
                 {
-                    StatusCode = HttpStatusCode.OK,
-                    Data = new AiIntentDetectionResponse
+                    // Max attempts exhausted — let the pipeline proceed with partial profile data.
+                    _logger.LogInformation(
+                        "Safety net (non-streaming): max discovery attempts ({Count}) exhausted for {UserId} — allowing pipeline to proceed",
+                        safetyAttempts, userId);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Safety net (non-streaming): profile still incomplete for {UserId} (attempt {Count}), re-entering discovery",
+                        userId, safetyAttempts + 1);
+
+                    var safetyMessage = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
+                    var safetyQuestions = BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+
+                    await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, safetyMessage, "assistant");
+                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+
+                    return new APIResponse<AiIntentDetectionResponse>()
                     {
-                        InteractionType = LLMInteractionType.RoadmapGeneration,
-                        Confidence = confidence,
-                        Success = true,
-                        Answer = safetyMessage,
-                        Thinking = !string.IsNullOrEmpty(thinkingContent),
-                        ThinkingLog = thinkingContent,
-                        Questions = safetyQuestions
-                    }
-                };
+                        StatusCode = HttpStatusCode.OK,
+                        Data = new AiIntentDetectionResponse
+                        {
+                            InteractionType = LLMInteractionType.RoadmapGeneration,
+                            Confidence = confidence,
+                            Success = true,
+                            Answer = safetyMessage,
+                            Thinking = !string.IsNullOrEmpty(thinkingContent),
+                            ThinkingLog = thinkingContent,
+                            Questions = safetyQuestions
+                        }
+                    };
+                }
             }
 
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
