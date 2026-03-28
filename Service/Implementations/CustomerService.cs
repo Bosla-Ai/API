@@ -331,31 +331,37 @@ public class CustomerService(
         // When the frontend sends a specific mode selection, override the LLM mode classification.
         // Intent detection still runs so the LLM can generate tags/response, but routing is forced.
         LLMInteractionType? uiForcedIntent = null;
+        string? canonicalUiMode = null;
         if (!string.IsNullOrEmpty(uiSelectedMode))
         {
             var modeLower = uiSelectedMode.ToLowerInvariant();
             if (modeLower.Contains("roadmap"))
             {
                 uiForcedIntent = LLMInteractionType.RoadmapGeneration;
+                canonicalUiMode = "Roadmap Builder";
                 classifiedMode = "ACTION";
-                skipIntentDetection = false; // Must run intent detection for tags
-                explicitRoadmapRequest = true; // Treat as explicit so mode classification is skipped
+                // Only re-enable intent detection when input is long enough — preserve short-input guard
+                if (!skipIntentDetection) skipIntentDetection = false;
+                else if (wordCount >= minWordThreshold) skipIntentDetection = false;
+                explicitRoadmapRequest = true;
                 _logger.LogDebug("UI mode override: Roadmap Builder → forcing RoadmapGeneration intent");
             }
             else if (modeLower.Contains("cv") || modeLower.Contains("resume"))
             {
                 uiForcedIntent = LLMInteractionType.CVAnalysis;
+                canonicalUiMode = "CV Analyzer";
                 classifiedMode = "ACTION";
-                skipIntentDetection = false;
+                if (wordCount >= minWordThreshold) skipIntentDetection = false;
                 _logger.LogDebug("UI mode override: CV Analyzer → forcing CVAnalysis intent");
             }
             else if (modeLower.Contains("career") || modeLower.Contains("coach"))
             {
+                canonicalUiMode = "Career Coach";
                 classifiedMode = "FRIEND";
                 _logger.LogDebug("UI mode override: Career Coach → forcing FRIEND mode");
             }
 
-            yield return FormatSse("mode", new { classified = classifiedMode, uiOverride = uiSelectedMode });
+            yield return FormatSse("mode", new { classified = classifiedMode, uiOverride = canonicalUiMode ?? uiSelectedMode });
         }
 
         // FRIEND mode: Skip intent detection, go directly to warm chat
@@ -404,11 +410,10 @@ public class CustomerService(
         var discoveryAttemptCount = 0;
 
         // ── Fix 2: Inject UI mode hint so LLM generates appropriate response/tags ──
-        // Even when profile is complete, the LLM needs to know the user's selected mode
-        // so it generates roadmap-relevant content rather than generic chat responses.
-        if (!string.IsNullOrEmpty(uiSelectedMode))
+        // Use the server-side canonical label (not raw user input) to prevent prompt injection.
+        if (!string.IsNullOrEmpty(canonicalUiMode))
         {
-            systemPrompt += $"\n\nUI MODE CONTEXT: The user has explicitly selected \"{uiSelectedMode}\" mode. " +
+            systemPrompt += $"\n\nUI MODE CONTEXT: The user has explicitly selected \"{canonicalUiMode}\" mode. " +
                 $"Generate your response, questions, and tags appropriate for this mode.";
         }
 
@@ -1942,7 +1947,8 @@ Latest user message:
     private async Task<int> GetDiscoveryAttemptCountAsync(string userId, string sessionId)
     {
         var messages = await chatRepository.GetMessagesAsync(userId, sessionId, 50);
-        var messageList = messages.ToList();
+        // GetMessagesAsync returns newest-first; sort ascending so index order = chronological order.
+        var messageList = messages.OrderBy(m => m.CreatedAt).ToList();
 
         var lastCycleResetIndex = -1;
         for (var i = messageList.Count - 1; i >= 0; i--)
