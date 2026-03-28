@@ -987,7 +987,10 @@ public class CustomerService(
         }
 
         if (options.CurrentValue.Llm.EnableBackgroundProfileExtraction
-            && (classifiedMode == "FRIEND" || interactionType == LLMInteractionType.RoadmapGeneration))
+            && (classifiedMode == "FRIEND"
+                || interactionType == LLMInteractionType.RoadmapGeneration
+                || hasAskedDiscovery
+                || hasPendingRoadmapConfirmation))
         {
             var capturedUserId = userId;
             var capturedSessionId = actualSessionId;
@@ -1557,8 +1560,12 @@ public class CustomerService(
         if (userProfile is null)
             return false;
 
-        return !string.IsNullOrWhiteSpace(userProfile.TargetRole)
-               && !string.IsNullOrWhiteSpace(userProfile.ExperienceLevel);
+        var hasRole = !string.IsNullOrWhiteSpace(userProfile.TargetRole);
+        var hasExperience = !string.IsNullOrWhiteSpace(userProfile.ExperienceLevel);
+        var hasInterests = userProfile.Interests?.Count > 0;
+
+        // Role + experience is the gold standard; role + interests is acceptable fallback.
+        return (hasRole && hasExperience) || (hasRole && hasInterests);
     }
 
     private static bool LooksLikeRole(string value)
@@ -1636,16 +1643,20 @@ public class CustomerService(
 
         if (questions.Count == 0)
         {
+            // All required fields are present — ask experience level as a tie-breaker so the
+            // profile gate (which requires ExperienceLevel) can always be satisfied. This
+            // replaces the old "roadmap_focus" fallback whose answer was never parsed back into
+            // the profile and caused an infinite re-ask loop.
             questions.Add(new AskUserQuestion
             {
-                Id = "roadmap_focus",
+                Id = "roadmap_experience",
                 Text = isArabic
-                    ? "ما الجوانب التي تريد التركيز عليها أولًا في الخطة؟"
-                    : "Which topics should this roadmap prioritize first?",
-                Type = "text",
-                Placeholder = isArabic
-                    ? "مثال: Algorithms, System Design"
-                    : "Example: Algorithms, System Design",
+                    ? (casualTone ? "مستواك الحالي إيه في المجال؟" : "ما مستوى خبرتك الحالي؟")
+                    : (casualTone ? "What level are you at right now?" : "What is your current experience level?"),
+                Type = "checkbox",
+                Options = isArabic
+                    ? ["مبتدئ", "متوسط", "متقدم"]
+                    : ["Beginner", "Intermediate", "Advanced"],
                 Required = true
             });
         }
@@ -2107,6 +2118,24 @@ Latest user message:
         if (ContainsAny(lower, "free only", "no paid", "مجاني فقط", "بدون مدفوع"))
         {
             profile.Constraints!.Add("Free only");
+            return profile;
+        }
+
+        // Handle bare checkbox answers sent by the UI widget (no label prefix).
+        // These are single-line responses matching known option values exactly.
+        var trimmed = query.Trim();
+        var trimmedLower = trimmed.ToLowerInvariant();
+        if (ContainsAny(trimmedLower, "beginner", "intermediate", "advanced",
+            "مبتدئ", "متوسط", "متقدم"))
+        {
+            profile.ExperienceLevel = trimmed;
+            return profile;
+        }
+
+        // Bare paid/free budget answer from checkbox widget
+        if (ContainsAny(trimmedLower, "paid is okay", "free only", "المدفوع مناسب", "مجاني فقط"))
+        {
+            profile.Constraints!.Add(trimmed);
             return profile;
         }
 
