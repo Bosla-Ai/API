@@ -239,6 +239,46 @@ public class ChatBugFixTests
     }
 
     [Fact]
+    public void ExtractProfileFromConversationContext_ParsesUserBlocksOnly()
+    {
+        var context = """
+            Recent Conversation:
+            [assistant]: Before I generate your roadmap, I need a bit more context.
+            [user]: What is your current experience level?: Beginner
+            Which role are you targeting with this roadmap?: Backend Engineer
+            [assistant]: Perfect, thanks!
+            """;
+
+        var method = typeof(CustomerService).GetMethod(
+            "ExtractProfileFromConversationContext",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        var result = (UserProfileEntity?)method!.Invoke(null, ["user1", context]);
+
+        result.Should().NotBeNull();
+        result!.ExperienceLevel.Should().Be("Beginner");
+        result.TargetRole.Should().Be("Backend Engineer");
+    }
+
+    [Fact]
+    public void ExtractProfileFromConversationContext_IgnoresAssistantOnlySignals()
+    {
+        var context = """
+            Recent Conversation:
+            [assistant]: What is your current experience level?: Beginner
+            [assistant]: Which role are you targeting with this roadmap?: Backend Engineer
+            """;
+
+        var method = typeof(CustomerService).GetMethod(
+            "ExtractProfileFromConversationContext",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        var result = (UserProfileEntity?)method!.Invoke(null, ["user1", context]);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
     public void ExtractProfileFromUserMessage_ReturnsNull_ForIrrelevantText()
     {
         var method = typeof(CustomerService).GetMethod(
