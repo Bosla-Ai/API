@@ -7,7 +7,7 @@ public class UserProfileEntity
     [JsonProperty("id")]
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
-    [JsonProperty("userId")]
+    [JsonProperty("UserId")]
     public string UserId { get; set; } = string.Empty;
 
     [JsonProperty("interests")]

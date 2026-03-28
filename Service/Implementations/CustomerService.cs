@@ -618,28 +618,6 @@ public class CustomerService(
         // Re-fetch to pick up fields persisted by TryPersistProfileFromLatestMessageAsync this turn.
         if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile)
         {
-            // When the user is answering discovery questions, run AI-powered profile extraction
-            // synchronously. The static parser may miss free-form answers like "I'm a beginner SWE"
-            // or "target role : swe". The AI extractor understands any format.
-            if (hasAskedDiscovery)
-            {
-                try
-                {
-                    var contextForExtraction = $"{conversationContextText}\n[user]: {query}";
-                    var aiExtracted = await customerHelper.ExtractProfileAsync(contextForExtraction);
-                    if (aiExtracted != null)
-                    {
-                        var aiProfileEntity = UserProfileEntity.FromExtraction(userId, aiExtracted);
-                        await userProfileRepository.UpsertAsync(aiProfileEntity);
-                        _logger.LogDebug("Synchronous AI profile extraction succeeded for {UserId} during discovery", userId);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Synchronous AI profile extraction failed for {UserId}, continuing with static extraction", userId);
-                }
-            }
-
             try
             {
                 var refreshedProfile = await userProfileRepository.GetByUserIdAsync(userId);
@@ -653,6 +631,36 @@ public class CustomerService(
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Failed to re-fetch profile during roadmap flow for {UserId}", userId);
+            }
+
+            // Only run the expensive AI extractor if the static parser failed to gather a sufficient profile.
+            // This happens when users type free-form text instead of using the AskUserBlock UI.
+            if (!hasSufficientRoadmapProfile && hasAskedDiscovery)
+            {
+                try
+                {
+                    var contextForExtraction = $"{conversationContextText}\n[user]: {query}";
+                    var aiExtracted = await customerHelper.ExtractProfileAsync(contextForExtraction);
+                    if (aiExtracted != null)
+                    {
+                        var aiProfileEntity = UserProfileEntity.FromExtraction(userId, aiExtracted);
+                        await userProfileRepository.UpsertAsync(aiProfileEntity);
+                        _logger.LogInformation("Synchronous AI profile extraction succeeded for {UserId} during discovery", userId);
+
+                        // Re-fetch one final time after AI extraction
+                        var finalProfile = await userProfileRepository.GetByUserIdAsync(userId);
+                        if (finalProfile != null)
+                        {
+                            userProfile = finalProfile;
+                            hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
+                            profileSummary = userProfile.ToPromptSummary();
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Synchronous AI profile extraction failed for {UserId}, continuing with static extraction", userId);
+                }
             }
         }
 
@@ -957,6 +965,9 @@ public class CustomerService(
                 yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "processing" });
 
                 // Keep SSE connection alive during long-running pipeline calls.
+                string apiResponse = "";
+                bool pipelineSuccess = false;
+                string? pipelineError = null;
                 var apiResponseTask = ExecuteRoadmapGenerationAsync(toolArguments!, cancellationToken);
                 var heartbeatSeconds = 0;
                 while (!apiResponseTask.IsCompleted)
@@ -974,58 +985,80 @@ public class CustomerService(
                     });
                 }
 
-                var apiResponse = await apiResponseTask;
-
-                // Generate a stable ID that links the Cosmos chat message to a saved roadmap
-                var generationId = Guid.NewGuid().ToString();
-
-                object? resultData = null;
                 try
                 {
-                    var apiParsed = JsonSerializer.Deserialize<JsonElement>(apiResponse);
-                    if (apiParsed.TryGetProperty("data", out var innerData))
+                    apiResponse = await apiResponseTask;
+                    pipelineSuccess = true;
+                }
+                catch (Exception ex)
+                {
+                    pipelineError = ex.InnerException?.Message ?? ex.Message;
+                }
+
+                if (!pipelineSuccess && pipelineError != null)
+                {
+                    yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "end", summary = "Generation failed" });
+
+                    yield return FormatSse("result", new { status = "error", message = pipelineError });
+                    yield return FormatSse("text", new { delta = $"\n\nI apologize, but I encountered an error while generating your roadmap: {pipelineError}" });
+
+                    finalResponse = $"I apologize, but I encountered an error while generating your roadmap: {pipelineError}";
+                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
+                }
+
+                if (pipelineSuccess)
+                {
+                    // Generate a stable ID that links the Cosmos chat message to a saved roadmap
+                    var generationId = Guid.NewGuid().ToString();
+
+                    object? resultData = null;
+                    try
                     {
-                        resultData = innerData;
+                        var apiParsed = JsonSerializer.Deserialize<JsonElement>(apiResponse);
+                        if (apiParsed.TryGetProperty("data", out var innerData))
+                        {
+                            resultData = innerData;
+                        }
+                        else
+                        {
+                            resultData = apiParsed;
+                        }
                     }
-                    else
+                    catch
                     {
-                        resultData = apiParsed;
+                        resultData = apiResponse;
                     }
+
+                    // Inject generationId into result data so it's stored in Cosmos and sent via SSE.
+                    string resultJsonString;
+                    try
+                    {
+                        var rawJson = resultData is JsonElement je2 ? je2.GetRawText() : JsonSerializer.Serialize(resultData);
+                        resultJsonString = InjectGenerationId(rawJson, generationId);
+                        resultData = JsonSerializer.Deserialize<JsonElement>(resultJsonString);
+                    }
+                    catch
+                    {
+                        resultJsonString = JsonSerializer.Serialize(new { data = resultData, generationId }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                        resultData = JsonSerializer.Deserialize<JsonElement>(resultJsonString);
+                    }
+
+                    // Persist parseable roadmap payload for refresh hydration.
+                    finalResponse = $"[SYSTEM] {resultJsonString}";
+
+                    yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "end", summary = "Roadmap generated" });
+
+                    // Suppress pre-decision aiResponse when forceRoadmapFlow overrode intent.
+                    if (!string.IsNullOrEmpty(aiResponse) && !forceRoadmapFlow)
+                    {
+                        yield return FormatSse("text", new { delta = aiResponse });
+                        await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, aiResponse, "assistant");
+                    }
+
+                    yield return FormatSse("result", new { status = "success", data = resultData });
+
+                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateCompleted);
                 }
-                catch
-                {
-                    resultData = apiResponse;
-                }
-
-                // Inject generationId into result data so it's stored in Cosmos and sent via SSE.
-                string resultJsonString;
-                try
-                {
-                    var rawJson = resultData is JsonElement je2 ? je2.GetRawText() : JsonSerializer.Serialize(resultData);
-                    resultJsonString = InjectGenerationId(rawJson, generationId);
-                    resultData = JsonSerializer.Deserialize<JsonElement>(resultJsonString);
-                }
-                catch
-                {
-                    resultJsonString = JsonSerializer.Serialize(new { data = resultData, generationId }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-                    resultData = JsonSerializer.Deserialize<JsonElement>(resultJsonString);
-                }
-
-                // Persist parseable roadmap payload for refresh hydration.
-                finalResponse = $"[SYSTEM] {resultJsonString}";
-
-                yield return FormatSse("tool", new { name = "RoadmapGenerator", state = "end", summary = "Roadmap generated" });
-
-                // Suppress pre-decision aiResponse when forceRoadmapFlow overrode intent.
-                if (!string.IsNullOrEmpty(aiResponse) && !forceRoadmapFlow)
-                {
-                    yield return FormatSse("text", new { delta = aiResponse });
-                    await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, aiResponse, "assistant");
-                }
-
-                yield return FormatSse("result", new { status = "success", data = resultData });
-
-                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateCompleted);
             }
             else if (interactionType == LLMInteractionType.ChooseTrack)
             {
@@ -1211,34 +1244,10 @@ public class CustomerService(
             {
                 toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(query, conversationContextText);
             }
-
-            var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
-                && !roadmapConfirmationReply
-                && !roadmapRefinementReply;
-
-            var discoveryAttempts = await GetDiscoveryAttemptCountAsync(userId, actualSessionId);
-
             // When the user is answering discovery questions, run AI-powered profile extraction
             // synchronously. The static parser may miss free-form answers.
-            if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile && hasAskedDiscovery)
+            if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile)
             {
-                try
-                {
-                    var contextForExtraction = $"{conversationContextText}\n[user]: {query}";
-                    var aiExtracted = await customerHelper.ExtractProfileAsync(contextForExtraction);
-                    if (aiExtracted != null)
-                    {
-                        var aiProfileEntity = UserProfileEntity.FromExtraction(userId, aiExtracted);
-                        await userProfileRepository.UpsertAsync(aiProfileEntity);
-                        _logger.LogDebug("Synchronous AI profile extraction succeeded for {UserId} during discovery (non-streaming)", userId);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Synchronous AI profile extraction failed for {UserId} (non-streaming), continuing with static extraction", userId);
-                }
-
-                // Re-fetch to pick up newly extracted profile data
                 try
                 {
                     var refreshedProfile = await userProfileRepository.GetByUserIdAsync(userId);
@@ -1251,9 +1260,44 @@ public class CustomerService(
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "Failed to re-fetch profile during roadmap discovery for {UserId}", userId);
+                    _logger.LogDebug(ex, "Failed to re-fetch profile during roadmap flow for {UserId}", userId);
+                }
+
+                // Only run the expensive AI extractor if the static parser failed to gather a sufficient profile.
+                if (!hasSufficientRoadmapProfile && hasAskedDiscovery)
+                {
+                    try
+                    {
+                        var contextForExtraction = $"{conversationContextText}\n[user]: {query}";
+                        var aiExtracted = await customerHelper.ExtractProfileAsync(contextForExtraction);
+                        if (aiExtracted != null)
+                        {
+                            var aiProfileEntity = UserProfileEntity.FromExtraction(userId, aiExtracted);
+                            await userProfileRepository.UpsertAsync(aiProfileEntity);
+                            _logger.LogDebug("Synchronous AI profile extraction succeeded for {UserId} during discovery (non-streaming)", userId);
+
+                            // Re-fetch one final time after AI extraction
+                            var finalProfile = await userProfileRepository.GetByUserIdAsync(userId);
+                            if (finalProfile != null)
+                            {
+                                userProfile = finalProfile;
+                                hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
+                                profileSummary = userProfile.ToPromptSummary();
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Synchronous AI profile extraction failed for {UserId} (non-streaming), continuing with static extraction", userId);
+                    }
                 }
             }
+
+            var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
+                && !roadmapConfirmationReply
+                && !roadmapRefinementReply;
+
+            var discoveryAttempts = await GetDiscoveryAttemptCountAsync(userId, actualSessionId);
 
             if (roadmapNeedsConfirmation)
             {
@@ -1369,20 +1413,44 @@ public class CustomerService(
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
                 toolArguments.JobId = Guid.NewGuid().ToString("N")[..12];
-                var apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments);
-                // Suppress pre-decision aiResponse when forceRoadmapFlow overrode intent.
-                if (forceRoadmapFlow)
+                string apiResponse = "";
+                try
                 {
-                    aiResponse = "Roadmap generated successfully.";
-                }
-                else
-                {
-                    aiResponse = string.IsNullOrEmpty(aiResponse)
-                        ? "Roadmap generated successfully."
-                        : $"{aiResponse}\n\nRoadmap generated successfully.";
-                }
+                    apiResponse = await ExecuteRoadmapGenerationAsync(toolArguments);
 
-                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateCompleted);
+                    // Suppress pre-decision aiResponse when forceRoadmapFlow overrode intent.
+                    if (forceRoadmapFlow)
+                    {
+                        aiResponse = "Roadmap generated successfully.";
+                    }
+                    else
+                    {
+                        aiResponse = string.IsNullOrEmpty(aiResponse)
+                            ? "Roadmap generated successfully."
+                            : $"{aiResponse}\n\nRoadmap generated successfully.";
+                    }
+
+                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateCompleted);
+                }
+                catch (Exception ex)
+                {
+                    var errorMsg = ex.InnerException?.Message ?? ex.Message;
+                    aiResponse = $"I apologize, but I encountered an error while generating your roadmap: {errorMsg}";
+                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateIdle);
+
+                    return new APIResponse<AiIntentDetectionResponse>()
+                    {
+                        StatusCode = HttpStatusCode.InternalServerError,
+                        Data = new AiIntentDetectionResponse
+                        {
+                            InteractionType = interactionType,
+                            Confidence = confidence,
+                            Success = false,
+                            Answer = aiResponse,
+                            ErrorMessage = errorMsg
+                        }
+                    };
+                }
             }
 
             if (toolArguments?.Tags != null)
@@ -1580,25 +1648,25 @@ public class CustomerService(
         try
         {
             var response = await client.PostAsync(apiUrl, httpContent, cancellationToken);
+            var resultJson = await response.Content.ReadAsStringAsync();
 
             if (response.IsSuccessStatusCode)
             {
-                var resultJson = await response.Content.ReadAsStringAsync();
                 return resultJson;
             }
             else
             {
-                return $"Error: The roadmap service returned {response.StatusCode}";
+                throw new InvalidOperationException($"Error: The roadmap service returned {response.StatusCode}. Details: {resultJson}");
             }
         }
         catch (TaskCanceledException)
         {
-            return "Error: The roadmap service request timed out. Please try again.";
+            throw new TimeoutException("Error: The roadmap service request timed out. Please try again.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not InvalidOperationException && ex is not TimeoutException)
         {
             _logger.LogError(ex, "Roadmap service call failed for request payload.");
-            return "Error: Unable to reach roadmap service right now. Please try again later.";
+            throw new Exception("Error: Unable to reach roadmap service right now. Please try again later.", ex);
         }
     }
 
@@ -1909,7 +1977,7 @@ Latest user message:
 
             var (Response, ModelName, ThinkingContent) = await customerHelper.SendRequestWithModel(
                 prompt,
-                options.CurrentValue.Llm.Model,
+                options.CurrentValue.Llm.ChatModel,
                 useThinking: false,
                 isSuperAdmin: IsSuperAdmin(),
                 systemPrompt: classifierSystem);

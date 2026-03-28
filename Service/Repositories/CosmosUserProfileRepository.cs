@@ -33,7 +33,7 @@ public class CosmosUserProfileRepository(
             var database = databaseResponse.Database;
 
             // Partition by userId for efficient single-user queries
-            var containerResponse = await database.CreateContainerIfNotExistsAsync(_containerName, "/userId");
+            var containerResponse = await database.CreateContainerIfNotExistsAsync(_containerName, "/UserId");
             _container = containerResponse.Container;
 
             _logger.LogInformation("Initialized Cosmos container '{ContainerName}' for user profiles", _containerName);
