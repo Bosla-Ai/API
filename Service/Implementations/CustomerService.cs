@@ -2322,6 +2322,15 @@ Latest user message:
 
     private async Task<string?> GetRoadmapFlowStateAsync(string userId, string sessionId)
     {
+        var latestStateMessage = await chatRepository.GetLatestStateMessageByPrefixAsync(
+            userId,
+            sessionId,
+            RoadmapIntentHelper.RoadmapStatePrefix);
+
+        var latestState = RoadmapIntentHelper.ExtractRoadmapState(latestStateMessage);
+        if (!string.IsNullOrWhiteSpace(latestState))
+            return latestState;
+
         var messages = await chatRepository.GetMessagesAsync(userId, sessionId, 80);
 
         foreach (var message in messages.OrderByDescending(m => m.CreatedAt))
