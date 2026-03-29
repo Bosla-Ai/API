@@ -19,6 +19,11 @@ public class NullChatRepository : IChatRepository
         return Task.FromResult(new List<ChatMessageEntity>());
     }
 
+    public Task<string?> GetLatestStateMessageByPrefixAsync(string userId, string sessionId, string prefix)
+    {
+        return Task.FromResult<string?>(null);
+    }
+
     public Task DeleteMessagesAsync(string userId, string sessionId, IEnumerable<string> messageIds)
     {
         return Task.CompletedTask;
