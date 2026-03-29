@@ -664,7 +664,7 @@ public class CustomerService(
 
                         try
                         {
-                            await userProfileRepository.UpsertAsync(contextDerivedProfile);
+                            await userProfileRepository.UpsertAsync(userProfile);
                         }
                         catch (Exception persistEx)
                         {
@@ -787,7 +787,7 @@ public class CustomerService(
         // Respecting the max-attempts cap here prevents a second infinite-loop entry point.
         if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile)
         {
-            var safetyAttemptCount = await GetDiscoveryAttemptCountAsync(userId, actualSessionId);
+            var safetyAttemptCount = discoveryAttemptCount;
             if (safetyAttemptCount >= 2)
             {
                 // Max attempts reached — let the pipeline proceed with the partial profile.
@@ -2252,6 +2252,15 @@ Latest user message:
 
     private async Task<int?> TryGetPersistedDiscoveryAttemptCountAsync(string userId, string sessionId)
     {
+        var latestAttemptMessage = await chatRepository.GetLatestStateMessageByPrefixAsync(
+            userId,
+            sessionId,
+            RoadmapDiscoveryAttemptPrefix);
+
+        var latestAttempt = ExtractRoadmapDiscoveryAttempt(latestAttemptMessage);
+        if (latestAttempt.HasValue)
+            return latestAttempt.Value;
+
         var messages = await chatRepository.GetMessagesAsync(userId, sessionId, 200);
         for (var i = messages.Count - 1; i >= 0; i--)
         {

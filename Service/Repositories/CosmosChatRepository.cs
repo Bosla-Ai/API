@@ -65,6 +65,33 @@ public class CosmosChatRepository(CosmosClient cosmosClient, IConfiguration conf
         return messages;
     }
 
+    public async Task<string?> GetLatestStateMessageByPrefixAsync(string userId, string sessionId, string prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix))
+            return null;
+
+        var container = await GetContainerAsync();
+        var query = container.GetItemLinqQueryable<ChatMessageEntity>(
+                requestOptions: new QueryRequestOptions { PartitionKey = new PartitionKey(userId) })
+            .Where(m => m.SessionId == sessionId
+                        && m.Role == "state"
+                        && m.Message != null
+                        && m.Message.StartsWith(prefix))
+            .OrderByDescending(m => m.CreatedAt)
+            .Take(1);
+
+        using var iterator = query.ToFeedIterator();
+        while (iterator.HasMoreResults)
+        {
+            var response = await iterator.ReadNextAsync();
+            var latest = response.FirstOrDefault();
+            if (latest != null)
+                return latest.Message;
+        }
+
+        return null;
+    }
+
     public async Task DeleteMessagesAsync(string userId, string sessionId, IEnumerable<string> messageIds)
     {
         var container = await GetContainerAsync();
