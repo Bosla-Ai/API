@@ -84,12 +84,12 @@ public class MistralOptions
 public class PromptOptions
 {
     public string IntentDetectionSystemPrompt { get; set; } = string.Empty;
-    public string IntentDetectionSystemPromptPowerful { get; set; } = string.Empty;
     public string IntentDetectionUserPromptTemplate { get; set; } = string.Empty;
     public string ChatSystemPrompt { get; set; } = string.Empty;
-    public string ChatSystemPromptPowerful { get; set; } = string.Empty;
+    public string ChatSystemPromptDeep { get; set; } = string.Empty;
     public string ChatUserPromptTemplate { get; set; } = string.Empty;
     public string SummarizationPromptTemplate { get; set; } = string.Empty;
+    public string LanguageRules { get; set; } = string.Empty;
 
     // Smart Discovery Funnel prompts
     public string ModeClassificationPrompt { get; set; } = string.Empty;

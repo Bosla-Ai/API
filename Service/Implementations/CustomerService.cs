@@ -77,7 +77,7 @@ public class CustomerService(
 
     public async IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
-        ChatMode chatMode = ChatMode.Normal)
+        ChatMode chatMode = ChatMode.Fast)
     {
         if (string.IsNullOrWhiteSpace(userId))
             throw new BadRequestException("User ID is required");
@@ -96,6 +96,9 @@ public class CustomerService(
             _logger.LogDebug("UI mode override detected: {Mode}", uiSelectedMode);
         }
 
+        // Detect user language for hard constraint injection
+        var detectedLanguage = DetectLanguage(query);
+
         var pendingSseEvents = new ConcurrentQueue<string>();
         conversationContextManager.OnSseEvent = (eventName, data) =>
         {
@@ -108,6 +111,9 @@ public class CustomerService(
         var conversationContext = await conversationContextManager.GetConversationContextAsync(userId, actualSessionId);
         var conversationContextText = conversationContext.ToString();
 
+        // Build set of previously asked question IDs to avoid repeating them
+        var previouslyAskedIds = ExtractAskedQuestionIds(conversationContextText);
+
         // Drain any buffered SSE events (e.g. compaction)
         while (pendingSseEvents.TryDequeue(out var sseEvent))
             yield return sseEvent;
@@ -115,12 +121,12 @@ public class CustomerService(
         yield return FormatSse("status", new { message = "Analyzing your request...", step = "init" });
 
         // Emit quota info for Powerful mode
-        if (chatMode == ChatMode.Powerful)
+        if (chatMode == ChatMode.Deep)
         {
             var remaining = customerHelper.GetGeminiRemainingQuota(userId, IsSuperAdmin());
             yield return FormatSse("quota", new
             {
-                mode = "powerful",
+                mode = "deep",
                 remaining,
                 limit = options.CurrentValue.Gemini.MaxRequestsPerUserPerDay
             });
@@ -280,7 +286,7 @@ public class CustomerService(
         var profileSummary = userProfile?.ToPromptSummary() ?? "No profile data yet";
         var hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
 
-        if (enableModeClassification && !skipIntentDetection && chatMode != ChatMode.Powerful && !explicitRoadmapRequest)
+        if (enableModeClassification && !skipIntentDetection && chatMode != ChatMode.Deep && !explicitRoadmapRequest)
         {
             yield return FormatSse("status", new { message = "Understanding your request...", step = "mode_classification" });
 
@@ -384,10 +390,14 @@ public class CustomerService(
         // Intent Detection (only for ACTION mode)
         var prompts = options.CurrentValue.Prompts;
 
-        var systemPrompt = chatMode == ChatMode.Powerful
-            && !string.IsNullOrEmpty(prompts.IntentDetectionSystemPromptPowerful)
-            ? prompts.IntentDetectionSystemPromptPowerful
-            : prompts.IntentDetectionSystemPrompt;
+        var systemPrompt = prompts.IntentDetectionSystemPrompt;
+        if (chatMode == ChatMode.Deep)
+            systemPrompt = "Use your thinking capability to reason step-by-step before classifying the user's intent.\n\n" + systemPrompt;
+
+        // Inject shared language rules
+        if (!string.IsNullOrEmpty(prompts.LanguageRules))
+            systemPrompt = systemPrompt.Replace("{LANGUAGE_RULES}", prompts.LanguageRules);
+
         if (!string.IsNullOrEmpty(marketContext))
         {
             systemPrompt = systemPrompt.Replace("{MARKET_CONTEXT}", marketContext);
@@ -397,6 +407,10 @@ public class CustomerService(
             systemPrompt = systemPrompt.Replace("{MARKET_CONTEXT}",
                 "No real-time market data available. Use your knowledge of current labor market trends.");
         }
+
+        // Hard language constraint based on detected user language
+        var langName = detectedLanguage == "ar" ? "Arabic" : "English";
+        systemPrompt = $"[LANGUAGE CONSTRAINT: You MUST respond in {langName} only. This overrides all other language rules.]\n\n" + systemPrompt;
 
         // Inject UI mode context using canonical server-side label (prevents prompt injection).
         var missingProfileFields = GetMissingProfileFields(userProfile);
@@ -735,26 +749,31 @@ public class CustomerService(
                     var discoveryQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions))
                         ? questions
                         : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+                    discoveryQuestions = DeduplicateQuestions(discoveryQuestions, previouslyAskedIds);
 
                     var discoveryIntro = !string.IsNullOrWhiteSpace(aiResponse)
                         ? aiResponse
                         : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
 
                     yield return FormatSse("text", new { delta = discoveryIntro });
-                    yield return FormatSse("ask_user", new { questions = discoveryQuestions });
-
-                    if (followUpSuggestions is { Length: > 0 })
-                        yield return FormatSse("suggestions", new { items = followUpSuggestions });
+                    if (discoveryQuestions.Length > 0)
+                    {
+                        yield return FormatSse("ask_user", new { questions = discoveryQuestions });
+                        MarkQuestionsAsked(previouslyAskedIds, discoveryQuestions);
+                        await conversationContextManager.AddMessageToContextAsync(
+                            userId, actualSessionId,
+                            $"{discoveryIntro}\n[ASKED_QUESTIONS:{string.Join(",", discoveryQuestions.Select(q => q.Id))}]",
+                            "assistant");
+                    }
+                    else
+                    {
+                        await conversationContextManager.AddMessageToContextAsync(
+                            userId, actualSessionId, discoveryIntro, "assistant");
+                    }
 
                     yield return FormatSse("done", new { message = "Roadmap discovery questions requested" });
 
                     await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
-
-                    await conversationContextManager.AddMessageToContextAsync(
-                        userId,
-                        actualSessionId,
-                        discoveryIntro,
-                        "assistant");
 
                     yield break;
                 }
@@ -767,11 +786,13 @@ public class CustomerService(
             var confirmQuestions = (questions is { Length: > 0 } && !IsRoadmapIntakeQuestionSet(questions))
                 ? questions
                 : BuildRoadmapConfirmationQuestions();
+            confirmQuestions = DeduplicateQuestions(confirmQuestions, previouslyAskedIds);
 
-            yield return FormatSse("ask_user", new { questions = confirmQuestions });
-
-            if (followUpSuggestions is { Length: > 0 })
-                yield return FormatSse("suggestions", new { items = followUpSuggestions });
+            if (confirmQuestions.Length > 0)
+            {
+                yield return FormatSse("ask_user", new { questions = confirmQuestions });
+                MarkQuestionsAsked(previouslyAskedIds, confirmQuestions);
+            }
 
             yield return FormatSse("done", new { message = "Roadmap confirmation requested" });
 
@@ -780,7 +801,7 @@ public class CustomerService(
             await conversationContextManager.AddMessageToContextAsync(
                 userId,
                 actualSessionId,
-                aiResponse ?? "Please confirm if you want me to generate your roadmap now.",
+                $"{aiResponse ?? "Please confirm if you want me to generate your roadmap now."}\n[ASKED_QUESTIONS:{string.Join(",", confirmQuestions.Select(q => q.Id))}]",
                 "assistant");
 
             yield break;
@@ -804,16 +825,24 @@ public class CustomerService(
                     "Pre-pipeline safety net: profile still incomplete for {UserId} (attempt {Count}), re-entering discovery",
                     userId, safetyAttemptCount + 1);
 
-                var safetyQuestions = BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+                var safetyQuestions = DeduplicateQuestions(
+                    BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText),
+                    previouslyAskedIds);
                 var safetyIntro = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
 
                 yield return FormatSse("text", new { delta = safetyIntro });
-                yield return FormatSse("ask_user", new { questions = safetyQuestions });
+                if (safetyQuestions.Length > 0)
+                {
+                    yield return FormatSse("ask_user", new { questions = safetyQuestions });
+                    MarkQuestionsAsked(previouslyAskedIds, safetyQuestions);
+                }
                 yield return FormatSse("done", new { message = "Roadmap discovery re-requested (safety net)" });
 
                 await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
                 await conversationContextManager.AddMessageToContextAsync(
-                    userId, actualSessionId, safetyIntro, "assistant");
+                    userId, actualSessionId,
+                    $"{safetyIntro}\n[ASKED_QUESTIONS:{string.Join(",", safetyQuestions.Select(q => q.Id))}]",
+                    "assistant");
 
                 yield break;
             }
@@ -825,20 +854,25 @@ public class CustomerService(
 
         if (shouldEmitQuestions)
         {
+            var dedupedQuestions = DeduplicateQuestions(questions, previouslyAskedIds);
+
             // Emit the response text first (introduces the questions)
             if (!string.IsNullOrEmpty(aiResponse))
                 yield return FormatSse("text", new { delta = aiResponse });
 
-            yield return FormatSse("ask_user", new { questions });
-
-            if (followUpSuggestions is { Length: > 0 })
-                yield return FormatSse("suggestions", new { items = followUpSuggestions });
+            if (dedupedQuestions.Length > 0)
+            {
+                yield return FormatSse("ask_user", new { questions = dedupedQuestions });
+                MarkQuestionsAsked(previouslyAskedIds, dedupedQuestions);
+            }
 
             yield return FormatSse("done", new { message = "Questions sent" });
 
             // Save conversation context
             await conversationContextManager.AddMessageToContextAsync(
-                userId, actualSessionId, aiResponse ?? "Asked clarification questions", "assistant");
+                userId, actualSessionId,
+                $"{aiResponse ?? "Asked clarification questions"}\n[ASKED_QUESTIONS:{string.Join(",", dedupedQuestions.Select(q => q.Id))}]",
+                "assistant");
 
             yield break;
         }
@@ -908,7 +942,7 @@ public class CustomerService(
 
         if (interactionType == LLMInteractionType.ChatWithAI)
         {
-            var (chatSystemPrompt, chatPrompt) = BuildChatPrompt(conversationContext.ToString(), query, profileSummary, chatMode);
+            var (chatSystemPrompt, chatPrompt) = BuildChatPrompt(conversationContext.ToString(), query, profileSummary, chatMode, detectedLanguage);
 
             var fullResponseBuilder = new StringBuilder();
             var chatThinkingLog = "";
@@ -1244,6 +1278,7 @@ public class CustomerService(
 
             var conversationContext = await contextTask;
             var conversationContextText = conversationContext.ToString();
+            var previouslyAskedIds = ExtractAskedQuestionIds(conversationContextText);
             var userProfile = await profileTask;
             var profileSummary = userProfile?.ToPromptSummary() ?? "No profile data yet";
             var hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
@@ -1389,11 +1424,14 @@ public class CustomerService(
                             ? aiResponse
                             : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
 
-                        var responseQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions))
-                            ? questions
-                            : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+                        var responseQuestions = DeduplicateQuestions(
+                            (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions))
+                                ? questions
+                                : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText),
+                            previouslyAskedIds);
 
-                        await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, responseMessage, "assistant");
+                        await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
+                            $"{responseMessage}\n[ASKED_QUESTIONS:{string.Join(",", responseQuestions.Select(q => q.Id))}]", "assistant");
                         await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
 
                         return new APIResponse<AiIntentDetectionResponse>()
@@ -1418,11 +1456,14 @@ public class CustomerService(
                     ? aiResponse
                     : "I can generate your roadmap. Please confirm to continue.";
 
-                var confirmQuestions = (questions is { Length: > 0 } && !IsRoadmapIntakeQuestionSet(questions))
-                    ? questions
-                    : BuildRoadmapConfirmationQuestions();
+                var confirmQuestions = DeduplicateQuestions(
+                    (questions is { Length: > 0 } && !IsRoadmapIntakeQuestionSet(questions))
+                        ? questions
+                        : BuildRoadmapConfirmationQuestions(),
+                    previouslyAskedIds);
 
-                await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, confirmMessage, "assistant");
+                await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
+                    $"{confirmMessage}\n[ASKED_QUESTIONS:{string.Join(",", confirmQuestions.Select(q => q.Id))}]", "assistant");
                 await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
 
                 return new APIResponse<AiIntentDetectionResponse>()
@@ -1459,9 +1500,12 @@ public class CustomerService(
                         userId, safetyAttempts + 1);
 
                     var safetyMessage = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
-                    var safetyQuestions = BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+                    var safetyQuestions = DeduplicateQuestions(
+                        BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText),
+                        previouslyAskedIds);
 
-                    await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, safetyMessage, "assistant");
+                    await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
+                        $"{safetyMessage}\n[ASKED_QUESTIONS:{string.Join(",", safetyQuestions.Select(q => q.Id))}]", "assistant");
                     await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
 
                     return new APIResponse<AiIntentDetectionResponse>()
@@ -1573,7 +1617,7 @@ public class CustomerService(
         }
     }
 
-    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)> DetectIntentAsync(string query, string conversationContext, string? profileSummary = null, ChatMode chatMode = ChatMode.Normal, string? marketSkillsList = null)
+    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)> DetectIntentAsync(string query, string conversationContext, string? profileSummary = null, ChatMode chatMode = ChatMode.Fast, string? marketSkillsList = null)
     {
         var prompts = options.CurrentValue.Prompts;
         var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
@@ -1582,10 +1626,11 @@ public class CustomerService(
             profileSummary ?? "No profile data yet",
             marketSkillsList ?? "No market skills data available");
 
-        var intentSystemPrompt = chatMode == ChatMode.Powerful
-            && !string.IsNullOrEmpty(prompts.IntentDetectionSystemPromptPowerful)
-            ? prompts.IntentDetectionSystemPromptPowerful
-            : prompts.IntentDetectionSystemPrompt;
+        var intentSystemPrompt = prompts.IntentDetectionSystemPrompt;
+        if (chatMode == ChatMode.Deep)
+            intentSystemPrompt = "Use your thinking capability to reason step-by-step before classifying the user's intent.\n\n" + intentSystemPrompt;
+        if (!string.IsNullOrEmpty(prompts.LanguageRules))
+            intentSystemPrompt = intentSystemPrompt.Replace("{LANGUAGE_RULES}", prompts.LanguageRules);
 
         try
         {
@@ -1604,7 +1649,7 @@ public class CustomerService(
         }
     }
 
-    private (string SystemPrompt, string UserPrompt) BuildChatPrompt(string context, string query, string? profileSummary = null, ChatMode chatMode = ChatMode.Normal)
+    private (string SystemPrompt, string UserPrompt) BuildChatPrompt(string context, string query, string? profileSummary = null, ChatMode chatMode = ChatMode.Fast, string? detectedLanguage = null)
     {
         var prompts = options.CurrentValue.Prompts;
 
@@ -1614,10 +1659,20 @@ public class CustomerService(
             enrichedContext = $"[User Profile: {profileSummary}]\n\n{context}";
         }
 
-        var chatSystemPrompt = chatMode == ChatMode.Powerful
-            && !string.IsNullOrEmpty(prompts.ChatSystemPromptPowerful)
-            ? prompts.ChatSystemPromptPowerful
+        var chatSystemPrompt = chatMode == ChatMode.Deep
+            && !string.IsNullOrEmpty(prompts.ChatSystemPromptDeep)
+            ? prompts.ChatSystemPromptDeep
             : prompts.ChatSystemPrompt;
+
+        // Inject shared language rules
+        if (!string.IsNullOrEmpty(prompts.LanguageRules))
+            chatSystemPrompt = chatSystemPrompt.Replace("{LANGUAGE_RULES}", prompts.LanguageRules);
+
+        if (!string.IsNullOrEmpty(detectedLanguage))
+        {
+            var langName = detectedLanguage == "ar" ? "Arabic" : "English";
+            chatSystemPrompt = $"[LANGUAGE CONSTRAINT: You MUST respond in {langName} only. This overrides all other language rules.]\n\n" + chatSystemPrompt;
+        }
 
         var userPrompt = string.Format(prompts.ChatUserPromptTemplate,
             enrichedContext,
@@ -2238,6 +2293,48 @@ Latest user message:
 
         var stored = aiRequestStore.GetAndRemove(requestId) ?? throw new NotFoundException("Request not found or expired");
         return stored;
+    }
+
+    private static string DetectLanguage(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "en";
+        int arabicCount = 0;
+        int letterCount = 0;
+        foreach (var c in text)
+        {
+            if (char.IsLetter(c))
+            {
+                letterCount++;
+                if (c >= '\u0600' && c <= '\u06FF') arabicCount++;
+            }
+        }
+        return letterCount > 0 && (double)arabicCount / letterCount > 0.3 ? "ar" : "en";
+    }
+
+    private static HashSet<string> ExtractAskedQuestionIds(string conversationContext)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrEmpty(conversationContext)) return ids;
+        foreach (System.Text.RegularExpressions.Match m in
+            System.Text.RegularExpressions.Regex.Matches(conversationContext, @"\[ASKED_QUESTIONS:([^\]]+)\]"))
+        {
+            foreach (var id in m.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                ids.Add(id);
+        }
+        return ids;
+    }
+
+    private static AskUserQuestion[] DeduplicateQuestions(AskUserQuestion[] questions, HashSet<string> askedIds)
+    {
+        if (questions is not { Length: > 0 } || askedIds.Count == 0) return questions;
+        var filtered = questions.Where(q => !askedIds.Contains(q.Id)).ToArray();
+        return filtered.Length > 0 ? filtered : questions; // fallback: if all deduped, keep originals to avoid empty
+    }
+
+    private static void MarkQuestionsAsked(HashSet<string> askedIds, AskUserQuestion[] questions)
+    {
+        foreach (var q in questions)
+            askedIds.Add(q.Id);
     }
 
     private string FormatSse(string eventName, object data)

@@ -152,11 +152,11 @@ public class CustomerHelper
 
     public async Task<(string Response, string ModelName, string? ThinkingContent)> SendRequestByTask(
         string prompt, LLMInteractionType taskType, bool useThinking = false,
-        string? userId = null, bool isSuperAdmin = false, ChatMode chatMode = ChatMode.Normal, string? systemPrompt = null)
+        string? userId = null, bool isSuperAdmin = false, ChatMode chatMode = ChatMode.Fast, string? systemPrompt = null)
     {
         var targetModel = GetModelForTask(taskType);
 
-        if (chatMode == ChatMode.Powerful)
+        if (chatMode == ChatMode.Deep)
         {
             return await SendRequestToGemini(prompt, useThinking, userId, isSuperAdmin, systemPrompt);
         }
@@ -600,11 +600,11 @@ public class CustomerHelper
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
         string? userId = null,
         bool isSuperAdmin = false,
-        ChatMode chatMode = ChatMode.Normal,
+        ChatMode chatMode = ChatMode.Fast,
         string? systemPrompt = null)
     {
         // Powerful mode: route all tasks to Gemini (intent detection bypasses this via SendStreamRequestWithModel)
-        if (chatMode == ChatMode.Powerful)
+        if (chatMode == ChatMode.Deep)
         {
             await foreach (var chunk in SendStreamRequestToGemini(prompt, useThinking, cancellationToken, userId, isSuperAdmin, systemPrompt))
                 yield return chunk;

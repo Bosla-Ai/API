@@ -10,7 +10,7 @@ namespace Service.Abstraction;
 public interface ICustomerService
 {
     Task<APIResponse<string>> ProcessUserQueryAsync(string userId, string query, string? sessionId = null);
-    IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null, CancellationToken cancellationToken = default, ChatMode chatMode = ChatMode.Normal);
+    IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null, CancellationToken cancellationToken = default, ChatMode chatMode = ChatMode.Fast);
 
     Task<APIResponse<AiIntentDetectionResponse>> ProcessUserQueryWithIntentDetectionAsync(string userId, string query, string? sessionId = null);
 

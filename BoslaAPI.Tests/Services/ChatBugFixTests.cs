@@ -14,21 +14,21 @@ public class ChatBugFixTests
     #region Dual Prompt Architecture (Workstream 1)
 
     [Fact]
-    public void PromptOptions_HasPowerfulModeFields()
+    public void PromptOptions_HasDeepModeFields()
     {
         var opts = new PromptOptions();
 
-        opts.IntentDetectionSystemPromptPowerful.Should().NotBeNull();
-        opts.ChatSystemPromptPowerful.Should().NotBeNull();
+        opts.ChatSystemPromptDeep.Should().NotBeNull();
+        opts.LanguageRules.Should().NotBeNull();
     }
 
     [Fact]
-    public void PromptOptions_PowerfulFieldsDefaultToEmpty()
+    public void PromptOptions_DeepFieldsDefaultToEmpty()
     {
         var opts = new PromptOptions();
 
-        opts.IntentDetectionSystemPromptPowerful.Should().BeEmpty();
-        opts.ChatSystemPromptPowerful.Should().BeEmpty();
+        opts.ChatSystemPromptDeep.Should().BeEmpty();
+        opts.LanguageRules.Should().BeEmpty();
     }
 
     [Fact]
@@ -41,7 +41,7 @@ public class ChatBugFixTests
 
         var parameters = method!.GetParameters();
         parameters.Should().Contain(p => p.Name == "chatMode");
-        parameters.First(p => p.Name == "chatMode").DefaultValue.Should().Be(ChatMode.Normal);
+        parameters.First(p => p.Name == "chatMode").DefaultValue.Should().Be(ChatMode.Fast);
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public class ChatBugFixTests
 
         var parameters = method!.GetParameters();
         parameters.Should().Contain(p => p.Name == "chatMode");
-        parameters.First(p => p.Name == "chatMode").DefaultValue.Should().Be(ChatMode.Normal);
+        parameters.First(p => p.Name == "chatMode").DefaultValue.Should().Be(ChatMode.Fast);
     }
 
     #endregion

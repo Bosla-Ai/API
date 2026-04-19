@@ -10,7 +10,7 @@ public class AiQueryRequest
     public string? SessionId { get; set; }
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public ChatMode ChatMode { get; set; } = ChatMode.Normal;
+    public ChatMode ChatMode { get; set; } = ChatMode.Fast;
 }
 
 public class AiQueryResponse

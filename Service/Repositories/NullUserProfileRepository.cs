@@ -1,9 +1,10 @@
+using Microsoft.Extensions.Logging;
 using Service.Abstraction;
 using Shared.DTOs;
 
 namespace Service.Repositories;
 
-public class NullUserProfileRepository : IUserProfileRepository
+public class NullUserProfileRepository(ILogger<NullUserProfileRepository> logger) : IUserProfileRepository
 {
     public Task<UserProfileEntity?> GetByUserIdAsync(string userId)
     {
@@ -12,6 +13,7 @@ public class NullUserProfileRepository : IUserProfileRepository
 
     public Task UpsertAsync(UserProfileEntity profile)
     {
+        logger.LogWarning("UserProfile write discarded — Cosmos DB not configured. UserId: {UserId}", profile.UserId);
         return Task.CompletedTask;
     }
 
