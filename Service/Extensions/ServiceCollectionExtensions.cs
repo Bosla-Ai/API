@@ -59,11 +59,13 @@ public static class ServiceCollectionExtensions
         {
             services.AddSingleton<IChatRepository, CosmosChatRepository>();
             services.AddSingleton<IUserProfileRepository, CosmosUserProfileRepository>();
+            services.AddSingleton<IFeedbackRepository, CosmosFeedbackRepository>();
         }
         else
         {
             services.AddSingleton<IChatRepository, NullChatRepository>();
             services.AddSingleton<IUserProfileRepository, NullUserProfileRepository>();
+            services.AddSingleton<IFeedbackRepository, NullFeedbackRepository>();
         }
 
         services.AddHttpContextAccessor();
