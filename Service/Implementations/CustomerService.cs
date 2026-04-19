@@ -452,7 +452,10 @@ public class CustomerService(
             var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
                 (!string.IsNullOrEmpty(conversationContextText) ? $"Conversation History:\n{conversationContextText}\n\n" : ""),
                 query,
-                profileSummary);
+                profileSummary,
+                fetchedMarketInsight?.TopRequiredSkills is { Length: > 0 }
+                    ? string.Join(", ", fetchedMarketInsight.TopRequiredSkills)
+                    : "No market skills data available");
 
             var detectionJsonBuilder = new StringBuilder();
             string detectionModel = "Unknown";
@@ -969,6 +972,13 @@ public class CustomerService(
 
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
+                // Validate LLM-generated tags against market data
+                if (toolArguments.Tags is { Length: > 0 } && fetchedMarketInsight?.TopRequiredSkills is { Length: > 0 })
+                {
+                    toolArguments.Tags = ValidateTagsAgainstMarket(
+                        toolArguments.Tags, fetchedMarketInsight.TopRequiredSkills, interactionType);
+                }
+
                 // Career Pulse from CV/roadmap tags — fetch market data if not already done
                 if (toolArguments.Tags is { Length: > 0 })
                 {
@@ -1563,13 +1573,14 @@ public class CustomerService(
         }
     }
 
-    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)> DetectIntentAsync(string query, string conversationContext, string? profileSummary = null, ChatMode chatMode = ChatMode.Normal)
+    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)> DetectIntentAsync(string query, string conversationContext, string? profileSummary = null, ChatMode chatMode = ChatMode.Normal, string? marketSkillsList = null)
     {
         var prompts = options.CurrentValue.Prompts;
         var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
             (!string.IsNullOrEmpty(conversationContext) ? $"Conversation History:\n{conversationContext}\n\n" : ""),
             query,
-            profileSummary ?? "No profile data yet");
+            profileSummary ?? "No profile data yet",
+            marketSkillsList ?? "No market skills data available");
 
         var intentSystemPrompt = chatMode == ChatMode.Powerful
             && !string.IsNullOrEmpty(prompts.IntentDetectionSystemPromptPowerful)
@@ -1823,6 +1834,78 @@ public class CustomerService(
             .Split([' ', '\t', '\n', '\r', '.', ',', '!', '?', ';', ':'], StringSplitOptions.RemoveEmptyEntries);
 
         return tokens.Contains("no") || tokens.Contains("لا") || tokens.Contains("لأ");
+    }
+
+    private string[] ValidateTagsAgainstMarket(
+        string[] llmTags, string[] marketSkills, LLMInteractionType interactionType)
+    {
+        var marketSet = new HashSet<string>(marketSkills, StringComparer.OrdinalIgnoreCase);
+
+        // Count how many LLM tags overlap with market skills (fuzzy: check if market skill is contained in tag)
+        int overlapCount = 0;
+        foreach (var tag in llmTags)
+        {
+            if (marketSet.Any(ms =>
+                tag.Contains(ms, StringComparison.OrdinalIgnoreCase) ||
+                ms.Contains(tag, StringComparison.OrdinalIgnoreCase)))
+            {
+                overlapCount++;
+            }
+        }
+
+        var overlapRatio = llmTags.Length > 0 ? (float)overlapCount / llmTags.Length : 0;
+
+        // CVAnalysis: light validation — trust LLM gap analysis, only warn
+        if (interactionType == LLMInteractionType.CVAnalysis)
+        {
+            if (overlapRatio < 0.3f)
+            {
+                _logger.LogWarning("CV analysis tags have low market overlap ({Ratio:P0}). LLM tags: [{Tags}], Market: [{Market}]",
+                    overlapRatio, string.Join(", ", llmTags), string.Join(", ", marketSkills.Take(10)));
+            }
+            return llmTags; // Trust gap analysis
+        }
+
+        // RoadmapGeneration: if <50% overlap, replace with market-derived tags
+        if (interactionType == LLMInteractionType.RoadmapGeneration && overlapRatio < 0.5f)
+        {
+            _logger.LogWarning("Roadmap tags replaced: low market overlap ({Ratio:P0}). Original: [{Tags}] → Market: [{Market}]",
+                overlapRatio, string.Join(", ", llmTags), string.Join(", ", marketSkills.Take(10)));
+
+            // Build tags from market skills, transforming to course-level names
+            var marketTags = marketSkills
+                .Take(Math.Min(10, Math.Max(6, marketSkills.Length)))
+                .Select(NormalizeSkillToTag)
+                .ToArray();
+
+            return marketTags;
+        }
+
+        return llmTags;
+    }
+
+    private static string NormalizeSkillToTag(string skill)
+    {
+        // Transform raw skill names into searchable course-level titles
+        var normalized = skill.Trim();
+        // If it's a short acronym/name that doesn't look like a course title, append context
+        if (normalized.Length <= 4 && !normalized.Contains(' '))
+        {
+            return normalized switch
+            {
+                _ when normalized.Equals("C#", StringComparison.OrdinalIgnoreCase) => "C# Programming",
+                _ when normalized.Equals("SQL", StringComparison.OrdinalIgnoreCase) => "SQL & Databases",
+                _ when normalized.Equals("CSS", StringComparison.OrdinalIgnoreCase) => "CSS & Styling",
+                _ when normalized.Equals("HTML", StringComparison.OrdinalIgnoreCase) => "HTML & Web Fundamentals",
+                _ when normalized.Equals("Git", StringComparison.OrdinalIgnoreCase) => "Git & Version Control",
+                _ when normalized.Equals("AWS", StringComparison.OrdinalIgnoreCase) => "AWS Cloud Services",
+                _ when normalized.Equals("GCP", StringComparison.OrdinalIgnoreCase) => "Google Cloud Platform",
+                _ when normalized.Equals("CI", StringComparison.OrdinalIgnoreCase) => "CI/CD & DevOps",
+                _ when normalized.Equals("REST", StringComparison.OrdinalIgnoreCase) => "REST API Design",
+                _ => normalized
+            };
+        }
+        return normalized;
     }
 
     private static bool HasSufficientRoadmapProfile(UserProfileEntity? userProfile)
