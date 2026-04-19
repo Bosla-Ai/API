@@ -17,4 +17,9 @@ public class NullFeedbackRepository(ILogger<NullFeedbackRepository> logger) : IF
     {
         return Task.FromResult<IReadOnlyList<FeedbackEntity>>(Array.Empty<FeedbackEntity>());
     }
+
+    public Task<IReadOnlyList<FeedbackEntity>> GetAllAsync(int? limit = null)
+    {
+        return Task.FromResult<IReadOnlyList<FeedbackEntity>>(Array.Empty<FeedbackEntity>());
+    }
 }

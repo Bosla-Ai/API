@@ -13,7 +13,8 @@ public class ServiceManager(
     IRefreshTokenService refreshToken,
     IUserService user,
     IJobMarketService jobMarket,
-    IChatHistoryService chatHistory) : IServiceManager
+    IChatHistoryService chatHistory,
+    IFeedbackService feedback) : IServiceManager
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork;
 
@@ -26,6 +27,7 @@ public class ServiceManager(
     public IUserService User { get; private set; } = user;
     public IJobMarketService JobMarket { get; private set; } = jobMarket;
     public IChatHistoryService ChatHistory { get; private set; } = chatHistory;
+    public IFeedbackService Feedback { get; private set; } = feedback;
 
     public async Task SaveChangesAsync()
     {

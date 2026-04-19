@@ -84,6 +84,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IStackExchangeService, StackExchangeService>();
         services.AddScoped<ITechEcosystemService, TechEcosystemService>();
         services.AddScoped<IChatHistoryService, ChatHistoryService>();
+        services.AddScoped<IFeedbackService, FeedbackService>();
 
         services.AddScoped<IServiceManager, ServiceManager>(); // for generalization
         services.AddScoped<AuthenticationHelper>();
