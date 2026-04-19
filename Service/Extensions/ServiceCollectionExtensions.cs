@@ -1,6 +1,7 @@
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Service.Abstraction;
 using Service.Helpers;
@@ -66,6 +67,10 @@ public static class ServiceCollectionExtensions
             services.AddSingleton<IChatRepository, NullChatRepository>();
             services.AddSingleton<IUserProfileRepository, NullUserProfileRepository>();
             services.AddSingleton<IFeedbackRepository, NullFeedbackRepository>();
+
+            using var sp = services.BuildServiceProvider();
+            sp.GetRequiredService<ILoggerFactory>().CreateLogger("Startup")
+                .LogWarning("⚠ Cosmos DB not configured. UserProfile, Chat, and Feedback data will NOT be persisted.");
         }
 
         services.AddHttpContextAccessor();
