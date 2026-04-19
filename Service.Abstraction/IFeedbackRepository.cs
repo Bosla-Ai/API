@@ -6,4 +6,5 @@ public interface IFeedbackRepository
 {
     Task SubmitAsync(FeedbackEntity feedback);
     Task<IReadOnlyList<FeedbackEntity>> GetBySessionAsync(string userId, string sessionId);
+    Task<IReadOnlyList<FeedbackEntity>> GetAllAsync(int? limit = null);
 }

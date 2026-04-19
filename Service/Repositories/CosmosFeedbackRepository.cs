@@ -68,4 +68,24 @@ public class CosmosFeedbackRepository(
 
         return results;
     }
+
+    public async Task<IReadOnlyList<FeedbackEntity>> GetAllAsync(int? limit = null)
+    {
+        var container = await GetContainerAsync();
+        var sql = limit.HasValue
+            ? $"SELECT TOP {limit.Value} * FROM c ORDER BY c.CreatedAt DESC"
+            : "SELECT * FROM c ORDER BY c.CreatedAt DESC";
+
+        var query = new QueryDefinition(sql);
+        var results = new List<FeedbackEntity>();
+        using var iterator = container.GetItemQueryIterator<FeedbackEntity>(query);
+
+        while (iterator.HasMoreResults)
+        {
+            var response = await iterator.ReadNextAsync();
+            results.AddRange(response);
+        }
+
+        return results;
+    }
 }
