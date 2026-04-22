@@ -323,7 +323,10 @@ public class RoadmapService(
                 Order = rc.Order,
                 SectionName = rc.SectionName,
                 IsCompleted = rc.IsCompleted,
-                CompletedAt = rc.CompletedAt
+                CompletedAt = rc.CompletedAt,
+                CurrentPositionSeconds = rc.CurrentPositionSeconds,
+                TotalDurationSeconds = rc.TotalDurationSeconds,
+                VideoId = rc.VideoId
             }).ToList() ?? []
         };
 
@@ -331,6 +334,86 @@ public class RoadmapService(
         {
             StatusCode = HttpStatusCode.OK,
             Data = details
+        };
+    }
+
+    public async Task<APIResponse> ToggleCourseCompletionAsync(int roadmapId, int courseId, string userId)
+    {
+        var spec = new RoadmapsByCustomerSpecification(roadmapId, userId);
+        var roadmap = await _unitOfWork.GetRepo<Roadmap, int>().GetAsync(spec)
+            ?? throw new NotFoundException("Roadmap not found.");
+
+        var rc = roadmap.RoadmapCourses?.FirstOrDefault(c => c.CourseId == courseId)
+            ?? throw new NotFoundException("Course not found in this roadmap.");
+
+        rc.IsCompleted = !rc.IsCompleted;
+        rc.CompletedAt = rc.IsCompleted ? DateTime.UtcNow : null;
+
+        await _unitOfWork.SaveChangesAsync();
+
+        return new APIResponse { StatusCode = HttpStatusCode.OK };
+    }
+
+    public async Task<APIResponse> UpdateCourseProgressAsync(int roadmapId, int courseId, string userId, CourseProgressUpdateDTO dto)
+    {
+        var spec = new RoadmapsByCustomerSpecification(roadmapId, userId);
+        var roadmap = await _unitOfWork.GetRepo<Roadmap, int>().GetAsync(spec)
+            ?? throw new NotFoundException("Roadmap not found.");
+
+        var rc = roadmap.RoadmapCourses?.FirstOrDefault(c => c.CourseId == courseId)
+            ?? throw new NotFoundException("Course not found in this roadmap.");
+
+        rc.CurrentPositionSeconds = dto.CurrentPositionSeconds;
+        rc.TotalDurationSeconds = dto.TotalDurationSeconds;
+
+        if (!string.IsNullOrEmpty(dto.VideoId))
+            rc.VideoId = dto.VideoId;
+
+        if (dto.IsCompleted && !rc.IsCompleted)
+        {
+            rc.IsCompleted = true;
+            rc.CompletedAt = DateTime.UtcNow;
+        }
+
+        await _unitOfWork.SaveChangesAsync();
+
+        return new APIResponse { StatusCode = HttpStatusCode.OK };
+    }
+
+    public async Task<APIResponse<RoadmapProgressResponseDTO>> GetRoadmapProgressAsync(int roadmapId, string userId)
+    {
+        var spec = new RoadmapsByCustomerSpecification(roadmapId, userId);
+        var roadmap = await _unitOfWork.GetRepo<Roadmap, int>().GetAsync(spec)
+            ?? throw new NotFoundException("Roadmap not found.");
+
+        var courses = roadmap.RoadmapCourses?.OrderBy(rc => rc.Order).Select(rc => new CourseProgressDTO
+        {
+            CourseId = rc.CourseId,
+            Title = rc.Course?.Title ?? "Unknown",
+            IsCompleted = rc.IsCompleted,
+            CurrentPositionSeconds = rc.CurrentPositionSeconds,
+            TotalDurationSeconds = rc.TotalDurationSeconds,
+            VideoId = rc.VideoId,
+            WatchPercent = rc.TotalDurationSeconds > 0
+                ? Math.Round(100.0 * rc.CurrentPositionSeconds / rc.TotalDurationSeconds, 1)
+                : 0
+        }).ToList() ?? [];
+
+        var total = courses.Count;
+        var completed = courses.Count(c => c.IsCompleted);
+
+        return new APIResponse<RoadmapProgressResponseDTO>
+        {
+            StatusCode = HttpStatusCode.OK,
+            Data = new RoadmapProgressResponseDTO
+            {
+                RoadmapId = roadmapId,
+                Title = roadmap.Title ?? string.Empty,
+                TotalCourses = total,
+                CompletedCourses = completed,
+                CompletionPercent = total > 0 ? Math.Round(100.0 * completed / total, 1) : 0,
+                Courses = courses
+            }
         };
     }
 
