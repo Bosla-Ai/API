@@ -303,14 +303,34 @@ public class CustomerServiceTests
             "BuildRoadmapConfirmationQuestions",
             BindingFlags.NonPublic | BindingFlags.Static);
 
-        var result = (AskUserQuestion[])method!.Invoke(null, [])!;
+        var result = (AskUserQuestion[])method!.Invoke(null, [null, null])!;
 
         result.Should().NotBeNull();
         result.Should().HaveCountGreaterThan(0);
-        result[0].Id.Should().NotBeNullOrEmpty();
-        result[0].Text.Should().NotBeNullOrEmpty();
-        result[0].Type.Should().Be("checkbox");
-        result[0].Options.Should().NotBeNull();
+        // Without tags, only the roadmap_confirm question is returned
+        result.Last().Id.Should().Be("roadmap_confirm");
+        result.Last().Text.Should().NotBeNullOrEmpty();
+        result.Last().Type.Should().Be("checkbox");
+        result.Last().Options.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void BuildRoadmapConfirmationQuestions_WithTags_IncludesTopicPreview()
+    {
+        var method = typeof(CustomerService).GetMethod(
+            "BuildRoadmapConfirmationQuestions",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        var tags = new[] { "C#", "SQL Server", "EF Core" };
+        var knownSkills = new[] { "C#" };
+        var result = (AskUserQuestion[])method!.Invoke(null, [tags, knownSkills])!;
+
+        result.Should().HaveCount(2);
+        result[0].Id.Should().Be("topic_preview");
+        result[0].Type.Should().Be("topic_chips");
+        result[0].Options.Should().BeEquivalentTo(tags);
+        result[0].PreSelected.Should().BeEquivalentTo(knownSkills);
+        result[1].Id.Should().Be("roadmap_confirm");
     }
 
     #endregion
