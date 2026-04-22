@@ -392,9 +392,10 @@ public class ChatBugFixTests
         var result = (AskUserQuestion[])method!.Invoke(null, [null, "I want a roadmap", ""])!;
 
         result.Should().HaveCountGreaterThanOrEqualTo(2);
-        result.Should().HaveCountLessThanOrEqualTo(3);
+        result.Should().HaveCountLessThanOrEqualTo(4);
         result.Should().Contain(q => q.Id == "roadmap_experience");
         result.Should().Contain(q => q.Id == "roadmap_target_role");
+        result.Should().Contain(q => q.Id == "roadmap_cv_upload");
     }
 
     [Fact]
