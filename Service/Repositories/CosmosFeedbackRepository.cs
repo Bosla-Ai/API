@@ -27,7 +27,7 @@ public class CosmosFeedbackRepository(
             if (_container != null)
                 return _container;
 
-            var databaseResponse = await cosmosClient.CreateDatabaseIfNotExistsAsync(_databaseName);
+            var databaseResponse = await cosmosClient.CreateDatabaseIfNotExistsAsync(_databaseName, throughput: 1000);
             var database = databaseResponse.Database;
             var containerResponse = await database.CreateContainerIfNotExistsAsync(_containerName, "/UserId");
             _container = containerResponse.Container;
@@ -71,7 +71,17 @@ public class CosmosFeedbackRepository(
 
     public async Task<IReadOnlyList<FeedbackEntity>> GetAllAsync(int? limit = null)
     {
-        var container = await GetContainerAsync();
+        Container container;
+        try
+        {
+            container = await GetContainerAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to initialize feedback container, returning empty list");
+            return Array.Empty<FeedbackEntity>();
+        }
+
         var sql = limit.HasValue
             ? $"SELECT TOP {limit.Value} * FROM c ORDER BY c.CreatedAt DESC"
             : "SELECT * FROM c ORDER BY c.CreatedAt DESC";
