@@ -99,6 +99,17 @@ public class CustomerService(
         // Detect user language for hard constraint injection
         var detectedLanguage = DetectLanguage(query);
 
+        // Extract inline CV text if present
+        string? inlineCvText = null;
+        var cvMatch = System.Text.RegularExpressions.Regex.Match(query, @"\[CV_TEXT\]\s*([\s\S]+?)\s*\[/CV_TEXT\]");
+        if (cvMatch.Success)
+        {
+            inlineCvText = cvMatch.Groups[1].Value.Trim();
+            query = query[..cvMatch.Index].TrimEnd();
+            if (string.IsNullOrWhiteSpace(query)) query = "Please analyze my CV";
+            _logger.LogInformation("Inline CV text extracted ({Len} chars), cleaned query: '{Query}'", inlineCvText.Length, query);
+        }
+
         var pendingSseEvents = new ConcurrentQueue<string>();
         conversationContextManager.OnSseEvent = (eventName, data) =>
         {
@@ -158,20 +169,9 @@ public class CustomerService(
                         summary = $"Analyzed {fetchedMarketInsight.TotalJobsAnalyzed} jobs. Top skills: {topSkillsSummary}{salaryInfo}"
                     }));
 
-                    var pulse = jobMarketService.CalculateReadiness(marketKeywords, fetchedMarketInsight);
-                    if (pulse is not null)
-                    {
-                        pendingEvents.Add(FormatSse("career_pulse", new
-                        {
-                            readinessScore = pulse.ReadinessScore,
-                            readinessLevel = pulse.ReadinessLevel,
-                            matchedSkills = pulse.MatchedSkills,
-                            topGaps = pulse.TopGaps.Select(g => new { skill = g.Skill, demandPercent = g.DemandPercent, category = g.Category }),
-                            insight = pulse.Insight,
-                            targetRole = pulse.TargetRole,
-                            jobsAnalyzed = pulse.JobsAnalyzed
-                        }));
-                    }
+                    // Career Pulse is intentionally NOT emitted here.
+                    // It is only emitted after intent detection for CVAnalysis / RoadmapGeneration
+                    // (see the tag-based Career Pulse block further below).
                 }
                 else
                 {
@@ -286,6 +286,19 @@ public class CustomerService(
         var profileSummary = userProfile?.ToPromptSummary() ?? "No profile data yet";
         var hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
 
+        // Inject compact roadmap progress context into profile summary (every turn)
+        string? progressContextSnippet = null;
+        try
+        {
+            progressContextSnippet = await BuildProgressContextSnippetAsync(userId);
+            if (!string.IsNullOrEmpty(progressContextSnippet))
+                profileSummary += "\n\nRoadmap Progress:\n" + progressContextSnippet;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to build progress context for {UserId}", userId);
+        }
+
         if (enableModeClassification && !skipIntentDetection && chatMode != ChatMode.Deep && !explicitRoadmapRequest)
         {
             yield return FormatSse("status", new { message = "Understanding your request...", step = "mode_classification" });
@@ -299,8 +312,23 @@ public class CustomerService(
             // New sessions with incomplete profiles lean toward FRIEND mode.
             var applyFriendBias = sessionMessageCount < sessionMessageThreshold && !profileComplete;
 
+            // Extract last assistant message for classification context
+            string? lastAssistantMessage = null;
+            if (!string.IsNullOrEmpty(conversationContextText))
+            {
+                var lines = conversationContextText.Split('\n');
+                for (var i = lines.Length - 1; i >= 0; i--)
+                {
+                    if (lines[i].StartsWith("[assistant]:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        lastAssistantMessage = lines[i]["[assistant]:".Length..].Trim();
+                        break;
+                    }
+                }
+            }
+
             (classifiedMode, modeClassificationError) = await ClassifyModeWithFallbackAsync(
-                customerHelper, query, sessionMessageCount, profileComplete, applyFriendBias, _logger);
+                customerHelper, query, sessionMessageCount, profileComplete, applyFriendBias, _logger, lastAssistantMessage);
         }
 
         if (sessionMessageCount > 0)
@@ -367,10 +395,19 @@ public class CustomerService(
         }
 
         // FRIEND mode: Skip intent detection, go directly to warm chat
-        if (classifiedMode == "FRIEND")
+        if (classifiedMode == "FRIEND" && string.IsNullOrEmpty(inlineCvText))
         {
             skipIntentDetection = true;
             _logger.LogDebug("FRIEND mode: Skipping intent detection for empathetic conversation");
+        }
+
+        // When inline CV text is present, force CVAnalysis regardless of classification
+        if (!string.IsNullOrEmpty(inlineCvText) && !uiForcedIntent.HasValue)
+        {
+            uiForcedIntent = LLMInteractionType.CVAnalysis;
+            classifiedMode = "ACTION";
+            skipIntentDetection = false;
+            _logger.LogInformation("Inline CV text detected ({Len} chars) → forcing CVAnalysis intent", inlineCvText.Length);
         }
 
         // UNCLEAR mode: Skip intent detection, ask clarifying question
@@ -783,9 +820,20 @@ public class CustomerService(
             if (!string.IsNullOrEmpty(aiResponse))
                 yield return FormatSse("text", new { delta = aiResponse });
 
+            // Detect known skills from user's completed roadmap courses
+            string[]? knownSkillsFromProgress = null;
+            try
+            {
+                knownSkillsFromProgress = await DetectKnownSkillsFromProgressAsync(userId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to detect known skills for {UserId}", userId);
+            }
+
             var confirmQuestions = (questions is { Length: > 0 } && !IsRoadmapIntakeQuestionSet(questions))
                 ? questions
-                : BuildRoadmapConfirmationQuestions();
+                : BuildRoadmapConfirmationQuestions(toolArguments?.Tags, knownSkillsFromProgress);
             confirmQuestions = DeduplicateQuestions(confirmQuestions, previouslyAskedIds);
 
             if (confirmQuestions.Length > 0)
@@ -940,6 +988,79 @@ public class CustomerService(
             }
         }
 
+        if (interactionType == LLMInteractionType.ProgressCheck)
+        {
+            // Fetch detailed progress for the most active roadmap
+            var progressDetail = progressContextSnippet;
+            if (string.IsNullOrEmpty(progressDetail))
+            {
+                try { progressDetail = await BuildProgressContextSnippetAsync(userId); }
+                catch { /* already logged */ }
+            }
+
+            if (string.IsNullOrEmpty(progressDetail))
+            {
+                progressDetail = "No saved roadmaps found.";
+            }
+
+            var pcSystemPrompt = options.CurrentValue.Prompts.ProgressCheckSystemPrompt;
+            if (string.IsNullOrEmpty(pcSystemPrompt))
+                pcSystemPrompt = "You are Bosla AI. Summarize the user's learning progress in a warm, encouraging way. Always end with exactly one specific next action.";
+            if (!string.IsNullOrEmpty(options.CurrentValue.Prompts.LanguageRules))
+                pcSystemPrompt = pcSystemPrompt.Replace("{LANGUAGE_RULES}", options.CurrentValue.Prompts.LanguageRules);
+            if (!string.IsNullOrEmpty(detectedLanguage))
+            {
+                var pcLangName = detectedLanguage == "ar" ? "Arabic" : "English";
+                pcSystemPrompt = $"[LANGUAGE CONSTRAINT: You MUST respond in {pcLangName} only.]\n\n" + pcSystemPrompt;
+            }
+
+            var pcUserPrompt = $"Progress Context:\n{progressDetail}\n\nConversation History:\n{conversationContextText}\n\nUser Query: \"{query}\"";
+
+            var pcResponseBuilder = new StringBuilder();
+            try
+            {
+                await foreach (var chunk in customerHelper.SendStreamRequestByTask(
+                    pcUserPrompt, LLMInteractionType.ChatWithAI, useThinking: false,
+                    cancellationToken: cancellationToken, userId: userId,
+                    isSuperAdmin: IsSuperAdmin(), chatMode: chatMode,
+                    systemPrompt: pcSystemPrompt))
+                {
+                    if (chunk.StartsWith("__FALLBACK__:"))
+                    {
+                        yield return FormatSse("fallback", new { provider = chunk[13..].Trim(), message = "Switched to backup AI model" });
+                    }
+                    else if (chunk == "__RETRY__")
+                    {
+                        yield return FormatSse("retry", new { message = "Rate limited, retrying with backup model..." });
+                        pcResponseBuilder.Clear();
+                    }
+                    else if (chunk.StartsWith("__MODEL__:"))
+                    {
+                        yield return FormatSse("model", new { name = chunk[10..].Trim(), reasoning = false });
+                    }
+                    else if (!chunk.StartsWith("__STATUS__") && !chunk.StartsWith("__THINKING_CONTENT__:"))
+                    {
+                        yield return FormatSse("text", new { delta = chunk });
+                        pcResponseBuilder.Append(chunk);
+                    }
+                }
+            }
+            finally
+            {
+                if (!cancellationToken.IsCancellationRequested && pcResponseBuilder.Length > 0)
+                {
+                    await conversationContextManager
+                        .AddMessageToContextAsync(userId, actualSessionId, pcResponseBuilder.ToString(), "assistant");
+                }
+            }
+
+            if (followUpSuggestions is { Length: > 0 })
+                yield return FormatSse("suggestions", new { items = followUpSuggestions });
+
+            yield return FormatSse("done", new { message = "Progress check completed" });
+            yield break;
+        }
+
         if (interactionType == LLMInteractionType.ChatWithAI)
         {
             var (chatSystemPrompt, chatPrompt) = BuildChatPrompt(conversationContext.ToString(), query, profileSummary, chatMode, detectedLanguage);
@@ -1000,12 +1121,142 @@ public class CustomerService(
                 }
             }
         }
+        else if (interactionType == LLMInteractionType.CVAnalysis && !string.IsNullOrEmpty(inlineCvText))
+        {
+            // ── Inline CV analysis via LLM (no pipeline) ──
+            yield return FormatSse("status", new { message = "Analyzing your CV...", step = "cv_analysis" });
+
+            var cvSystemPrompt = options.CurrentValue.Prompts.CvAnalysisSystemPrompt;
+            if (string.IsNullOrEmpty(cvSystemPrompt))
+            {
+                cvSystemPrompt = "You are an expert career advisor. Analyze the provided CV/resume text and provide a detailed, Markdown-formatted career analysis including: Profile Summary, Strengths, Gaps, Recommendations, Suggested Learning Tags, and Target Roles.";
+            }
+
+            // Inject shared language rules
+            if (!string.IsNullOrEmpty(options.CurrentValue.Prompts.LanguageRules))
+            {
+                cvSystemPrompt = cvSystemPrompt.Replace("{LANGUAGE_RULES}", options.CurrentValue.Prompts.LanguageRules);
+            }
+
+            // Inject language constraint
+            if (!string.IsNullOrEmpty(detectedLanguage))
+            {
+                var cvLangName = detectedLanguage == "ar" ? "Arabic" : "English";
+                cvSystemPrompt = $"[LANGUAGE CONSTRAINT: You MUST respond in {cvLangName} only. This overrides all other language rules.]\n\n" + cvSystemPrompt;
+            }
+
+            var cvUserPrompt = $"Here is the CV/resume text to analyze:\n\n{inlineCvText}";
+
+            var fullCvResponse = new StringBuilder();
+            try
+            {
+                await foreach (var chunk in customerHelper.SendStreamRequestByTask(
+                    cvUserPrompt, LLMInteractionType.CVAnalysis, useThinking: false,
+                    cancellationToken: cancellationToken, userId: userId,
+                    isSuperAdmin: IsSuperAdmin(), chatMode: chatMode,
+                    systemPrompt: cvSystemPrompt))
+                {
+                    if (chunk.StartsWith("__FALLBACK__:"))
+                    {
+                        var fbModel = chunk["__FALLBACK__:".Length..];
+                        yield return FormatSse("fallback", new { model = fbModel });
+                        continue;
+                    }
+                    yield return FormatSse("text", new { delta = chunk });
+                    fullCvResponse.Append(chunk);
+                }
+            }
+            finally
+            {
+                if (!cancellationToken.IsCancellationRequested && fullCvResponse.Length > 0)
+                {
+                    await conversationContextManager
+                        .AddMessageToContextAsync(userId, actualSessionId, fullCvResponse.ToString(), "assistant");
+                }
+            }
+
+            // Try to extract suggested tags from the analysis for career pulse
+            // (best-effort — response is Markdown, not JSON)
+            string? cvPulseEvent = null;
+            if (toolArguments?.Tags is { Length: > 0 })
+            {
+                try
+                {
+                    var cvInsight = await jobMarketService.GetMarketInsightsAsync(toolArguments.Tags);
+                    if (cvInsight is not null)
+                    {
+                        var cvPulse = jobMarketService.CalculateReadiness(toolArguments.Tags, cvInsight);
+                        if (cvPulse is not null)
+                        {
+                            cvPulseEvent = FormatSse("career_pulse", new
+                            {
+                                readinessScore = cvPulse.ReadinessScore,
+                                readinessLevel = cvPulse.ReadinessLevel,
+                                matchedSkills = cvPulse.MatchedSkills,
+                                topGaps = cvPulse.TopGaps.Select(g => new { skill = g.Skill, demandPercent = g.DemandPercent, category = g.Category }),
+                                insight = cvPulse.Insight,
+                                targetRole = cvPulse.TargetRole,
+                                jobsAnalyzed = cvPulse.JobsAnalyzed
+                            });
+                        }
+                    }
+                }
+                catch { /* graceful — don't block CV analysis */ }
+            }
+
+            if (cvPulseEvent is not null)
+                yield return cvPulseEvent;
+
+            // Persist CV-derived profile signals to Cosmos
+            try
+            {
+                var cvProfile = new UserProfileEntity { UserId = userId };
+                if (toolArguments?.Tags is { Length: > 0 })
+                    cvProfile.Interests = toolArguments.Tags.ToList();
+                if (!string.IsNullOrEmpty(targetRole))
+                    cvProfile.TargetRole = targetRole;
+
+                if (cvProfile.Interests?.Count > 0 || !string.IsNullOrEmpty(cvProfile.TargetRole))
+                    await userProfileRepository.UpsertAsync(cvProfile);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to persist CV profile signals for user {UserId}", userId);
+            }
+
+            yield return FormatSse("done", new { message = "CV analysis completed" });
+        }
         else if (interactionType != LLMInteractionType.ChatWithAI)
         {
             string finalResponse = "";
 
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
+                // Filter out topics the user marked as "already known" from topic_chips
+                if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments.Tags is { Length: > 0 })
+                {
+                    var knownTopicsFromAnswer = ExtractKnownTopicsFromAnswer(query);
+                    if (knownTopicsFromAnswer.Length > 0)
+                    {
+                        var originalTags = toolArguments.Tags;
+                        toolArguments.Tags = originalTags
+                            .Where(t => !knownTopicsFromAnswer.Contains(t, StringComparer.OrdinalIgnoreCase))
+                            .ToArray();
+
+                        if (toolArguments.Tags.Length == 0)
+                        {
+                            // All topics are known — tell the user
+                            yield return FormatSse("text", new { delta = "It looks like you already know all the detected topics! Try asking for a more advanced roadmap or a different subject." });
+                            yield return FormatSse("done", new { message = "All topics already known" });
+                            yield break;
+                        }
+
+                        _logger.LogInformation(
+                            "Filtered known topics for {UserId}: removed [{Known}], remaining [{Remaining}]",
+                            userId, string.Join(", ", knownTopicsFromAnswer), string.Join(", ", toolArguments.Tags));
+                    }
+                }
+
                 // Validate LLM-generated tags against market data
                 if (toolArguments.Tags is { Length: > 0 } && fetchedMarketInsight?.TopRequiredSkills is { Length: > 0 })
                 {
@@ -1187,44 +1438,62 @@ public class CustomerService(
             yield return FormatSse("suggestions", new { items = followUpSuggestions });
         }
 
+        string? profileUpdateSseEvent = null;
+
         if (options.CurrentValue.Llm.EnableBackgroundProfileExtraction
             && (classifiedMode == "FRIEND"
                 || interactionType == LLMInteractionType.RoadmapGeneration
                 || hasAskedDiscovery
                 || hasPendingRoadmapConfirmation))
         {
-            var capturedUserId = userId;
-            var capturedSessionId = actualSessionId;
-            var capturedContextManager = conversationContextManager;
-            var capturedHelper = customerHelper;
-            var capturedProfileRepo = userProfileRepository;
-            var capturedLogger = _logger;
-
-            _ = Task.Run(async () => // fire-and-forget; don't capture 'this'
+            try
             {
-                try
+                var context = await conversationContextManager.GetConversationContextAsync(userId, actualSessionId);
+                var extractedProfile = await customerHelper.ExtractProfileAsync(context);
+                if (extractedProfile != null)
                 {
-                    var context = await capturedContextManager.GetConversationContextAsync(capturedUserId, capturedSessionId);
-                    var extractedProfile = await capturedHelper.ExtractProfileAsync(context);
-                    if (extractedProfile != null)
+                    _logger.LogDebug("Extracted profile for user {UserId}: Interests={Interests}, TargetRole={TargetRole}",
+                        userId,
+                        extractedProfile.Interests != null ? string.Join(", ", extractedProfile.Interests) : "none",
+                        extractedProfile.TargetRole ?? "none");
+
+                    var profileEntity = UserProfileEntity.FromExtraction(userId, extractedProfile);
+                    await userProfileRepository.UpsertAsync(profileEntity);
+
+                    _logger.LogInformation("Saved profile to Cosmos DB for user {UserId}", userId);
+
+                    // Build SSE event outside try-catch (C# yield limitation)
+                    var updatedFields = new List<string>();
+                    if (extractedProfile.Interests?.Count > 0) updatedFields.Add("interests");
+                    if (!string.IsNullOrEmpty(extractedProfile.ExperienceLevel)) updatedFields.Add("experience_level");
+                    if (!string.IsNullOrEmpty(extractedProfile.TargetRole)) updatedFields.Add("target_role");
+                    if (extractedProfile.Constraints?.Count > 0) updatedFields.Add("constraints");
+                    if (extractedProfile.PersonalityHints?.Count > 0) updatedFields.Add("personality_hints");
+
+                    if (updatedFields.Count > 0)
                     {
-                        capturedLogger.LogDebug("Extracted profile for user {UserId}: Interests={Interests}, TargetRole={TargetRole}",
-                            capturedUserId,
-                            extractedProfile.Interests != null ? string.Join(", ", extractedProfile.Interests) : "none",
-                            extractedProfile.TargetRole ?? "none");
-
-                        // Save to Cosmos DB with smart merge
-                        var profileEntity = UserProfileEntity.FromExtraction(capturedUserId, extractedProfile);
-                        await capturedProfileRepo.UpsertAsync(profileEntity);
-
-                        capturedLogger.LogInformation("Saved profile to Cosmos DB for user {UserId}", capturedUserId);
+                        profileUpdateSseEvent = FormatSse("profile_update", new
+                        {
+                            message = "Profile updated with new insights from our conversation",
+                            fields = updatedFields,
+                            interests = extractedProfile.Interests,
+                            experienceLevel = extractedProfile.ExperienceLevel,
+                            targetRole = extractedProfile.TargetRole,
+                            constraints = extractedProfile.Constraints,
+                            personalityHints = extractedProfile.PersonalityHints,
+                        });
                     }
                 }
-                catch (Exception ex)
-                {
-                    capturedLogger.LogWarning(ex, "Background profile extraction failed for user {UserId}", capturedUserId);
-                }
-            });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Profile extraction failed for user {UserId}", userId);
+            }
+        }
+
+        if (profileUpdateSseEvent != null)
+        {
+            yield return profileUpdateSseEvent;
         }
 
         yield return FormatSse("done", new { });
@@ -1456,10 +1725,14 @@ public class CustomerService(
                     ? aiResponse
                     : "I can generate your roadmap. Please confirm to continue.";
 
+                string[]? knownSkillsNonStream = null;
+                try { knownSkillsNonStream = await DetectKnownSkillsFromProgressAsync(userId); }
+                catch { /* optional */ }
+
                 var confirmQuestions = DeduplicateQuestions(
                     (questions is { Length: > 0 } && !IsRoadmapIntakeQuestionSet(questions))
                         ? questions
-                        : BuildRoadmapConfirmationQuestions(),
+                        : BuildRoadmapConfirmationQuestions(toolArguments?.Tags, knownSkillsNonStream),
                     previouslyAskedIds);
 
                 await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
@@ -1809,6 +2082,131 @@ public class CustomerService(
     }
 
 
+    /// <summary>
+    /// Builds a compact progress context string for the user's roadmaps.
+    /// Active roadmap (most recently updated) is expanded; others get a one-line summary.
+    /// </summary>
+    private async Task<string?> BuildProgressContextSnippetAsync(string userId)
+    {
+        var spec = new RoadmapsByCustomerSpecification(userId);
+        spec.AddInclude("RoadmapCourses");
+        spec.AddInclude("RoadmapCourses.Course");
+        var roadmaps = (await unitOfWork.GetRepo<Roadmap, int>().GetAllAsync(spec))
+            .Where(r => r != null)
+            .Cast<Roadmap>()
+            .ToList();
+
+        if (roadmaps.Count == 0) return null;
+
+        // Order all roadmaps by most recently active first
+        var orderedRoadmaps = roadmaps
+            .OrderByDescending(r => r.RoadmapCourses
+                .Where(rc => rc.CompletedAt.HasValue)
+                .Max(rc => (DateTime?)rc.CompletedAt) ?? r.CreatedAt)
+            .ToList();
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Total Roadmaps: {orderedRoadmaps.Count}");
+        sb.AppendLine();
+
+        foreach (var roadmap in orderedRoadmaps)
+        {
+            var courses = roadmap.RoadmapCourses.OrderBy(rc => rc.Order).ToList();
+            var totalCourses = courses.Count;
+            var completedCourses = courses.Count(c => c.IsCompleted);
+            var pct = totalCourses > 0 ? Math.Round(100.0 * completedCourses / totalCourses, 0) : 0;
+            var title = string.IsNullOrWhiteSpace(roadmap.Title) ? "Untitled Roadmap" : roadmap.Title;
+
+            sb.AppendLine($"📚 \"{title}\" — {completedCourses}/{totalCourses} completed ({pct}%)");
+
+            var completed = courses.Where(c => c.IsCompleted).Select(c => c.Course?.Title ?? "?");
+            var inProgress = courses.Where(c => !c.IsCompleted && c.CurrentPositionSeconds > 0).ToList();
+            var notStarted = courses.Where(c => !c.IsCompleted && c.CurrentPositionSeconds == 0).Select(c => c.Course?.Title ?? "?");
+
+            if (completed.Any())
+                sb.AppendLine("  ✓ Completed: " + string.Join(", ", completed));
+
+            foreach (var ip in inProgress)
+            {
+                var mins = ip.CurrentPositionSeconds / 60;
+                var totalMins = ip.TotalDurationSeconds > 0 ? ip.TotalDurationSeconds / 60 : 0;
+                sb.AppendLine($"  ▶ In Progress: {ip.Course?.Title ?? "?"} ({mins}:{ip.CurrentPositionSeconds % 60:D2}/{totalMins}:{(ip.TotalDurationSeconds > 0 ? ip.TotalDurationSeconds % 60 : 0):D2})");
+            }
+
+            if (notStarted.Any())
+                sb.AppendLine("  ○ Not Started: " + string.Join(", ", notStarted));
+
+            sb.AppendLine();
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// Detects skills the user has already learned by looking at completed roadmap courses.
+    /// Returns normalized skill tags extracted from completed course titles.
+    /// </summary>
+    private async Task<string[]?> DetectKnownSkillsFromProgressAsync(string userId)
+    {
+        var spec = new RoadmapsByCustomerSpecification(userId);
+        spec.AddInclude("RoadmapCourses");
+        spec.AddInclude("RoadmapCourses.Course");
+        var roadmaps = (await unitOfWork.GetRepo<Roadmap, int>().GetAllAsync(spec))
+            .Where(r => r != null)
+            .Cast<Roadmap>()
+            .ToList();
+
+        if (roadmaps.Count == 0) return null;
+
+        var knownSkills = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var roadmap in roadmaps)
+        {
+            foreach (var rc in roadmap.RoadmapCourses.Where(c => c.IsCompleted))
+            {
+                var title = rc.Course?.Title ?? "";
+                var skills = RoadmapIntentHelper.ExtractKeywordsFromText(title);
+                foreach (var skill in skills)
+                    knownSkills.Add(skill);
+            }
+
+            // Also extract skills from the roadmap title itself if all courses completed
+            var totalCourses = roadmap.RoadmapCourses.Count;
+            var completedCourses = roadmap.RoadmapCourses.Count(c => c.IsCompleted);
+            if (totalCourses > 0 && completedCourses == totalCourses)
+            {
+                var titleSkills = RoadmapIntentHelper.ExtractKeywordsFromText(roadmap.Title ?? "");
+                foreach (var skill in titleSkills)
+                    knownSkills.Add(skill);
+            }
+        }
+
+        return knownSkills.Count > 0 ? [.. knownSkills] : null;
+    }
+
+    /// <summary>
+    /// Parses "Known topics: X, Y, Z" from the user's answer text (submitted by topic_chips).
+    /// </summary>
+    private static string[] ExtractKnownTopicsFromAnswer(string answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer)) return [];
+
+        // The frontend formats topic_chips answers as: "Known topics: C#, SQL Server, LINQ"
+        var knownPrefix = "Known topics:";
+        var idx = answer.IndexOf(knownPrefix, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return [];
+
+        var rest = answer[(idx + knownPrefix.Length)..];
+        // Take until next newline
+        var newlineIdx = rest.IndexOf('\n');
+        if (newlineIdx >= 0)
+            rest = rest[..newlineIdx];
+
+        return rest.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(s => s.Length > 0)
+            .ToArray();
+    }
+
     private string GenerateSessionId(string userId)
     {
         var input = $"{userId}_{DateTime.UtcNow:yyyyMMddHHmmss}";
@@ -1999,6 +2397,21 @@ public class CustomerService(
 
         var questions = new List<AskUserQuestion>();
 
+        // Offer CV upload when multiple profile fields are missing
+        if (!hasExperience && !hasTargetRole)
+        {
+            questions.Add(new AskUserQuestion
+            {
+                Id = "roadmap_cv_upload",
+                Text = isArabic
+                    ? "لو عندك سيرة ذاتية، ارفعها وهنستخرج بياناتك تلقائياً"
+                    : "Have a CV? Upload it and we'll extract your details automatically",
+                Type = "file_upload",
+                Placeholder = isArabic ? "ارفع PDF أو DOCX أو TXT" : "Upload PDF, DOCX, or TXT",
+                Required = false
+            });
+        }
+
         if (!hasExperience)
         {
             questions.Add(new AskUserQuestion
@@ -2061,7 +2474,7 @@ public class CustomerService(
             });
         }
 
-        return [.. questions.Take(3)];
+        return [.. questions.Take(4)];
     }
 
     private static bool ContainsAny(string text, params string[] terms)
@@ -2087,19 +2500,34 @@ public class CustomerService(
                || normalized.Contains("؟");
     }
 
-    private static AskUserQuestion[] BuildRoadmapConfirmationQuestions()
+    private static AskUserQuestion[] BuildRoadmapConfirmationQuestions(string[]? detectedTags = null, string[]? knownSkills = null)
     {
-        return
-        [
-            new AskUserQuestion
+        var questions = new List<AskUserQuestion>();
+
+        // Topic preview chips — show detected tags and let user mark known ones
+        if (detectedTags is { Length: > 0 })
+        {
+            questions.Add(new AskUserQuestion
             {
-                Id = "roadmap_confirm",
-                Text = "I detected a roadmap request. Do you want me to generate your roadmap now?",
-                Type = "checkbox",
-                Options = ["Yes, generate roadmap now", "Not now"],
-                Required = true
-            }
-        ];
+                Id = "topic_preview",
+                Text = "Here's what your roadmap will cover. Already know some? Tap to skip them:",
+                Type = "topic_chips",
+                Options = detectedTags,
+                PreSelected = knownSkills ?? [],
+                Required = false
+            });
+        }
+
+        questions.Add(new AskUserQuestion
+        {
+            Id = "roadmap_confirm",
+            Text = "I detected a roadmap request. Do you want me to generate your roadmap now?",
+            Type = "checkbox",
+            Options = ["Yes, generate roadmap now", "Not now"],
+            Required = true
+        });
+
+        return [.. questions];
     }
 
     private static bool IsExplicitRoadmapRequest(string query)
@@ -2359,11 +2787,12 @@ Latest user message:
         int sessionMessageCount,
         bool profileComplete,
         bool applyFriendBias,
-        ILogger logger)
+        ILogger logger,
+        string? lastAssistantMessage = null)
     {
         try
         {
-            var classifiedMode = await customerHelper.ClassifyModeAsync(query, sessionMessageCount, profileComplete);
+            var classifiedMode = await customerHelper.ClassifyModeAsync(query, sessionMessageCount, profileComplete, lastAssistantMessage);
 
             if (applyFriendBias && classifiedMode == "ACTION" && !profileComplete)
             {

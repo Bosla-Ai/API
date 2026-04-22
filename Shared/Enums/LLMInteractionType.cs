@@ -9,4 +9,5 @@ public enum LLMInteractionType
     [Obsolete("Merged into ChatWithAI. Kept for backward compatibility.")]
     ChooseMethod,
     TopicPreview,
+    ProgressCheck,
 }
