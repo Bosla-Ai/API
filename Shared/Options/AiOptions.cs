@@ -90,9 +90,10 @@ public class PromptOptions
     public string ChatUserPromptTemplate { get; set; } = string.Empty;
     public string SummarizationPromptTemplate { get; set; } = string.Empty;
     public string LanguageRules { get; set; } = string.Empty;
+    public string CvAnalysisSystemPrompt { get; set; } = string.Empty;
 
     // Smart Discovery Funnel prompts
     public string ModeClassificationPrompt { get; set; } = string.Empty;
-    public string SimplifiedIntentPrompt { get; set; } = string.Empty;
     public string ProfileExtractionPrompt { get; set; } = string.Empty;
+    public string ProgressCheckSystemPrompt { get; set; } = string.Empty;
 }
