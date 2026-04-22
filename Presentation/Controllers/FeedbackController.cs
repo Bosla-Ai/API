@@ -50,6 +50,7 @@ public class FeedbackController(
 
     [HttpGet("all")]
     [Authorize(Roles = StaticData.SuperAdminRoleName)]
+    [DisableRateLimiting]
     public async Task<ActionResult<APIResponse<IReadOnlyList<FeedbackEntity>>>> GetAll([FromQuery] int? limit = 100)
     {
         var response = await serviceManager.Feedback.GetAllFeedbackAsync(limit);

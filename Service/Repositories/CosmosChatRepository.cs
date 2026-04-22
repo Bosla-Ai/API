@@ -25,7 +25,7 @@ public class CosmosChatRepository(CosmosClient cosmosClient, IConfiguration conf
             if (_container != null)
                 return _container;
 
-            var databaseResponse = await _cosmosClient.CreateDatabaseIfNotExistsAsync(_databaseName);
+            var databaseResponse = await _cosmosClient.CreateDatabaseIfNotExistsAsync(_databaseName, throughput: 1000);
             var database = databaseResponse.Database;
             var containerResponse = await database.CreateContainerIfNotExistsAsync(_containerName, "/UserId");
             _container = containerResponse.Container;
