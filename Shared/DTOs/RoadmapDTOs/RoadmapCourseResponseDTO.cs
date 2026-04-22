@@ -20,4 +20,7 @@ public class RoadmapCourseResponseDTO
     public string? SectionName { get; set; }
     public bool IsCompleted { get; set; }
     public DateTime? CompletedAt { get; set; }
+    public int CurrentPositionSeconds { get; set; }
+    public int TotalDurationSeconds { get; set; }
+    public string? VideoId { get; set; }
 }

@@ -23,6 +23,16 @@ public class RoadmapCourseConfigurations : IEntityTypeConfiguration<RoadmapCours
         builder.Property(rc => rc.CompletedAt)
             .IsRequired(false);
 
+        builder.Property(rc => rc.CurrentPositionSeconds)
+            .HasDefaultValue(0);
+
+        builder.Property(rc => rc.TotalDurationSeconds)
+            .HasDefaultValue(0);
+
+        builder.Property(rc => rc.VideoId)
+            .HasMaxLength(20)
+            .IsRequired(false);
+
         // Relationships
         builder.HasOne(rc => rc.Roadmap)
             .WithMany(r => r.RoadmapCourses)

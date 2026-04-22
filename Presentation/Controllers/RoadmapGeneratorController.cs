@@ -102,4 +102,46 @@ public class RoadmapGeneratorController(
 
         return Ok(response);
     }
+
+    [HttpPatch("{roadmapId:int}/courses/{courseId:int}/toggle-complete")]
+    [EnableRateLimiting("GeneralPolicy")]
+    public async Task<IActionResult> ToggleCourseCompletion(int roadmapId, int courseId)
+    {
+        var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
+                     ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized("User ID claim not found");
+
+        var result = await serviceManager.Roadmap.ToggleCourseCompletionAsync(roadmapId, courseId, userId);
+        return Ok(result);
+    }
+
+    [HttpPatch("{roadmapId:int}/courses/{courseId:int}/progress")]
+    [EnableRateLimiting("GeneralPolicy")]
+    public async Task<IActionResult> UpdateCourseProgress(int roadmapId, int courseId, [FromBody] CourseProgressUpdateDTO dto)
+    {
+        var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
+                     ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized("User ID claim not found");
+
+        var result = await serviceManager.Roadmap.UpdateCourseProgressAsync(roadmapId, courseId, userId, dto);
+        return Ok(result);
+    }
+
+    [HttpGet("{roadmapId:int}/progress")]
+    [EnableRateLimiting("GeneralPolicy")]
+    public async Task<IActionResult> GetRoadmapProgress(int roadmapId)
+    {
+        var userId = User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value
+                     ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized("User ID claim not found");
+
+        var result = await serviceManager.Roadmap.GetRoadmapProgressAsync(roadmapId, userId);
+        return Ok(result);
+    }
 }
