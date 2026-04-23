@@ -7,6 +7,13 @@ namespace Service.Helpers;
 
 public static class RoadmapIntentHelper
 {
+    private static readonly Dictionary<string, string> RoadmapTokenAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["eng"] = "engineer",
+        ["engr"] = "engineer",
+        ["dev"] = "developer"
+    };
+
     public const string RoadmapStatePrefix = "roadmap_state:";
     public const string RoadmapStatePendingConfirmation = "pending_confirmation";
     public const string RoadmapStateDiscoveryAsked = "discovery_asked";
@@ -72,7 +79,7 @@ public static class RoadmapIntentHelper
 
         void AddTag(string? value)
         {
-            var normalized = value?.Trim();
+            var normalized = NormalizeRoadmapTag(value);
             if (string.IsNullOrWhiteSpace(normalized))
                 return;
 
@@ -236,5 +243,20 @@ public static class RoadmapIntentHelper
                 return null;
             }
         }
+    }
+
+    public static string NormalizeRoadmapTag(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var tokens = value
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(token => RoadmapTokenAliases.TryGetValue(token, out var expanded)
+                ? expanded
+                : token)
+            .ToArray();
+
+        return string.Join(" ", tokens).Trim();
     }
 }

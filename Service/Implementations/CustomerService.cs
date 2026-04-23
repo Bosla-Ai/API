@@ -2983,6 +2983,8 @@ Latest user message:
         merged.Tags = [.. primary.Tags
             .Concat(secondary.Tags ?? [])
             .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Select(RoadmapIntentHelper.NormalizeRoadmapTag)
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(10)];
 
@@ -3011,7 +3013,8 @@ Latest user message:
             .Concat(normalizedRequest.Tags ?? [])
             .Concat(userProfile?.Interests ?? [])
             .Where(tag => !string.IsNullOrWhiteSpace(tag))
-            .Select(tag => tag.Trim())
+            .Select(RoadmapIntentHelper.NormalizeRoadmapTag)
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(10)];
 
