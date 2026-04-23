@@ -152,11 +152,11 @@ public class CustomerHelper
 
     public async Task<(string Response, string ModelName, string? ThinkingContent)> SendRequestByTask(
         string prompt, LLMInteractionType taskType, bool useThinking = false,
-        string? userId = null, bool isSuperAdmin = false, ChatMode chatMode = ChatMode.Normal, string? systemPrompt = null)
+        string? userId = null, bool isSuperAdmin = false, ChatMode chatMode = ChatMode.Fast, string? systemPrompt = null)
     {
         var targetModel = GetModelForTask(taskType);
 
-        if (chatMode == ChatMode.Powerful)
+        if (chatMode == ChatMode.Deep)
         {
             return await SendRequestToGemini(prompt, useThinking, userId, isSuperAdmin, systemPrompt);
         }
@@ -600,11 +600,11 @@ public class CustomerHelper
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
         string? userId = null,
         bool isSuperAdmin = false,
-        ChatMode chatMode = ChatMode.Normal,
+        ChatMode chatMode = ChatMode.Fast,
         string? systemPrompt = null)
     {
         // Powerful mode: route all tasks to Gemini (intent detection bypasses this via SendStreamRequestWithModel)
-        if (chatMode == ChatMode.Powerful)
+        if (chatMode == ChatMode.Deep)
         {
             await foreach (var chunk in SendStreamRequestToGemini(prompt, useThinking, cancellationToken, userId, isSuperAdmin, systemPrompt))
                 yield return chunk;
@@ -1407,7 +1407,7 @@ public class CustomerHelper
     private static string EscapeBraces(string? input)
         => input?.Replace("{", "{{").Replace("}", "}}") ?? string.Empty;
 
-    public async Task<string> ClassifyModeAsync(string query, int sessionMessageCount, bool profileComplete)
+    public async Task<string> ClassifyModeAsync(string query, int sessionMessageCount, bool profileComplete, string? lastAssistantMessage = null)
     {
         var template = _options.CurrentValue.Prompts.ModeClassificationPrompt;
 
@@ -1418,7 +1418,8 @@ public class CustomerHelper
         }
 
         var profileStatus = profileComplete ? "complete" : "incomplete";
-        var prompt = string.Format(template, EscapeBraces(query), sessionMessageCount, profileStatus);
+        var assistantContext = string.IsNullOrWhiteSpace(lastAssistantMessage) ? "(none)" : lastAssistantMessage;
+        var prompt = string.Format(template, EscapeBraces(query), sessionMessageCount, profileStatus, EscapeBraces(assistantContext));
 
         try
         {
@@ -1441,61 +1442,6 @@ public class CustomerHelper
         {
             _logger.LogWarning(ex, "Mode classification failed. Defaulting to ACTION.");
             return "ACTION";
-        }
-    }
-
-    public async Task<(LLMInteractionType Intent, float Confidence, string? TargetRole)> ClassifyIntentSimplifiedAsync(
-        string query, string? profileSummary)
-    {
-        var template = _options.CurrentValue.Prompts.SimplifiedIntentPrompt;
-
-        if (string.IsNullOrWhiteSpace(template))
-        {
-            // Fallback if prompt not configured
-            return (LLMInteractionType.ChatWithAI, 50, null);
-        }
-
-        var prompt = string.Format(template, EscapeBraces(query), EscapeBraces(profileSummary ?? "No profile data available"));
-
-        try
-        {
-            var (response, _, _) = await SendRequestWithModel(prompt, _chatModel, useThinking: false);
-
-            // Parse the JSON response
-            var cleanJson = response.Trim();
-            if (cleanJson.StartsWith("```"))
-            {
-                cleanJson = cleanJson.Replace("```json", "").Replace("```", "").Trim();
-            }
-
-            var parsed = JsonConvert.DeserializeAnonymousType(cleanJson, new
-            {
-                intent = "",
-                confidence = 0f,
-                target_role = (string?)null
-            });
-
-            if (parsed == null)
-            {
-                return (LLMInteractionType.ChatWithAI, 50, null);
-            }
-
-            var intent = parsed.intent?.ToLowerInvariant() switch
-            {
-                "roadmapgeneration" => LLMInteractionType.RoadmapGeneration,
-                "cvanalysis" => LLMInteractionType.CVAnalysis,
-                "topicpreview" => LLMInteractionType.TopicPreview,
-                "choosetrack" => LLMInteractionType.ChooseTrack,
-                _ => LLMInteractionType.ChatWithAI
-            };
-
-            return (intent, parsed.confidence, parsed.target_role);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Simplified intent classification failed. Defaulting to ChatWithAI.");
-            return (LLMInteractionType.ChatWithAI, 50, null);
         }
     }
 

@@ -6,6 +6,7 @@ public interface IChatRepository
 {
     Task AddMessageAsync(ChatMessageEntity message);
     Task<List<ChatMessageEntity>> GetMessagesAsync(string userId, string sessionId, int limit = 15);
+    Task<ChatMessageEntity?> GetLatestSummaryMessageAsync(string userId, string sessionId);
     Task<string?> GetLatestStateMessageByPrefixAsync(string userId, string sessionId, string prefix);
     Task DeleteMessagesAsync(string userId, string sessionId, IEnumerable<string> messageIds);
 

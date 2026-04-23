@@ -13,4 +13,9 @@ public sealed class RoadmapCourse
 
     public bool IsCompleted { get; set; } = false;
     public DateTime? CompletedAt { get; set; }
+
+    // Video progress tracking
+    public int CurrentPositionSeconds { get; set; }
+    public int TotalDurationSeconds { get; set; }
+    public string? VideoId { get; set; }
 }

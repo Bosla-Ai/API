@@ -40,6 +40,8 @@ public class CustomerService(
     , IChatRepository chatRepository
     , IUserProfileRepository userProfileRepository) : ICustomerService
 {
+    private static readonly ConcurrentDictionary<string, RoadmapRequestDTO> PendingRoadmapRequestCache = new(StringComparer.Ordinal);
+
     private bool IsSuperAdmin()
     {
         var user = httpContextAccessor.HttpContext?.User;
@@ -77,7 +79,7 @@ public class CustomerService(
 
     public async IAsyncEnumerable<string> ProcessUserQueryStreamAsync(string userId, string query, string? sessionId = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
-        ChatMode chatMode = ChatMode.Normal)
+        ChatMode chatMode = ChatMode.Fast)
     {
         if (string.IsNullOrWhiteSpace(userId))
             throw new BadRequestException("User ID is required");
@@ -96,6 +98,20 @@ public class CustomerService(
             _logger.LogDebug("UI mode override detected: {Mode}", uiSelectedMode);
         }
 
+        // Detect user language for hard constraint injection
+        var detectedLanguage = DetectLanguage(query);
+
+        // Extract inline CV text if present
+        string? inlineCvText = null;
+        var cvMatch = System.Text.RegularExpressions.Regex.Match(query, @"\[CV_TEXT\]\s*([\s\S]+?)\s*\[/CV_TEXT\]");
+        if (cvMatch.Success)
+        {
+            inlineCvText = cvMatch.Groups[1].Value.Trim();
+            query = query[..cvMatch.Index].TrimEnd();
+            if (string.IsNullOrWhiteSpace(query)) query = "Please analyze my CV";
+            _logger.LogInformation("Inline CV text extracted ({Len} chars), cleaned query: '{Query}'", inlineCvText.Length, query);
+        }
+
         var pendingSseEvents = new ConcurrentQueue<string>();
         conversationContextManager.OnSseEvent = (eventName, data) =>
         {
@@ -108,6 +124,9 @@ public class CustomerService(
         var conversationContext = await conversationContextManager.GetConversationContextAsync(userId, actualSessionId);
         var conversationContextText = conversationContext.ToString();
 
+        // Build set of previously asked question IDs to avoid repeating them
+        var previouslyAskedIds = ExtractAskedQuestionIds(conversationContextText);
+
         // Drain any buffered SSE events (e.g. compaction)
         while (pendingSseEvents.TryDequeue(out var sseEvent))
             yield return sseEvent;
@@ -115,12 +134,12 @@ public class CustomerService(
         yield return FormatSse("status", new { message = "Analyzing your request...", step = "init" });
 
         // Emit quota info for Powerful mode
-        if (chatMode == ChatMode.Powerful)
+        if (chatMode == ChatMode.Deep)
         {
             var remaining = customerHelper.GetGeminiRemainingQuota(userId, IsSuperAdmin());
             yield return FormatSse("quota", new
             {
-                mode = "powerful",
+                mode = "deep",
                 remaining,
                 limit = options.CurrentValue.Gemini.MaxRequestsPerUserPerDay
             });
@@ -152,20 +171,9 @@ public class CustomerService(
                         summary = $"Analyzed {fetchedMarketInsight.TotalJobsAnalyzed} jobs. Top skills: {topSkillsSummary}{salaryInfo}"
                     }));
 
-                    var pulse = jobMarketService.CalculateReadiness(marketKeywords, fetchedMarketInsight);
-                    if (pulse is not null)
-                    {
-                        pendingEvents.Add(FormatSse("career_pulse", new
-                        {
-                            readinessScore = pulse.ReadinessScore,
-                            readinessLevel = pulse.ReadinessLevel,
-                            matchedSkills = pulse.MatchedSkills,
-                            topGaps = pulse.TopGaps.Select(g => new { skill = g.Skill, demandPercent = g.DemandPercent, category = g.Category }),
-                            insight = pulse.Insight,
-                            targetRole = pulse.TargetRole,
-                            jobsAnalyzed = pulse.JobsAnalyzed
-                        }));
-                    }
+                    // Career Pulse is intentionally NOT emitted here.
+                    // It is only emitted after intent detection for CVAnalysis / RoadmapGeneration
+                    // (see the tag-based Career Pulse block further below).
                 }
                 else
                 {
@@ -235,9 +243,14 @@ public class CustomerService(
         }
         var hasPendingRoadmapConfirmation = roadmapFlowState == RoadmapIntentHelper.RoadmapStatePendingConfirmation;
         var hasAskedDiscovery = roadmapFlowState == RoadmapIntentHelper.RoadmapStateDiscoveryAsked;
+        var pendingRoadmapRequest = await GetPendingRoadmapRequestAsync(userId, actualSessionId);
 
         var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
-        var hasRoadmapContext = hasPendingRoadmapConfirmation || hasAskedDiscovery || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+        var hasRoadmapContext = hasPendingRoadmapConfirmation
+            || hasAskedDiscovery
+            || pendingRoadmapRequest != null
+            || HasInlineRoadmapQuestionPayload(query)
+            || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
         var roadmapDeclineReply = HasRoadmapDecline(query) && hasRoadmapContext;
         var roadmapConfirmationReply = HasRoadmapConfirmation(query) && hasRoadmapContext;
         var roadmapStateFollowUp = (hasPendingRoadmapConfirmation || hasAskedDiscovery)
@@ -280,7 +293,20 @@ public class CustomerService(
         var profileSummary = userProfile?.ToPromptSummary() ?? "No profile data yet";
         var hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
 
-        if (enableModeClassification && !skipIntentDetection && chatMode != ChatMode.Powerful && !explicitRoadmapRequest)
+        // Inject compact roadmap progress context into profile summary (every turn)
+        string? progressContextSnippet = null;
+        try
+        {
+            progressContextSnippet = await BuildProgressContextSnippetAsync(userId);
+            if (!string.IsNullOrEmpty(progressContextSnippet))
+                profileSummary += "\n\nRoadmap Progress:\n" + progressContextSnippet;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to build progress context for {UserId}", userId);
+        }
+
+        if (enableModeClassification && !skipIntentDetection && chatMode != ChatMode.Deep && !explicitRoadmapRequest)
         {
             yield return FormatSse("status", new { message = "Understanding your request...", step = "mode_classification" });
 
@@ -293,8 +319,23 @@ public class CustomerService(
             // New sessions with incomplete profiles lean toward FRIEND mode.
             var applyFriendBias = sessionMessageCount < sessionMessageThreshold && !profileComplete;
 
+            // Extract last assistant message for classification context
+            string? lastAssistantMessage = null;
+            if (!string.IsNullOrEmpty(conversationContextText))
+            {
+                var lines = conversationContextText.Split('\n');
+                for (var i = lines.Length - 1; i >= 0; i--)
+                {
+                    if (lines[i].StartsWith("[assistant]:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        lastAssistantMessage = lines[i]["[assistant]:".Length..].Trim();
+                        break;
+                    }
+                }
+            }
+
             (classifiedMode, modeClassificationError) = await ClassifyModeWithFallbackAsync(
-                customerHelper, query, sessionMessageCount, profileComplete, applyFriendBias, _logger);
+                customerHelper, query, sessionMessageCount, profileComplete, applyFriendBias, _logger, lastAssistantMessage);
         }
 
         if (sessionMessageCount > 0)
@@ -361,10 +402,19 @@ public class CustomerService(
         }
 
         // FRIEND mode: Skip intent detection, go directly to warm chat
-        if (classifiedMode == "FRIEND")
+        if (classifiedMode == "FRIEND" && string.IsNullOrEmpty(inlineCvText))
         {
             skipIntentDetection = true;
             _logger.LogDebug("FRIEND mode: Skipping intent detection for empathetic conversation");
+        }
+
+        // When inline CV text is present, force CVAnalysis regardless of classification
+        if (!string.IsNullOrEmpty(inlineCvText) && !uiForcedIntent.HasValue)
+        {
+            uiForcedIntent = LLMInteractionType.CVAnalysis;
+            classifiedMode = "ACTION";
+            skipIntentDetection = false;
+            _logger.LogInformation("Inline CV text detected ({Len} chars) → forcing CVAnalysis intent", inlineCvText.Length);
         }
 
         // UNCLEAR mode: Skip intent detection, ask clarifying question
@@ -384,10 +434,14 @@ public class CustomerService(
         // Intent Detection (only for ACTION mode)
         var prompts = options.CurrentValue.Prompts;
 
-        var systemPrompt = chatMode == ChatMode.Powerful
-            && !string.IsNullOrEmpty(prompts.IntentDetectionSystemPromptPowerful)
-            ? prompts.IntentDetectionSystemPromptPowerful
-            : prompts.IntentDetectionSystemPrompt;
+        var systemPrompt = prompts.IntentDetectionSystemPrompt;
+        if (chatMode == ChatMode.Deep)
+            systemPrompt = "Use your thinking capability to reason step-by-step before classifying the user's intent.\n\n" + systemPrompt;
+
+        // Inject shared language rules
+        if (!string.IsNullOrEmpty(prompts.LanguageRules))
+            systemPrompt = systemPrompt.Replace("{LANGUAGE_RULES}", prompts.LanguageRules);
+
         if (!string.IsNullOrEmpty(marketContext))
         {
             systemPrompt = systemPrompt.Replace("{MARKET_CONTEXT}", marketContext);
@@ -397,6 +451,10 @@ public class CustomerService(
             systemPrompt = systemPrompt.Replace("{MARKET_CONTEXT}",
                 "No real-time market data available. Use your knowledge of current labor market trends.");
         }
+
+        // Hard language constraint based on detected user language
+        var langName = detectedLanguage == "ar" ? "Arabic" : "English";
+        systemPrompt = $"[LANGUAGE CONSTRAINT: You MUST respond in {langName} only. This overrides all other language rules.]\n\n" + systemPrompt;
 
         // Inject UI mode context using canonical server-side label (prevents prompt injection).
         var missingProfileFields = GetMissingProfileFields(userProfile);
@@ -452,7 +510,10 @@ public class CustomerService(
             var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
                 (!string.IsNullOrEmpty(conversationContextText) ? $"Conversation History:\n{conversationContextText}\n\n" : ""),
                 query,
-                profileSummary);
+                profileSummary,
+                fetchedMarketInsight?.TopRequiredSkills is { Length: > 0 }
+                    ? string.Join(", ", fetchedMarketInsight.TopRequiredSkills)
+                    : "No market skills data available");
 
             var detectionJsonBuilder = new StringBuilder();
             string detectionModel = "Unknown";
@@ -612,9 +673,65 @@ public class CustomerService(
             confidence = Math.Max(confidence, 75);
         }
 
-        if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments == null)
+        if (interactionType == LLMInteractionType.RoadmapGeneration)
         {
-            toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(query, conversationContextText);
+            if (roadmapConfirmationReply && pendingRoadmapRequest != null)
+            {
+                toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                    pendingRoadmapRequest,
+                    userProfile,
+                    detectedLanguage);
+            }
+            else if (roadmapRefinementReply && pendingRoadmapRequest != null)
+            {
+                var refinementRequest = toolArguments
+                    ?? RoadmapIntentHelper.BuildRoadmapFallbackRequest(
+                        query,
+                        conversationContextText,
+                        userProfile,
+                        detectedLanguage);
+
+                toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                    MergeRoadmapRequests(refinementRequest, pendingRoadmapRequest),
+                    userProfile,
+                    detectedLanguage);
+            }
+            else if (toolArguments == null && pendingRoadmapRequest != null
+                     && (roadmapStateFollowUp || hasAskedDiscovery || hasPendingRoadmapConfirmation))
+            {
+                toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                    pendingRoadmapRequest,
+                    userProfile,
+                    detectedLanguage);
+            }
+            else if (toolArguments == null)
+            {
+                toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(
+                    query,
+                    conversationContextText,
+                    userProfile,
+                    detectedLanguage);
+            }
+            else if (pendingRoadmapRequest != null
+                     && (roadmapStateFollowUp || hasAskedDiscovery || hasPendingRoadmapConfirmation))
+            {
+                toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                    MergeRoadmapRequests(pendingRoadmapRequest, toolArguments),
+                    userProfile,
+                    detectedLanguage);
+            }
+            else
+            {
+                toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                    toolArguments,
+                    userProfile,
+                    detectedLanguage);
+            }
+        }
+
+        if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments != null)
+        {
+            await SavePendingRoadmapRequestAsync(userId, actualSessionId, toolArguments);
         }
 
         // Requires confirmed profile before proceeding; re-asks discovery if fields are still missing.
@@ -732,55 +849,73 @@ public class CustomerService(
                     var discoveryQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions))
                         ? questions
                         : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+                    discoveryQuestions = DeduplicateQuestions(discoveryQuestions, previouslyAskedIds);
+                    if (discoveryQuestions.Length > 0)
+                    {
+                        var discoveryIntro = !string.IsNullOrWhiteSpace(aiResponse)
+                            ? aiResponse
+                            : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
 
-                    var discoveryIntro = !string.IsNullOrWhiteSpace(aiResponse)
-                        ? aiResponse
-                        : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
+                        yield return FormatSse("text", new { delta = discoveryIntro });
+                        yield return FormatSse("ask_user", new { questions = discoveryQuestions });
+                        MarkQuestionsAsked(previouslyAskedIds, discoveryQuestions);
+                        await conversationContextManager.AddMessageToContextAsync(
+                            userId, actualSessionId,
+                            $"{discoveryIntro}\n[ASKED_QUESTIONS:{string.Join(",", discoveryQuestions.Select(q => q.Id))}]",
+                            "assistant");
+                        yield return FormatSse("done", new { message = "Roadmap discovery questions requested" });
+                        await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+                        yield break;
+                    }
 
-                    yield return FormatSse("text", new { delta = discoveryIntro });
-                    yield return FormatSse("ask_user", new { questions = discoveryQuestions });
-
-                    if (followUpSuggestions is { Length: > 0 })
-                        yield return FormatSse("suggestions", new { items = followUpSuggestions });
-
-                    yield return FormatSse("done", new { message = "Roadmap discovery questions requested" });
-
-                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
-
-                    await conversationContextManager.AddMessageToContextAsync(
+                    _logger.LogInformation(
+                        "No new roadmap discovery questions remain for {UserId} in session {SessionId}; proceeding with partial profile",
                         userId,
-                        actualSessionId,
-                        discoveryIntro,
-                        "assistant");
-
-                    yield break;
+                        actualSessionId);
                 }
             }
 
             // Profile is sufficient (or max attempts exhausted) → ask for confirmation
-            if (!string.IsNullOrEmpty(aiResponse))
-                yield return FormatSse("text", new { delta = aiResponse });
+            // Detect known skills from user's completed roadmap courses
+            string[]? knownSkillsFromProgress = null;
+            try
+            {
+                knownSkillsFromProgress = await DetectKnownSkillsFromProgressAsync(userId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to detect known skills for {UserId}", userId);
+            }
 
             var confirmQuestions = (questions is { Length: > 0 } && !IsRoadmapIntakeQuestionSet(questions))
                 ? questions
-                : BuildRoadmapConfirmationQuestions();
+                : BuildRoadmapConfirmationQuestions(toolArguments?.Tags, knownSkillsFromProgress);
+            confirmQuestions = DeduplicateQuestions(confirmQuestions, previouslyAskedIds);
 
-            yield return FormatSse("ask_user", new { questions = confirmQuestions });
+            if (confirmQuestions.Length > 0)
+            {
+                if (!string.IsNullOrEmpty(aiResponse))
+                    yield return FormatSse("text", new { delta = aiResponse });
 
-            if (followUpSuggestions is { Length: > 0 })
-                yield return FormatSse("suggestions", new { items = followUpSuggestions });
+                yield return FormatSse("ask_user", new { questions = confirmQuestions });
+                MarkQuestionsAsked(previouslyAskedIds, confirmQuestions);
+                yield return FormatSse("done", new { message = "Roadmap confirmation requested" });
 
-            yield return FormatSse("done", new { message = "Roadmap confirmation requested" });
+                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
 
-            await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
+                await conversationContextManager.AddMessageToContextAsync(
+                    userId,
+                    actualSessionId,
+                    $"{aiResponse ?? "Please confirm if you want me to generate your roadmap now."}\n[ASKED_QUESTIONS:{string.Join(",", confirmQuestions.Select(q => q.Id))}]",
+                    "assistant");
 
-            await conversationContextManager.AddMessageToContextAsync(
+                yield break;
+            }
+
+            _logger.LogInformation(
+                "No new roadmap confirmation questions remain for {UserId} in session {SessionId}; proceeding to generation",
                 userId,
-                actualSessionId,
-                aiResponse ?? "Please confirm if you want me to generate your roadmap now.",
-                "assistant");
-
-            yield break;
+                actualSessionId);
         }
 
         // Safety net: incomplete profile should not reach the pipeline, unless max discovery attempts have been exhausted.
@@ -801,18 +936,30 @@ public class CustomerService(
                     "Pre-pipeline safety net: profile still incomplete for {UserId} (attempt {Count}), re-entering discovery",
                     userId, safetyAttemptCount + 1);
 
-                var safetyQuestions = BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
-                var safetyIntro = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
+                var safetyQuestions = DeduplicateQuestions(
+                    BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText),
+                    previouslyAskedIds);
+                if (safetyQuestions.Length > 0)
+                {
+                    var safetyIntro = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
+                    yield return FormatSse("text", new { delta = safetyIntro });
+                    yield return FormatSse("ask_user", new { questions = safetyQuestions });
+                    MarkQuestionsAsked(previouslyAskedIds, safetyQuestions);
+                    yield return FormatSse("done", new { message = "Roadmap discovery re-requested (safety net)" });
 
-                yield return FormatSse("text", new { delta = safetyIntro });
-                yield return FormatSse("ask_user", new { questions = safetyQuestions });
-                yield return FormatSse("done", new { message = "Roadmap discovery re-requested (safety net)" });
+                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+                    await conversationContextManager.AddMessageToContextAsync(
+                        userId, actualSessionId,
+                        $"{safetyIntro}\n[ASKED_QUESTIONS:{string.Join(",", safetyQuestions.Select(q => q.Id))}]",
+                        "assistant");
 
-                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
-                await conversationContextManager.AddMessageToContextAsync(
-                    userId, actualSessionId, safetyIntro, "assistant");
+                    yield break;
+                }
 
-                yield break;
+                _logger.LogInformation(
+                    "Safety net found no new roadmap discovery questions for {UserId} in session {SessionId}; allowing pipeline to proceed",
+                    userId,
+                    actualSessionId);
             }
         }
 
@@ -822,20 +969,25 @@ public class CustomerService(
 
         if (shouldEmitQuestions)
         {
+            var dedupedQuestions = DeduplicateQuestions(questions, previouslyAskedIds);
+
             // Emit the response text first (introduces the questions)
             if (!string.IsNullOrEmpty(aiResponse))
                 yield return FormatSse("text", new { delta = aiResponse });
 
-            yield return FormatSse("ask_user", new { questions });
-
-            if (followUpSuggestions is { Length: > 0 })
-                yield return FormatSse("suggestions", new { items = followUpSuggestions });
+            if (dedupedQuestions.Length > 0)
+            {
+                yield return FormatSse("ask_user", new { questions = dedupedQuestions });
+                MarkQuestionsAsked(previouslyAskedIds, dedupedQuestions);
+            }
 
             yield return FormatSse("done", new { message = "Questions sent" });
 
             // Save conversation context
             await conversationContextManager.AddMessageToContextAsync(
-                userId, actualSessionId, aiResponse ?? "Asked clarification questions", "assistant");
+                userId, actualSessionId,
+                $"{aiResponse ?? "Asked clarification questions"}\n[ASKED_QUESTIONS:{string.Join(",", dedupedQuestions.Select(q => q.Id))}]",
+                "assistant");
 
             yield break;
         }
@@ -903,9 +1055,82 @@ public class CustomerService(
             }
         }
 
+        if (interactionType == LLMInteractionType.ProgressCheck)
+        {
+            // Fetch detailed progress for the most active roadmap
+            var progressDetail = progressContextSnippet;
+            if (string.IsNullOrEmpty(progressDetail))
+            {
+                try { progressDetail = await BuildProgressContextSnippetAsync(userId); }
+                catch { /* already logged */ }
+            }
+
+            if (string.IsNullOrEmpty(progressDetail))
+            {
+                progressDetail = "No saved roadmaps found.";
+            }
+
+            var pcSystemPrompt = options.CurrentValue.Prompts.ProgressCheckSystemPrompt;
+            if (string.IsNullOrEmpty(pcSystemPrompt))
+                pcSystemPrompt = "You are Bosla AI. Summarize the user's learning progress in a warm, encouraging way. Always end with exactly one specific next action.";
+            if (!string.IsNullOrEmpty(options.CurrentValue.Prompts.LanguageRules))
+                pcSystemPrompt = pcSystemPrompt.Replace("{LANGUAGE_RULES}", options.CurrentValue.Prompts.LanguageRules);
+            if (!string.IsNullOrEmpty(detectedLanguage))
+            {
+                var pcLangName = detectedLanguage == "ar" ? "Arabic" : "English";
+                pcSystemPrompt = $"[LANGUAGE CONSTRAINT: You MUST respond in {pcLangName} only.]\n\n" + pcSystemPrompt;
+            }
+
+            var pcUserPrompt = $"Progress Context:\n{progressDetail}\n\nConversation History:\n{conversationContextText}\n\nUser Query: \"{query}\"";
+
+            var pcResponseBuilder = new StringBuilder();
+            try
+            {
+                await foreach (var chunk in customerHelper.SendStreamRequestByTask(
+                    pcUserPrompt, LLMInteractionType.ChatWithAI, useThinking: false,
+                    cancellationToken: cancellationToken, userId: userId,
+                    isSuperAdmin: IsSuperAdmin(), chatMode: chatMode,
+                    systemPrompt: pcSystemPrompt))
+                {
+                    if (chunk.StartsWith("__FALLBACK__:"))
+                    {
+                        yield return FormatSse("fallback", new { provider = chunk[13..].Trim(), message = "Switched to backup AI model" });
+                    }
+                    else if (chunk == "__RETRY__")
+                    {
+                        yield return FormatSse("retry", new { message = "Rate limited, retrying with backup model..." });
+                        pcResponseBuilder.Clear();
+                    }
+                    else if (chunk.StartsWith("__MODEL__:"))
+                    {
+                        yield return FormatSse("model", new { name = chunk[10..].Trim(), reasoning = false });
+                    }
+                    else if (!chunk.StartsWith("__STATUS__") && !chunk.StartsWith("__THINKING_CONTENT__:"))
+                    {
+                        yield return FormatSse("text", new { delta = chunk });
+                        pcResponseBuilder.Append(chunk);
+                    }
+                }
+            }
+            finally
+            {
+                if (!cancellationToken.IsCancellationRequested && pcResponseBuilder.Length > 0)
+                {
+                    await conversationContextManager
+                        .AddMessageToContextAsync(userId, actualSessionId, pcResponseBuilder.ToString(), "assistant");
+                }
+            }
+
+            if (followUpSuggestions is { Length: > 0 })
+                yield return FormatSse("suggestions", new { items = followUpSuggestions });
+
+            yield return FormatSse("done", new { message = "Progress check completed" });
+            yield break;
+        }
+
         if (interactionType == LLMInteractionType.ChatWithAI)
         {
-            var (chatSystemPrompt, chatPrompt) = BuildChatPrompt(conversationContext.ToString(), query, profileSummary, chatMode);
+            var (chatSystemPrompt, chatPrompt) = BuildChatPrompt(conversationContext.ToString(), query, profileSummary, chatMode, detectedLanguage);
 
             var fullResponseBuilder = new StringBuilder();
             var chatThinkingLog = "";
@@ -963,12 +1188,147 @@ public class CustomerService(
                 }
             }
         }
+        else if (interactionType == LLMInteractionType.CVAnalysis && !string.IsNullOrEmpty(inlineCvText))
+        {
+            // ── Inline CV analysis via LLM (no pipeline) ──
+            yield return FormatSse("status", new { message = "Analyzing your CV...", step = "cv_analysis" });
+
+            var cvSystemPrompt = options.CurrentValue.Prompts.CvAnalysisSystemPrompt;
+            if (string.IsNullOrEmpty(cvSystemPrompt))
+            {
+                cvSystemPrompt = "You are an expert career advisor. Analyze the provided CV/resume text and provide a detailed, Markdown-formatted career analysis including: Profile Summary, Strengths, Gaps, Recommendations, Suggested Learning Tags, and Target Roles.";
+            }
+
+            // Inject shared language rules
+            if (!string.IsNullOrEmpty(options.CurrentValue.Prompts.LanguageRules))
+            {
+                cvSystemPrompt = cvSystemPrompt.Replace("{LANGUAGE_RULES}", options.CurrentValue.Prompts.LanguageRules);
+            }
+
+            // Inject language constraint
+            if (!string.IsNullOrEmpty(detectedLanguage))
+            {
+                var cvLangName = detectedLanguage == "ar" ? "Arabic" : "English";
+                cvSystemPrompt = $"[LANGUAGE CONSTRAINT: You MUST respond in {cvLangName} only. This overrides all other language rules.]\n\n" + cvSystemPrompt;
+            }
+
+            var cvUserPrompt = $"Here is the CV/resume text to analyze:\n\n{inlineCvText}";
+
+            var fullCvResponse = new StringBuilder();
+            try
+            {
+                await foreach (var chunk in customerHelper.SendStreamRequestByTask(
+                    cvUserPrompt, LLMInteractionType.CVAnalysis, useThinking: false,
+                    cancellationToken: cancellationToken, userId: userId,
+                    isSuperAdmin: IsSuperAdmin(), chatMode: chatMode,
+                    systemPrompt: cvSystemPrompt))
+                {
+                    if (chunk.StartsWith("__FALLBACK__:"))
+                    {
+                        var fbModel = chunk["__FALLBACK__:".Length..];
+                        yield return FormatSse("fallback", new { model = fbModel });
+                        continue;
+                    }
+                    yield return FormatSse("text", new { delta = chunk });
+                    fullCvResponse.Append(chunk);
+                }
+            }
+            finally
+            {
+                if (!cancellationToken.IsCancellationRequested && fullCvResponse.Length > 0)
+                {
+                    await conversationContextManager
+                        .AddMessageToContextAsync(userId, actualSessionId, fullCvResponse.ToString(), "assistant");
+                }
+            }
+
+            // Try to extract suggested tags from the analysis for career pulse
+            // (best-effort — response is Markdown, not JSON)
+            string? cvPulseEvent = null;
+            if (toolArguments?.Tags is { Length: > 0 })
+            {
+                try
+                {
+                    var cvInsight = await jobMarketService.GetMarketInsightsAsync(toolArguments.Tags);
+                    if (cvInsight is not null)
+                    {
+                        var cvPulse = jobMarketService.CalculateReadiness(toolArguments.Tags, cvInsight);
+                        if (cvPulse is not null)
+                        {
+                            cvPulseEvent = FormatSse("career_pulse", new
+                            {
+                                readinessScore = cvPulse.ReadinessScore,
+                                readinessLevel = cvPulse.ReadinessLevel,
+                                matchedSkills = cvPulse.MatchedSkills,
+                                topGaps = cvPulse.TopGaps.Select(g => new { skill = g.Skill, demandPercent = g.DemandPercent, category = g.Category }),
+                                insight = cvPulse.Insight,
+                                targetRole = cvPulse.TargetRole,
+                                jobsAnalyzed = cvPulse.JobsAnalyzed
+                            });
+                        }
+                    }
+                }
+                catch { /* graceful — don't block CV analysis */ }
+            }
+
+            if (cvPulseEvent is not null)
+                yield return cvPulseEvent;
+
+            // Persist CV-derived profile signals to Cosmos
+            try
+            {
+                var cvProfile = new UserProfileEntity { UserId = userId };
+                if (toolArguments?.Tags is { Length: > 0 })
+                    cvProfile.Interests = [.. toolArguments.Tags];
+                if (!string.IsNullOrEmpty(targetRole))
+                    cvProfile.TargetRole = targetRole;
+
+                if (cvProfile.Interests?.Count > 0 || !string.IsNullOrEmpty(cvProfile.TargetRole))
+                    await userProfileRepository.UpsertAsync(cvProfile);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to persist CV profile signals for user {UserId}", userId);
+            }
+
+            yield return FormatSse("done", new { message = "CV analysis completed" });
+        }
         else if (interactionType != LLMInteractionType.ChatWithAI)
         {
             string finalResponse = "";
 
             if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
             {
+                // Filter out topics the user marked as "already known" from topic_chips
+                if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments.Tags is { Length: > 0 })
+                {
+                    var knownTopicsFromAnswer = ExtractKnownTopicsFromAnswer(query);
+                    if (knownTopicsFromAnswer.Length > 0)
+                    {
+                        var originalTags = toolArguments.Tags;
+                        toolArguments.Tags = [.. originalTags.Where(t => !knownTopicsFromAnswer.Contains(t, StringComparer.OrdinalIgnoreCase))];
+
+                        if (toolArguments.Tags.Length == 0)
+                        {
+                            // All topics are known — tell the user
+                            yield return FormatSse("text", new { delta = "It looks like you already know all the detected topics! Try asking for a more advanced roadmap or a different subject." });
+                            yield return FormatSse("done", new { message = "All topics already known" });
+                            yield break;
+                        }
+
+                        _logger.LogInformation(
+                            "Filtered known topics for {UserId}: removed [{Known}], remaining [{Remaining}]",
+                            userId, string.Join(", ", knownTopicsFromAnswer), string.Join(", ", toolArguments.Tags));
+                    }
+                }
+
+                // Validate LLM-generated tags against market data
+                if (toolArguments.Tags is { Length: > 0 } && fetchedMarketInsight?.TopRequiredSkills is { Length: > 0 })
+                {
+                    toolArguments.Tags = ValidateTagsAgainstMarket(
+                        toolArguments.Tags, fetchedMarketInsight.TopRequiredSkills, interactionType);
+                }
+
                 // Career Pulse from CV/roadmap tags — fetch market data if not already done
                 if (toolArguments.Tags is { Length: > 0 })
                 {
@@ -1143,44 +1503,62 @@ public class CustomerService(
             yield return FormatSse("suggestions", new { items = followUpSuggestions });
         }
 
+        string? profileUpdateSseEvent = null;
+
         if (options.CurrentValue.Llm.EnableBackgroundProfileExtraction
             && (classifiedMode == "FRIEND"
                 || interactionType == LLMInteractionType.RoadmapGeneration
                 || hasAskedDiscovery
                 || hasPendingRoadmapConfirmation))
         {
-            var capturedUserId = userId;
-            var capturedSessionId = actualSessionId;
-            var capturedContextManager = conversationContextManager;
-            var capturedHelper = customerHelper;
-            var capturedProfileRepo = userProfileRepository;
-            var capturedLogger = _logger;
-
-            _ = Task.Run(async () => // fire-and-forget; don't capture 'this'
+            try
             {
-                try
+                var context = await conversationContextManager.GetConversationContextAsync(userId, actualSessionId);
+                var extractedProfile = await customerHelper.ExtractProfileAsync(context);
+                if (extractedProfile != null)
                 {
-                    var context = await capturedContextManager.GetConversationContextAsync(capturedUserId, capturedSessionId);
-                    var extractedProfile = await capturedHelper.ExtractProfileAsync(context);
-                    if (extractedProfile != null)
+                    _logger.LogDebug("Extracted profile for user {UserId}: Interests={Interests}, TargetRole={TargetRole}",
+                        userId,
+                        extractedProfile.Interests != null ? string.Join(", ", extractedProfile.Interests) : "none",
+                        extractedProfile.TargetRole ?? "none");
+
+                    var profileEntity = UserProfileEntity.FromExtraction(userId, extractedProfile);
+                    await userProfileRepository.UpsertAsync(profileEntity);
+
+                    _logger.LogInformation("Saved profile to Cosmos DB for user {UserId}", userId);
+
+                    // Build SSE event outside try-catch (C# yield limitation)
+                    var updatedFields = new List<string>();
+                    if (extractedProfile.Interests?.Count > 0) updatedFields.Add("interests");
+                    if (!string.IsNullOrEmpty(extractedProfile.ExperienceLevel)) updatedFields.Add("experience_level");
+                    if (!string.IsNullOrEmpty(extractedProfile.TargetRole)) updatedFields.Add("target_role");
+                    if (extractedProfile.Constraints?.Count > 0) updatedFields.Add("constraints");
+                    if (extractedProfile.PersonalityHints?.Count > 0) updatedFields.Add("personality_hints");
+
+                    if (updatedFields.Count > 0)
                     {
-                        capturedLogger.LogDebug("Extracted profile for user {UserId}: Interests={Interests}, TargetRole={TargetRole}",
-                            capturedUserId,
-                            extractedProfile.Interests != null ? string.Join(", ", extractedProfile.Interests) : "none",
-                            extractedProfile.TargetRole ?? "none");
-
-                        // Save to Cosmos DB with smart merge
-                        var profileEntity = UserProfileEntity.FromExtraction(capturedUserId, extractedProfile);
-                        await capturedProfileRepo.UpsertAsync(profileEntity);
-
-                        capturedLogger.LogInformation("Saved profile to Cosmos DB for user {UserId}", capturedUserId);
+                        profileUpdateSseEvent = FormatSse("profile_update", new
+                        {
+                            message = "Profile updated with new insights from our conversation",
+                            fields = updatedFields,
+                            interests = extractedProfile.Interests,
+                            experienceLevel = extractedProfile.ExperienceLevel,
+                            targetRole = extractedProfile.TargetRole,
+                            constraints = extractedProfile.Constraints,
+                            personalityHints = extractedProfile.PersonalityHints,
+                        });
                     }
                 }
-                catch (Exception ex)
-                {
-                    capturedLogger.LogWarning(ex, "Background profile extraction failed for user {UserId}", capturedUserId);
-                }
-            });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Profile extraction failed for user {UserId}", userId);
+            }
+        }
+
+        if (profileUpdateSseEvent != null)
+        {
+            yield return profileUpdateSseEvent;
         }
 
         yield return FormatSse("done", new { });
@@ -1234,6 +1612,7 @@ public class CustomerService(
 
             var conversationContext = await contextTask;
             var conversationContextText = conversationContext.ToString();
+            var previouslyAskedIds = ExtractAskedQuestionIds(conversationContextText);
             var userProfile = await profileTask;
             var profileSummary = userProfile?.ToPromptSummary() ?? "No profile data yet";
             var hasSufficientRoadmapProfile = HasSufficientRoadmapProfile(userProfile);
@@ -1256,9 +1635,14 @@ public class CustomerService(
             }
             var hasPendingRoadmapConfirmation = roadmapFlowState == RoadmapIntentHelper.RoadmapStatePendingConfirmation;
             var hasAskedDiscovery = roadmapFlowState == RoadmapIntentHelper.RoadmapStateDiscoveryAsked;
+            var pendingRoadmapRequest = await GetPendingRoadmapRequestAsync(userId, actualSessionId);
 
             var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
-            var hasRoadmapContext = hasPendingRoadmapConfirmation || hasAskedDiscovery || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+            var hasRoadmapContext = hasPendingRoadmapConfirmation
+                || hasAskedDiscovery
+                || pendingRoadmapRequest != null
+                || HasInlineRoadmapQuestionPayload(query)
+                || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
             var roadmapDeclineReply = HasRoadmapDecline(query) && hasRoadmapContext;
             var roadmapConfirmationReply = HasRoadmapConfirmation(query) && hasRoadmapContext;
             var roadmapStateFollowUp = (hasPendingRoadmapConfirmation || hasAskedDiscovery)
@@ -1301,9 +1685,67 @@ public class CustomerService(
                 confidence = Math.Max(confidence, 75);
             }
 
-            if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments == null)
+            if (interactionType == LLMInteractionType.RoadmapGeneration)
             {
-                toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(query, conversationContextText);
+                var detectedLanguage = DetectLanguage(query);
+
+                if (roadmapConfirmationReply && pendingRoadmapRequest != null)
+                {
+                    toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                        pendingRoadmapRequest,
+                        userProfile,
+                        detectedLanguage);
+                }
+                else if (roadmapRefinementReply && pendingRoadmapRequest != null)
+                {
+                    var refinementRequest = toolArguments
+                        ?? RoadmapIntentHelper.BuildRoadmapFallbackRequest(
+                            query,
+                            conversationContextText,
+                            userProfile,
+                            detectedLanguage);
+
+                    toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                        MergeRoadmapRequests(refinementRequest, pendingRoadmapRequest),
+                        userProfile,
+                        detectedLanguage);
+                }
+                else if (toolArguments == null && pendingRoadmapRequest != null
+                         && (roadmapStateFollowUp || hasAskedDiscovery || hasPendingRoadmapConfirmation))
+                {
+                    toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                        pendingRoadmapRequest,
+                        userProfile,
+                        detectedLanguage);
+                }
+                else if (toolArguments == null)
+                {
+                    toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(
+                        query,
+                        conversationContextText,
+                        userProfile,
+                        detectedLanguage);
+                }
+                else if (pendingRoadmapRequest != null
+                         && (roadmapStateFollowUp || hasAskedDiscovery || hasPendingRoadmapConfirmation))
+                {
+                    toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                        MergeRoadmapRequests(pendingRoadmapRequest, toolArguments),
+                        userProfile,
+                        detectedLanguage);
+                }
+                else
+                {
+                    toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                        toolArguments,
+                        userProfile,
+                        detectedLanguage);
+                }
+            }
+
+            if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments != null)
+            {
+                await SavePendingRoadmapRequestAsync(userId, actualSessionId, toolArguments);
             }
             // When the user is answering discovery questions, run AI-powered profile extraction
             // synchronously. The static parser may miss free-form answers.
@@ -1379,27 +1821,38 @@ public class CustomerService(
                             ? aiResponse
                             : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
 
-                        var responseQuestions = (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions))
-                            ? questions
-                            : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+                        var responseQuestions = DeduplicateQuestions(
+                            (questions is { Length: > 0 } && IsRoadmapIntakeQuestionSet(questions))
+                                ? questions
+                                : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText),
+                            previouslyAskedIds);
 
-                        await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, responseMessage, "assistant");
-                        await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
-
-                        return new APIResponse<AiIntentDetectionResponse>()
+                        if (responseQuestions.Length > 0)
                         {
-                            StatusCode = HttpStatusCode.OK,
-                            Data = new AiIntentDetectionResponse
+                            await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
+                                $"{responseMessage}\n[ASKED_QUESTIONS:{string.Join(",", responseQuestions.Select(q => q.Id))}]", "assistant");
+                            await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+
+                            return new APIResponse<AiIntentDetectionResponse>()
                             {
-                                InteractionType = LLMInteractionType.RoadmapGeneration,
-                                Confidence = confidence,
-                                Success = true,
-                                Answer = responseMessage,
-                                Thinking = !string.IsNullOrEmpty(thinkingContent),
-                                ThinkingLog = thinkingContent,
-                                Questions = responseQuestions
-                            }
-                        };
+                                StatusCode = HttpStatusCode.OK,
+                                Data = new AiIntentDetectionResponse
+                                {
+                                    InteractionType = LLMInteractionType.RoadmapGeneration,
+                                    Confidence = confidence,
+                                    Success = true,
+                                    Answer = responseMessage,
+                                    Thinking = !string.IsNullOrEmpty(thinkingContent),
+                                    ThinkingLog = thinkingContent,
+                                    Questions = responseQuestions
+                                }
+                            };
+                        }
+
+                        _logger.LogInformation(
+                            "No new roadmap discovery questions remain for {UserId} in non-streaming session {SessionId}; proceeding with partial profile",
+                            userId,
+                            actualSessionId);
                     }
                 }
 
@@ -1408,27 +1861,42 @@ public class CustomerService(
                     ? aiResponse
                     : "I can generate your roadmap. Please confirm to continue.";
 
-                var confirmQuestions = (questions is { Length: > 0 } && !IsRoadmapIntakeQuestionSet(questions))
-                    ? questions
-                    : BuildRoadmapConfirmationQuestions();
+                string[]? knownSkillsNonStream = null;
+                try { knownSkillsNonStream = await DetectKnownSkillsFromProgressAsync(userId); }
+                catch { /* optional */ }
 
-                await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, confirmMessage, "assistant");
-                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
+                var confirmQuestions = DeduplicateQuestions(
+                    (questions is { Length: > 0 } && !IsRoadmapIntakeQuestionSet(questions))
+                        ? questions
+                        : BuildRoadmapConfirmationQuestions(toolArguments?.Tags, knownSkillsNonStream),
+                    previouslyAskedIds);
 
-                return new APIResponse<AiIntentDetectionResponse>()
+                if (confirmQuestions.Length > 0)
                 {
-                    StatusCode = HttpStatusCode.OK,
-                    Data = new AiIntentDetectionResponse
+                    await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
+                        $"{confirmMessage}\n[ASKED_QUESTIONS:{string.Join(",", confirmQuestions.Select(q => q.Id))}]", "assistant");
+                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
+
+                    return new APIResponse<AiIntentDetectionResponse>()
                     {
-                        InteractionType = LLMInteractionType.RoadmapGeneration,
-                        Confidence = confidence,
-                        Success = true,
-                        Answer = confirmMessage,
-                        Thinking = !string.IsNullOrEmpty(thinkingContent),
-                        ThinkingLog = thinkingContent,
-                        Questions = confirmQuestions
-                    }
-                };
+                        StatusCode = HttpStatusCode.OK,
+                        Data = new AiIntentDetectionResponse
+                        {
+                            InteractionType = LLMInteractionType.RoadmapGeneration,
+                            Confidence = confidence,
+                            Success = true,
+                            Answer = confirmMessage,
+                            Thinking = !string.IsNullOrEmpty(thinkingContent),
+                            ThinkingLog = thinkingContent,
+                            Questions = confirmQuestions
+                        }
+                    };
+                }
+
+                _logger.LogInformation(
+                    "No new roadmap confirmation questions remain for {UserId} in non-streaming session {SessionId}; proceeding to generation",
+                    userId,
+                    actualSessionId);
             }
 
             // Safety net: incomplete profile should not reach the pipeline, unless max discovery attempts are exhausted.
@@ -1449,25 +1917,36 @@ public class CustomerService(
                         userId, safetyAttempts + 1);
 
                     var safetyMessage = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
-                    var safetyQuestions = BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
+                    var safetyQuestions = DeduplicateQuestions(
+                        BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText),
+                        previouslyAskedIds);
 
-                    await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, safetyMessage, "assistant");
-                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
-
-                    return new APIResponse<AiIntentDetectionResponse>()
+                    if (safetyQuestions.Length > 0)
                     {
-                        StatusCode = HttpStatusCode.OK,
-                        Data = new AiIntentDetectionResponse
+                        await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
+                            $"{safetyMessage}\n[ASKED_QUESTIONS:{string.Join(",", safetyQuestions.Select(q => q.Id))}]", "assistant");
+                        await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+
+                        return new APIResponse<AiIntentDetectionResponse>()
                         {
-                            InteractionType = LLMInteractionType.RoadmapGeneration,
-                            Confidence = confidence,
-                            Success = true,
-                            Answer = safetyMessage,
-                            Thinking = !string.IsNullOrEmpty(thinkingContent),
-                            ThinkingLog = thinkingContent,
-                            Questions = safetyQuestions
-                        }
-                    };
+                            StatusCode = HttpStatusCode.OK,
+                            Data = new AiIntentDetectionResponse
+                            {
+                                InteractionType = LLMInteractionType.RoadmapGeneration,
+                                Confidence = confidence,
+                                Success = true,
+                                Answer = safetyMessage,
+                                Thinking = !string.IsNullOrEmpty(thinkingContent),
+                                ThinkingLog = thinkingContent,
+                                Questions = safetyQuestions
+                            }
+                        };
+                    }
+
+                    _logger.LogInformation(
+                        "Safety net found no new roadmap discovery questions for {UserId} in non-streaming session {SessionId}; allowing pipeline to proceed",
+                        userId,
+                        actualSessionId);
                 }
             }
 
@@ -1563,18 +2042,20 @@ public class CustomerService(
         }
     }
 
-    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)> DetectIntentAsync(string query, string conversationContext, string? profileSummary = null, ChatMode chatMode = ChatMode.Normal)
+    private async Task<(LLMInteractionType intent, float confidence, string? response, RoadmapRequestDTO? toolArguments, string ModelName, string? ThinkingContent, string? targetRole, string[]? followUpSuggestions, string? videoUrl, string? videoSearchQuery, AskUserQuestion[]? questions)> DetectIntentAsync(string query, string conversationContext, string? profileSummary = null, ChatMode chatMode = ChatMode.Fast, string? marketSkillsList = null)
     {
         var prompts = options.CurrentValue.Prompts;
         var detectionPrompt = string.Format(prompts.IntentDetectionUserPromptTemplate,
             (!string.IsNullOrEmpty(conversationContext) ? $"Conversation History:\n{conversationContext}\n\n" : ""),
             query,
-            profileSummary ?? "No profile data yet");
+            profileSummary ?? "No profile data yet",
+            marketSkillsList ?? "No market skills data available");
 
-        var intentSystemPrompt = chatMode == ChatMode.Powerful
-            && !string.IsNullOrEmpty(prompts.IntentDetectionSystemPromptPowerful)
-            ? prompts.IntentDetectionSystemPromptPowerful
-            : prompts.IntentDetectionSystemPrompt;
+        var intentSystemPrompt = prompts.IntentDetectionSystemPrompt;
+        if (chatMode == ChatMode.Deep)
+            intentSystemPrompt = "Use your thinking capability to reason step-by-step before classifying the user's intent.\n\n" + intentSystemPrompt;
+        if (!string.IsNullOrEmpty(prompts.LanguageRules))
+            intentSystemPrompt = intentSystemPrompt.Replace("{LANGUAGE_RULES}", prompts.LanguageRules);
 
         try
         {
@@ -1593,7 +2074,7 @@ public class CustomerService(
         }
     }
 
-    private (string SystemPrompt, string UserPrompt) BuildChatPrompt(string context, string query, string? profileSummary = null, ChatMode chatMode = ChatMode.Normal)
+    private (string SystemPrompt, string UserPrompt) BuildChatPrompt(string context, string query, string? profileSummary = null, ChatMode chatMode = ChatMode.Fast, string? detectedLanguage = null)
     {
         var prompts = options.CurrentValue.Prompts;
 
@@ -1603,10 +2084,20 @@ public class CustomerService(
             enrichedContext = $"[User Profile: {profileSummary}]\n\n{context}";
         }
 
-        var chatSystemPrompt = chatMode == ChatMode.Powerful
-            && !string.IsNullOrEmpty(prompts.ChatSystemPromptPowerful)
-            ? prompts.ChatSystemPromptPowerful
+        var chatSystemPrompt = chatMode == ChatMode.Deep
+            && !string.IsNullOrEmpty(prompts.ChatSystemPromptDeep)
+            ? prompts.ChatSystemPromptDeep
             : prompts.ChatSystemPrompt;
+
+        // Inject shared language rules
+        if (!string.IsNullOrEmpty(prompts.LanguageRules))
+            chatSystemPrompt = chatSystemPrompt.Replace("{LANGUAGE_RULES}", prompts.LanguageRules);
+
+        if (!string.IsNullOrEmpty(detectedLanguage))
+        {
+            var langName = detectedLanguage == "ar" ? "Arabic" : "English";
+            chatSystemPrompt = $"[LANGUAGE CONSTRAINT: You MUST respond in {langName} only. This overrides all other language rules.]\n\n" + chatSystemPrompt;
+        }
 
         var userPrompt = string.Format(prompts.ChatUserPromptTemplate,
             enrichedContext,
@@ -1743,6 +2234,129 @@ public class CustomerService(
     }
 
 
+    /// <summary>
+    /// Builds a compact progress context string for the user's roadmaps.
+    /// Active roadmap (most recently updated) is expanded; others get a one-line summary.
+    /// </summary>
+    private async Task<string?> BuildProgressContextSnippetAsync(string userId)
+    {
+        var spec = new RoadmapsByCustomerSpecification(userId);
+        spec.AddInclude("RoadmapCourses");
+        spec.AddInclude("RoadmapCourses.Course");
+        var roadmaps = (await unitOfWork.GetRepo<Roadmap, int>().GetAllAsync(spec))
+            .Where(r => r != null)
+            .Cast<Roadmap>()
+            .ToList();
+
+        if (roadmaps.Count == 0) return null;
+
+        // Order all roadmaps by most recently active first
+        var orderedRoadmaps = roadmaps
+            .OrderByDescending(r => r.RoadmapCourses
+                .Where(rc => rc.CompletedAt.HasValue)
+                .Max(rc => (DateTime?)rc.CompletedAt) ?? r.CreatedAt)
+            .ToList();
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Total Roadmaps: {orderedRoadmaps.Count}");
+        sb.AppendLine();
+
+        foreach (var roadmap in orderedRoadmaps)
+        {
+            var courses = roadmap.RoadmapCourses.OrderBy(rc => rc.Order).ToList();
+            var totalCourses = courses.Count;
+            var completedCourses = courses.Count(c => c.IsCompleted);
+            var pct = totalCourses > 0 ? Math.Round(100.0 * completedCourses / totalCourses, 0) : 0;
+            var title = string.IsNullOrWhiteSpace(roadmap.Title) ? "Untitled Roadmap" : roadmap.Title;
+
+            sb.AppendLine($"📚 \"{title}\" — {completedCourses}/{totalCourses} completed ({pct}%)");
+
+            var completed = courses.Where(c => c.IsCompleted).Select(c => c.Course?.Title ?? "?");
+            var inProgress = courses.Where(c => !c.IsCompleted && c.CurrentPositionSeconds > 0).ToList();
+            var notStarted = courses.Where(c => !c.IsCompleted && c.CurrentPositionSeconds == 0).Select(c => c.Course?.Title ?? "?");
+
+            if (completed.Any())
+                sb.AppendLine("  ✓ Completed: " + string.Join(", ", completed));
+
+            foreach (var ip in inProgress)
+            {
+                var mins = ip.CurrentPositionSeconds / 60;
+                var totalMins = ip.TotalDurationSeconds > 0 ? ip.TotalDurationSeconds / 60 : 0;
+                sb.AppendLine($"  ▶ In Progress: {ip.Course?.Title ?? "?"} ({mins}:{ip.CurrentPositionSeconds % 60:D2}/{totalMins}:{(ip.TotalDurationSeconds > 0 ? ip.TotalDurationSeconds % 60 : 0):D2})");
+            }
+
+            if (notStarted.Any())
+                sb.AppendLine("  ○ Not Started: " + string.Join(", ", notStarted));
+
+            sb.AppendLine();
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// Detects skills the user has already learned by looking at completed roadmap courses.
+    /// Returns normalized skill tags extracted from completed course titles.
+    /// </summary>
+    private async Task<string[]?> DetectKnownSkillsFromProgressAsync(string userId)
+    {
+        var spec = new RoadmapsByCustomerSpecification(userId);
+        spec.AddInclude("RoadmapCourses");
+        spec.AddInclude("RoadmapCourses.Course");
+        var roadmaps = (await unitOfWork.GetRepo<Roadmap, int>().GetAllAsync(spec))
+            .Where(r => r != null)
+            .Cast<Roadmap>()
+            .ToList();
+
+        if (roadmaps.Count == 0) return null;
+
+        var knownSkills = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var roadmap in roadmaps)
+        {
+            foreach (var rc in roadmap.RoadmapCourses.Where(c => c.IsCompleted))
+            {
+                var title = rc.Course?.Title ?? "";
+                var skills = RoadmapIntentHelper.ExtractKeywordsFromText(title);
+                foreach (var skill in skills)
+                    knownSkills.Add(skill);
+            }
+
+            // Also extract skills from the roadmap title itself if all courses completed
+            var totalCourses = roadmap.RoadmapCourses.Count;
+            var completedCourses = roadmap.RoadmapCourses.Count(c => c.IsCompleted);
+            if (totalCourses > 0 && completedCourses == totalCourses)
+            {
+                var titleSkills = RoadmapIntentHelper.ExtractKeywordsFromText(roadmap.Title ?? "");
+                foreach (var skill in titleSkills)
+                    knownSkills.Add(skill);
+            }
+        }
+
+        return knownSkills.Count > 0 ? [.. knownSkills] : null;
+    }
+
+    /// <summary>
+    /// Parses "Known topics: X, Y, Z" from the user's answer text (submitted by topic_chips).
+    /// </summary>
+    private static string[] ExtractKnownTopicsFromAnswer(string answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer)) return [];
+
+        // The frontend formats topic_chips answers as: "Known topics: C#, SQL Server, LINQ"
+        var knownPrefix = "Known topics:";
+        var idx = answer.IndexOf(knownPrefix, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return [];
+
+        var rest = answer[(idx + knownPrefix.Length)..];
+        // Take until next newline
+        var newlineIdx = rest.IndexOf('\n');
+        if (newlineIdx >= 0)
+            rest = rest[..newlineIdx];
+
+        return [.. rest.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(s => s.Length > 0)];
+    }
+
     private string GenerateSessionId(string userId)
     {
         var input = $"{userId}_{DateTime.UtcNow:yyyyMMddHHmmss}";
@@ -1825,6 +2439,103 @@ public class CustomerService(
         return tokens.Contains("no") || tokens.Contains("لا") || tokens.Contains("لأ");
     }
 
+    private static bool HasInlineRoadmapQuestionPayload(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return false;
+
+        var normalized = query.Trim().ToLowerInvariant();
+        return normalized.Contains("i detected a roadmap request")
+               || normalized.Contains("roadmap_confirm")
+               || normalized.Contains("roadmap_experience")
+               || normalized.Contains("roadmap_target_role")
+               || normalized.Contains("roadmap_budget")
+               || normalized.Contains("topic_preview")
+               || normalized.Contains("generate your roadmap now")
+               || normalized.Contains("generate roadmap now")
+               || normalized.Contains("which role are you targeting with this roadmap")
+               || normalized.Contains("what is your current experience level")
+               || normalized.Contains("known topics:")
+               || normalized.Contains("already know some")
+               || normalized.Contains("خريطة طريق")
+               || normalized.Contains("مسار تعلم")
+               || normalized.Contains("ما الدور المستهدف")
+               || normalized.Contains("ما مستوى خبرتك")
+               || normalized.Contains("مستواك الحالي");
+    }
+
+    private string[] ValidateTagsAgainstMarket(
+        string[] llmTags, string[] marketSkills, LLMInteractionType interactionType)
+    {
+        var marketSet = new HashSet<string>(marketSkills, StringComparer.OrdinalIgnoreCase);
+
+        // Count how many LLM tags overlap with market skills (fuzzy: check if market skill is contained in tag)
+        int overlapCount = 0;
+        foreach (var tag in llmTags)
+        {
+            if (marketSet.Any(ms =>
+                tag.Contains(ms, StringComparison.OrdinalIgnoreCase) ||
+                ms.Contains(tag, StringComparison.OrdinalIgnoreCase)))
+            {
+                overlapCount++;
+            }
+        }
+
+        var overlapRatio = llmTags.Length > 0 ? (float)overlapCount / llmTags.Length : 0;
+
+        // CVAnalysis: light validation — trust LLM gap analysis, only warn
+        if (interactionType == LLMInteractionType.CVAnalysis)
+        {
+            if (overlapRatio < 0.3f)
+            {
+                _logger.LogWarning("CV analysis tags have low market overlap ({Ratio:P0}). LLM tags: [{Tags}], Market: [{Market}]",
+                    overlapRatio, string.Join(", ", llmTags), string.Join(", ", marketSkills.Take(10)));
+            }
+            return llmTags; // Trust gap analysis
+        }
+
+        // RoadmapGeneration: if <50% overlap, replace with market-derived tags
+        if (interactionType == LLMInteractionType.RoadmapGeneration && overlapRatio < 0.5f)
+        {
+            _logger.LogWarning("Roadmap tags replaced: low market overlap ({Ratio:P0}). Original: [{Tags}] → Market: [{Market}]",
+                overlapRatio, string.Join(", ", llmTags), string.Join(", ", marketSkills.Take(10)));
+
+            // Build tags from market skills, transforming to course-level names
+            var marketTags = marketSkills
+                .Take(Math.Min(10, Math.Max(6, marketSkills.Length)))
+                .Select(NormalizeSkillToTag)
+                .ToArray();
+
+            return marketTags;
+        }
+
+        return llmTags;
+    }
+
+    private static string NormalizeSkillToTag(string skill)
+    {
+        // Transform raw skill names into searchable course-level titles
+        var normalized = skill.Trim();
+        // If it's a short acronym/name that doesn't look like a course title, append context
+        if (normalized.Length <= 4 && !normalized.Contains(' '))
+        {
+            return normalized switch
+            {
+                _ when normalized.Equals("C#", StringComparison.OrdinalIgnoreCase) => "C# Programming",
+                _ when normalized.Equals("SQL", StringComparison.OrdinalIgnoreCase) => "SQL & Databases",
+                _ when normalized.Equals("CSS", StringComparison.OrdinalIgnoreCase) => "CSS & Styling",
+                _ when normalized.Equals("HTML", StringComparison.OrdinalIgnoreCase) => "HTML & Web Fundamentals",
+                _ when normalized.Equals("Git", StringComparison.OrdinalIgnoreCase) => "Git & Version Control",
+                _ when normalized.Equals("AWS", StringComparison.OrdinalIgnoreCase) => "AWS Cloud Services",
+                _ when normalized.Equals("GCP", StringComparison.OrdinalIgnoreCase) => "Google Cloud Platform",
+                _ when normalized.Equals("CI", StringComparison.OrdinalIgnoreCase) => "CI/CD & DevOps",
+                _ when normalized.Equals("REST", StringComparison.OrdinalIgnoreCase) => "REST API Design",
+                _ => normalized
+            };
+        }
+        return normalized;
+    }
+
     private static bool HasSufficientRoadmapProfile(UserProfileEntity? userProfile)
     {
         if (userProfile is null)
@@ -1860,6 +2571,21 @@ public class CustomerService(
             || ContainsAny(combinedContext, "free", "paid", "budget", "no paid", "free only", "مجاني", "مدفوع", "ميزانية");
 
         var questions = new List<AskUserQuestion>();
+
+        // Offer CV upload when multiple profile fields are missing
+        if (!hasExperience && !hasTargetRole)
+        {
+            questions.Add(new AskUserQuestion
+            {
+                Id = "roadmap_cv_upload",
+                Text = isArabic
+                    ? "لو عندك سيرة ذاتية، ارفعها وهنستخرج بياناتك تلقائياً"
+                    : "Have a CV? Upload it and we'll extract your details automatically",
+                Type = "file_upload",
+                Placeholder = isArabic ? "ارفع PDF أو DOCX أو TXT" : "Upload PDF, DOCX, or TXT",
+                Required = false
+            });
+        }
 
         if (!hasExperience)
         {
@@ -1923,7 +2649,7 @@ public class CustomerService(
             });
         }
 
-        return [.. questions.Take(3)];
+        return [.. questions.Take(4)];
     }
 
     private static bool ContainsAny(string text, params string[] terms)
@@ -1949,19 +2675,34 @@ public class CustomerService(
                || normalized.Contains("؟");
     }
 
-    private static AskUserQuestion[] BuildRoadmapConfirmationQuestions()
+    private static AskUserQuestion[] BuildRoadmapConfirmationQuestions(string[]? detectedTags = null, string[]? knownSkills = null)
     {
-        return
-        [
-            new AskUserQuestion
+        var questions = new List<AskUserQuestion>();
+
+        // Topic preview chips — show detected tags and let user mark known ones
+        if (detectedTags is { Length: > 0 })
+        {
+            questions.Add(new AskUserQuestion
             {
-                Id = "roadmap_confirm",
-                Text = "I detected a roadmap request. Do you want me to generate your roadmap now?",
-                Type = "checkbox",
-                Options = ["Yes, generate roadmap now", "Not now"],
-                Required = true
-            }
-        ];
+                Id = "topic_preview",
+                Text = "Here's what your roadmap will cover. Already know some? Tap to skip them:",
+                Type = "topic_chips",
+                Options = detectedTags,
+                PreSelected = knownSkills ?? [],
+                Required = false
+            });
+        }
+
+        questions.Add(new AskUserQuestion
+        {
+            Id = "roadmap_confirm",
+            Text = "I detected a roadmap request. Do you want me to generate your roadmap now?",
+            Type = "checkbox",
+            Options = ["Yes, generate roadmap now", "Not now"],
+            Required = true
+        });
+
+        return [.. questions];
     }
 
     private static bool IsExplicitRoadmapRequest(string query)
@@ -2157,6 +2898,246 @@ Latest user message:
         return stored;
     }
 
+    private static string DetectLanguage(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "en";
+        int arabicCount = 0;
+        int letterCount = 0;
+        foreach (var c in text)
+        {
+            if (char.IsLetter(c))
+            {
+                letterCount++;
+                if (c >= '\u0600' && c <= '\u06FF') arabicCount++;
+            }
+        }
+        return letterCount > 0 && (double)arabicCount / letterCount > 0.3 ? "ar" : "en";
+    }
+
+    private static HashSet<string> ExtractAskedQuestionIds(string conversationContext)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrEmpty(conversationContext)) return ids;
+        foreach (System.Text.RegularExpressions.Match m in
+            System.Text.RegularExpressions.Regex.Matches(conversationContext, @"\[ASKED_QUESTIONS:([^\]]+)\]"))
+        {
+            foreach (var id in m.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                ids.Add(id);
+        }
+        return ids;
+    }
+
+    private static AskUserQuestion[] DeduplicateQuestions(AskUserQuestion[] questions, HashSet<string> askedIds)
+    {
+        if (questions is not { Length: > 0 } || askedIds.Count == 0) return questions;
+        return [.. questions.Where(q => !askedIds.Contains(q.Id))];
+    }
+
+    private static void MarkQuestionsAsked(HashSet<string> askedIds, AskUserQuestion[] questions)
+    {
+        foreach (var q in questions)
+            askedIds.Add(q.Id);
+    }
+
+    private static string BuildRoadmapRequestCacheKey(string userId, string sessionId)
+        => $"{userId}::{sessionId}";
+
+    private static bool ProfilePrefersFreeOnly(UserProfileEntity? userProfile)
+    {
+        return userProfile?.Constraints?.Any(c =>
+            c.Contains("free only", StringComparison.OrdinalIgnoreCase)
+            || c.Contains("no paid", StringComparison.OrdinalIgnoreCase)
+            || c.Contains("مجاني", StringComparison.OrdinalIgnoreCase)
+            || c.Contains("بدون مدفوع", StringComparison.OrdinalIgnoreCase)) == true;
+    }
+
+    private static RoadmapRequestDTO CloneRoadmapRequest(RoadmapRequestDTO request)
+    {
+        return new RoadmapRequestDTO
+        {
+            Tags = request.Tags?.ToArray() ?? [],
+            PreferPaid = request.PreferPaid,
+            Language = request.Language,
+            Sources = request.Sources?.ToArray(),
+            TagCheckpoints = request.TagCheckpoints?.ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value?.ToArray() ?? [],
+                StringComparer.OrdinalIgnoreCase),
+            JobId = request.JobId
+        };
+    }
+
+    private static RoadmapRequestDTO MergeRoadmapRequests(RoadmapRequestDTO primary, RoadmapRequestDTO secondary)
+    {
+        var merged = CloneRoadmapRequest(primary);
+        var tagCheckpoints = merged.TagCheckpoints is { Count: > 0 }
+            ? new Dictionary<string, string[]>(merged.TagCheckpoints, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var kvp in secondary.TagCheckpoints ?? [])
+        {
+            if (!tagCheckpoints.ContainsKey(kvp.Key))
+                tagCheckpoints[kvp.Key] = kvp.Value?.ToArray() ?? [];
+        }
+
+        merged.Tags = [.. primary.Tags
+            .Concat(secondary.Tags ?? [])
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Select(RoadmapIntentHelper.NormalizeRoadmapTag)
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)];
+
+        merged.Sources = [.. (primary.Sources ?? [])
+            .Concat(secondary.Sources ?? [])
+            .Where(source => !string.IsNullOrWhiteSpace(source))
+            .Distinct(StringComparer.OrdinalIgnoreCase)];
+
+        merged.TagCheckpoints = tagCheckpoints.Count > 0 ? tagCheckpoints : null;
+        merged.PreferPaid = primary.PreferPaid || secondary.PreferPaid;
+        merged.Language = !string.IsNullOrWhiteSpace(primary.Language)
+            ? primary.Language
+            : secondary.Language;
+        merged.JobId ??= secondary.JobId;
+        return merged;
+    }
+
+    private static RoadmapRequestDTO ApplyProfileSignalsToRoadmapRequest(
+        RoadmapRequestDTO request,
+        UserProfileEntity? userProfile,
+        string? detectedLanguage)
+    {
+        var normalizedRequest = CloneRoadmapRequest(request);
+
+        normalizedRequest.Tags = [.. new[] { userProfile?.TargetRole }
+            .Concat(normalizedRequest.Tags ?? [])
+            .Concat(userProfile?.Interests ?? [])
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Select(RoadmapIntentHelper.NormalizeRoadmapTag)
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)];
+
+        if (ProfilePrefersFreeOnly(userProfile))
+            normalizedRequest.PreferPaid = false;
+
+        if (string.Equals(detectedLanguage, "ar", StringComparison.OrdinalIgnoreCase))
+            normalizedRequest.Language = "ar";
+        else if (string.IsNullOrWhiteSpace(normalizedRequest.Language))
+            normalizedRequest.Language = detectedLanguage ?? "en";
+
+        normalizedRequest.Sources = normalizedRequest.PreferPaid
+            ? (normalizedRequest.Sources?.Length > 0
+                ? normalizedRequest.Sources
+                : ["youtube", "udemy"])
+            : ["youtube"];
+
+        var checkpoints = normalizedRequest.TagCheckpoints is { Count: > 0 }
+            ? new Dictionary<string, string[]>(normalizedRequest.TagCheckpoints, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var tag in normalizedRequest.Tags)
+        {
+            if (!checkpoints.ContainsKey(tag))
+            {
+                checkpoints[tag] = string.Equals(normalizedRequest.Language, "ar", StringComparison.OrdinalIgnoreCase)
+                    ?
+                    [
+                        $"أكمل أساسيات {tag}",
+                        $"طبّق مشروعًا عمليًا باستخدام {tag}"
+                    ]
+                    :
+                    [
+                        $"Complete fundamentals of {tag}",
+                        $"Build one practical project using {tag}"
+                    ];
+            }
+        }
+
+        normalizedRequest.TagCheckpoints = checkpoints;
+        return normalizedRequest;
+    }
+
+    private async Task SavePendingRoadmapRequestAsync(string userId, string sessionId, RoadmapRequestDTO request)
+    {
+        var clonedRequest = CloneRoadmapRequest(request);
+        PendingRoadmapRequestCache[BuildRoadmapRequestCacheKey(userId, sessionId)] = clonedRequest;
+
+        try
+        {
+            await conversationContextManager.AddMessageToContextAsync(
+                userId,
+                sessionId,
+                RoadmapIntentHelper.BuildRoadmapRequestMessage(clonedRequest),
+                "state");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Failed to persist pending roadmap request for {UserId} in session {SessionId}; using in-memory fallback",
+                userId,
+                sessionId);
+        }
+    }
+
+    private async Task ClearPendingRoadmapRequestAsync(string userId, string sessionId)
+    {
+        PendingRoadmapRequestCache.TryRemove(BuildRoadmapRequestCacheKey(userId, sessionId), out _);
+
+        try
+        {
+            await conversationContextManager.AddMessageToContextAsync(
+                userId,
+                sessionId,
+                RoadmapIntentHelper.BuildRoadmapRequestMessage(null),
+                "state");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Failed to clear pending roadmap request for {UserId} in session {SessionId}",
+                userId,
+                sessionId);
+        }
+    }
+
+    private async Task<RoadmapRequestDTO?> GetPendingRoadmapRequestAsync(string userId, string sessionId)
+    {
+        var cacheKey = BuildRoadmapRequestCacheKey(userId, sessionId);
+
+        try
+        {
+            var latestRequestMessage = await chatRepository.GetLatestStateMessageByPrefixAsync(
+                userId,
+                sessionId,
+                RoadmapIntentHelper.RoadmapRequestPrefix);
+
+            if (latestRequestMessage != null)
+            {
+                var parsedRequest = RoadmapIntentHelper.ExtractRoadmapRequest(latestRequestMessage);
+                if (parsedRequest != null)
+                {
+                    PendingRoadmapRequestCache[cacheKey] = CloneRoadmapRequest(parsedRequest);
+                    return CloneRoadmapRequest(parsedRequest);
+                }
+
+                PendingRoadmapRequestCache.TryRemove(cacheKey, out _);
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Failed to fetch pending roadmap request from persistence for {UserId} in session {SessionId}; falling back to memory",
+                userId,
+                sessionId);
+        }
+
+        return PendingRoadmapRequestCache.TryGetValue(cacheKey, out var cachedRequest)
+            ? CloneRoadmapRequest(cachedRequest)
+            : null;
+    }
+
     private string FormatSse(string eventName, object data)
     {
         var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
@@ -2179,11 +3160,12 @@ Latest user message:
         int sessionMessageCount,
         bool profileComplete,
         bool applyFriendBias,
-        ILogger logger)
+        ILogger logger,
+        string? lastAssistantMessage = null)
     {
         try
         {
-            var classifiedMode = await customerHelper.ClassifyModeAsync(query, sessionMessageCount, profileComplete);
+            var classifiedMode = await customerHelper.ClassifyModeAsync(query, sessionMessageCount, profileComplete, lastAssistantMessage);
 
             if (applyFriendBias && classifiedMode == "ACTION" && !profileComplete)
             {
@@ -2224,6 +3206,7 @@ Latest user message:
         else if (string.Equals(state, RoadmapIntentHelper.RoadmapStateIdle, StringComparison.OrdinalIgnoreCase)
                  || string.Equals(state, RoadmapIntentHelper.RoadmapStateCompleted, StringComparison.OrdinalIgnoreCase))
         {
+            await ClearPendingRoadmapRequestAsync(userId, sessionId);
             await conversationContextManager.AddMessageToContextAsync(
                 userId,
                 sessionId,
