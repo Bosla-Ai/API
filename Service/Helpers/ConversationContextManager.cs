@@ -46,22 +46,26 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
         }
 
         var dbMessages = await _chatRepository.GetMessagesAsync(userId, sessionId, CompactionThreshold + 5);
+        var latestSummary = dbMessages.FirstOrDefault(m => m.Role == "summary")
+            ?? await _chatRepository.GetLatestSummaryMessageAsync(userId, sessionId);
 
-        if (!dbMessages.Any())
+        if (!dbMessages.Any() && latestSummary == null)
         {
             return string.Empty;
         }
 
         var regularMessages = dbMessages.Where(m => m.Role != "summary" && m.Role != "title" && m.Role != "state").ToList();
-        var existingCompactContext = dbMessages.FirstOrDefault(m => m.Role == "summary");
 
-        if (regularMessages.Count >= CompactionThreshold && existingCompactContext == null)
+        if (regularMessages.Count >= CompactionThreshold && latestSummary == null)
         {
             await CompactConversationContextAsync(userId, sessionId, regularMessages);
             dbMessages = await _chatRepository.GetMessagesAsync(userId, sessionId, CompactionThreshold + 5);
+            latestSummary = dbMessages.FirstOrDefault(m => m.Role == "summary")
+                ?? await _chatRepository.GetLatestSummaryMessageAsync(userId, sessionId);
+            regularMessages = [.. dbMessages.Where(m => m.Role != "summary" && m.Role != "title" && m.Role != "state")];
         }
 
-        var context = BuildContext(dbMessages);
+        var context = BuildContext(dbMessages, latestSummary);
 
         // Edge-case guard: compact if assembled context exceeds safe threshold.
         if (context.Length > ContextCompactionCharThreshold)
@@ -73,9 +77,11 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
 
             if (messagesToCompact.Count > 0)
             {
-                await CompactConversationContextAsync(userId, sessionId, messagesToCompact);
+                await CompactConversationContextAsync(userId, sessionId, messagesToCompact, latestSummary?.Message);
                 dbMessages = await _chatRepository.GetMessagesAsync(userId, sessionId, CompactionThreshold + 5);
-                context = BuildContext(dbMessages);
+                latestSummary = dbMessages.FirstOrDefault(m => m.Role == "summary")
+                    ?? await _chatRepository.GetLatestSummaryMessageAsync(userId, sessionId);
+                context = BuildContext(dbMessages, latestSummary);
             }
         }
 
@@ -83,11 +89,15 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
         return context;
     }
 
-    private async Task CompactConversationContextAsync(string userId, string sessionId, List<ChatMessageEntity> messages)
+    private async Task CompactConversationContextAsync(string userId, string sessionId, List<ChatMessageEntity> messages, string? existingSummary = null)
     {
         OnSseEvent?.Invoke("tool", new { name = "Compaction", state = "start", summary = $"Compacting {messages.Count} messages into context memory..." });
 
         var conversationText = new StringBuilder();
+        var sanitizedSummary = SanitizeMessageForContext("summary", existingSummary, MaxContextMessageLength);
+        if (!string.IsNullOrWhiteSpace(sanitizedSummary))
+            conversationText.AppendLine($"[summary]: {sanitizedSummary}");
+
         foreach (var msg in messages)
         {
             var sanitized = SanitizeMessageForContext(msg.Role, msg.Message, MaxContextMessageLength);
@@ -161,11 +171,11 @@ public class ConversationContextManager(IMemoryCache cache, IChatRepository chat
 
     private static string GetCacheKey(string userId, string sessionId) => $"chat_{userId}_{sessionId}";
 
-    private string BuildContext(List<ChatMessageEntity> dbMessages)
+    private string BuildContext(List<ChatMessageEntity> dbMessages, ChatMessageEntity? summaryOverride = null)
     {
         var sb = new StringBuilder();
 
-        var compactContext = dbMessages.FirstOrDefault(m => m.Role == "summary");
+        var compactContext = summaryOverride ?? dbMessages.FirstOrDefault(m => m.Role == "summary");
         if (compactContext != null)
         {
             sb.AppendLine($"[Previous Compacted Context]: {compactContext.Message}");

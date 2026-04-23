@@ -40,6 +40,8 @@ public class CustomerService(
     , IChatRepository chatRepository
     , IUserProfileRepository userProfileRepository) : ICustomerService
 {
+    private static readonly ConcurrentDictionary<string, RoadmapRequestDTO> PendingRoadmapRequestCache = new(StringComparer.Ordinal);
+
     private bool IsSuperAdmin()
     {
         var user = httpContextAccessor.HttpContext?.User;
@@ -241,9 +243,14 @@ public class CustomerService(
         }
         var hasPendingRoadmapConfirmation = roadmapFlowState == RoadmapIntentHelper.RoadmapStatePendingConfirmation;
         var hasAskedDiscovery = roadmapFlowState == RoadmapIntentHelper.RoadmapStateDiscoveryAsked;
+        var pendingRoadmapRequest = await GetPendingRoadmapRequestAsync(userId, actualSessionId);
 
         var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
-        var hasRoadmapContext = hasPendingRoadmapConfirmation || hasAskedDiscovery || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+        var hasRoadmapContext = hasPendingRoadmapConfirmation
+            || hasAskedDiscovery
+            || pendingRoadmapRequest != null
+            || HasInlineRoadmapQuestionPayload(query)
+            || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
         var roadmapDeclineReply = HasRoadmapDecline(query) && hasRoadmapContext;
         var roadmapConfirmationReply = HasRoadmapConfirmation(query) && hasRoadmapContext;
         var roadmapStateFollowUp = (hasPendingRoadmapConfirmation || hasAskedDiscovery)
@@ -666,9 +673,65 @@ public class CustomerService(
             confidence = Math.Max(confidence, 75);
         }
 
-        if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments == null)
+        if (interactionType == LLMInteractionType.RoadmapGeneration)
         {
-            toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(query, conversationContextText);
+            if (roadmapConfirmationReply && pendingRoadmapRequest != null)
+            {
+                toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                    pendingRoadmapRequest,
+                    userProfile,
+                    detectedLanguage);
+            }
+            else if (roadmapRefinementReply && pendingRoadmapRequest != null)
+            {
+                var refinementRequest = toolArguments
+                    ?? RoadmapIntentHelper.BuildRoadmapFallbackRequest(
+                        query,
+                        conversationContextText,
+                        userProfile,
+                        detectedLanguage);
+
+                toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                    MergeRoadmapRequests(refinementRequest, pendingRoadmapRequest),
+                    userProfile,
+                    detectedLanguage);
+            }
+            else if (toolArguments == null && pendingRoadmapRequest != null
+                     && (roadmapStateFollowUp || hasAskedDiscovery || hasPendingRoadmapConfirmation))
+            {
+                toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                    pendingRoadmapRequest,
+                    userProfile,
+                    detectedLanguage);
+            }
+            else if (toolArguments == null)
+            {
+                toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(
+                    query,
+                    conversationContextText,
+                    userProfile,
+                    detectedLanguage);
+            }
+            else if (pendingRoadmapRequest != null
+                     && (roadmapStateFollowUp || hasAskedDiscovery || hasPendingRoadmapConfirmation))
+            {
+                toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                    MergeRoadmapRequests(pendingRoadmapRequest, toolArguments),
+                    userProfile,
+                    detectedLanguage);
+            }
+            else
+            {
+                toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                    toolArguments,
+                    userProfile,
+                    detectedLanguage);
+            }
+        }
+
+        if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments != null)
+        {
+            await SavePendingRoadmapRequestAsync(userId, actualSessionId, toolArguments);
         }
 
         // Requires confirmed profile before proceeding; re-asks discovery if fields are still missing.
@@ -787,39 +850,32 @@ public class CustomerService(
                         ? questions
                         : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText);
                     discoveryQuestions = DeduplicateQuestions(discoveryQuestions, previouslyAskedIds);
-
-                    var discoveryIntro = !string.IsNullOrWhiteSpace(aiResponse)
-                        ? aiResponse
-                        : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
-
-                    yield return FormatSse("text", new { delta = discoveryIntro });
                     if (discoveryQuestions.Length > 0)
                     {
+                        var discoveryIntro = !string.IsNullOrWhiteSpace(aiResponse)
+                            ? aiResponse
+                            : "Before I generate a personalized roadmap, I need a bit more about your background and goals.";
+
+                        yield return FormatSse("text", new { delta = discoveryIntro });
                         yield return FormatSse("ask_user", new { questions = discoveryQuestions });
                         MarkQuestionsAsked(previouslyAskedIds, discoveryQuestions);
                         await conversationContextManager.AddMessageToContextAsync(
                             userId, actualSessionId,
                             $"{discoveryIntro}\n[ASKED_QUESTIONS:{string.Join(",", discoveryQuestions.Select(q => q.Id))}]",
                             "assistant");
-                    }
-                    else
-                    {
-                        await conversationContextManager.AddMessageToContextAsync(
-                            userId, actualSessionId, discoveryIntro, "assistant");
+                        yield return FormatSse("done", new { message = "Roadmap discovery questions requested" });
+                        await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+                        yield break;
                     }
 
-                    yield return FormatSse("done", new { message = "Roadmap discovery questions requested" });
-
-                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
-
-                    yield break;
+                    _logger.LogInformation(
+                        "No new roadmap discovery questions remain for {UserId} in session {SessionId}; proceeding with partial profile",
+                        userId,
+                        actualSessionId);
                 }
             }
 
             // Profile is sufficient (or max attempts exhausted) → ask for confirmation
-            if (!string.IsNullOrEmpty(aiResponse))
-                yield return FormatSse("text", new { delta = aiResponse });
-
             // Detect known skills from user's completed roadmap courses
             string[]? knownSkillsFromProgress = null;
             try
@@ -838,21 +894,28 @@ public class CustomerService(
 
             if (confirmQuestions.Length > 0)
             {
+                if (!string.IsNullOrEmpty(aiResponse))
+                    yield return FormatSse("text", new { delta = aiResponse });
+
                 yield return FormatSse("ask_user", new { questions = confirmQuestions });
                 MarkQuestionsAsked(previouslyAskedIds, confirmQuestions);
+                yield return FormatSse("done", new { message = "Roadmap confirmation requested" });
+
+                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
+
+                await conversationContextManager.AddMessageToContextAsync(
+                    userId,
+                    actualSessionId,
+                    $"{aiResponse ?? "Please confirm if you want me to generate your roadmap now."}\n[ASKED_QUESTIONS:{string.Join(",", confirmQuestions.Select(q => q.Id))}]",
+                    "assistant");
+
+                yield break;
             }
 
-            yield return FormatSse("done", new { message = "Roadmap confirmation requested" });
-
-            await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
-
-            await conversationContextManager.AddMessageToContextAsync(
+            _logger.LogInformation(
+                "No new roadmap confirmation questions remain for {UserId} in session {SessionId}; proceeding to generation",
                 userId,
-                actualSessionId,
-                $"{aiResponse ?? "Please confirm if you want me to generate your roadmap now."}\n[ASKED_QUESTIONS:{string.Join(",", confirmQuestions.Select(q => q.Id))}]",
-                "assistant");
-
-            yield break;
+                actualSessionId);
         }
 
         // Safety net: incomplete profile should not reach the pipeline, unless max discovery attempts have been exhausted.
@@ -876,23 +939,27 @@ public class CustomerService(
                 var safetyQuestions = DeduplicateQuestions(
                     BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText),
                     previouslyAskedIds);
-                var safetyIntro = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
-
-                yield return FormatSse("text", new { delta = safetyIntro });
                 if (safetyQuestions.Length > 0)
                 {
+                    var safetyIntro = "I'd like to make sure your roadmap is personalized. Could you help me with a couple more details?";
+                    yield return FormatSse("text", new { delta = safetyIntro });
                     yield return FormatSse("ask_user", new { questions = safetyQuestions });
                     MarkQuestionsAsked(previouslyAskedIds, safetyQuestions);
+                    yield return FormatSse("done", new { message = "Roadmap discovery re-requested (safety net)" });
+
+                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+                    await conversationContextManager.AddMessageToContextAsync(
+                        userId, actualSessionId,
+                        $"{safetyIntro}\n[ASKED_QUESTIONS:{string.Join(",", safetyQuestions.Select(q => q.Id))}]",
+                        "assistant");
+
+                    yield break;
                 }
-                yield return FormatSse("done", new { message = "Roadmap discovery re-requested (safety net)" });
 
-                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
-                await conversationContextManager.AddMessageToContextAsync(
-                    userId, actualSessionId,
-                    $"{safetyIntro}\n[ASKED_QUESTIONS:{string.Join(",", safetyQuestions.Select(q => q.Id))}]",
-                    "assistant");
-
-                yield break;
+                _logger.LogInformation(
+                    "Safety net found no new roadmap discovery questions for {UserId} in session {SessionId}; allowing pipeline to proceed",
+                    userId,
+                    actualSessionId);
             }
         }
 
@@ -1212,7 +1279,7 @@ public class CustomerService(
             {
                 var cvProfile = new UserProfileEntity { UserId = userId };
                 if (toolArguments?.Tags is { Length: > 0 })
-                    cvProfile.Interests = toolArguments.Tags.ToList();
+                    cvProfile.Interests = [.. toolArguments.Tags];
                 if (!string.IsNullOrEmpty(targetRole))
                     cvProfile.TargetRole = targetRole;
 
@@ -1239,9 +1306,7 @@ public class CustomerService(
                     if (knownTopicsFromAnswer.Length > 0)
                     {
                         var originalTags = toolArguments.Tags;
-                        toolArguments.Tags = originalTags
-                            .Where(t => !knownTopicsFromAnswer.Contains(t, StringComparer.OrdinalIgnoreCase))
-                            .ToArray();
+                        toolArguments.Tags = [.. originalTags.Where(t => !knownTopicsFromAnswer.Contains(t, StringComparer.OrdinalIgnoreCase))];
 
                         if (toolArguments.Tags.Length == 0)
                         {
@@ -1570,9 +1635,14 @@ public class CustomerService(
             }
             var hasPendingRoadmapConfirmation = roadmapFlowState == RoadmapIntentHelper.RoadmapStatePendingConfirmation;
             var hasAskedDiscovery = roadmapFlowState == RoadmapIntentHelper.RoadmapStateDiscoveryAsked;
+            var pendingRoadmapRequest = await GetPendingRoadmapRequestAsync(userId, actualSessionId);
 
             var explicitRoadmapRequest = IsExplicitRoadmapRequest(query);
-            var hasRoadmapContext = hasPendingRoadmapConfirmation || hasAskedDiscovery || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
+            var hasRoadmapContext = hasPendingRoadmapConfirmation
+                || hasAskedDiscovery
+                || pendingRoadmapRequest != null
+                || HasInlineRoadmapQuestionPayload(query)
+                || RoadmapIntentHelper.HasRoadmapContext(conversationContextText);
             var roadmapDeclineReply = HasRoadmapDecline(query) && hasRoadmapContext;
             var roadmapConfirmationReply = HasRoadmapConfirmation(query) && hasRoadmapContext;
             var roadmapStateFollowUp = (hasPendingRoadmapConfirmation || hasAskedDiscovery)
@@ -1615,9 +1685,67 @@ public class CustomerService(
                 confidence = Math.Max(confidence, 75);
             }
 
-            if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments == null)
+            if (interactionType == LLMInteractionType.RoadmapGeneration)
             {
-                toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(query, conversationContextText);
+                var detectedLanguage = DetectLanguage(query);
+
+                if (roadmapConfirmationReply && pendingRoadmapRequest != null)
+                {
+                    toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                        pendingRoadmapRequest,
+                        userProfile,
+                        detectedLanguage);
+                }
+                else if (roadmapRefinementReply && pendingRoadmapRequest != null)
+                {
+                    var refinementRequest = toolArguments
+                        ?? RoadmapIntentHelper.BuildRoadmapFallbackRequest(
+                            query,
+                            conversationContextText,
+                            userProfile,
+                            detectedLanguage);
+
+                    toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                        MergeRoadmapRequests(refinementRequest, pendingRoadmapRequest),
+                        userProfile,
+                        detectedLanguage);
+                }
+                else if (toolArguments == null && pendingRoadmapRequest != null
+                         && (roadmapStateFollowUp || hasAskedDiscovery || hasPendingRoadmapConfirmation))
+                {
+                    toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                        pendingRoadmapRequest,
+                        userProfile,
+                        detectedLanguage);
+                }
+                else if (toolArguments == null)
+                {
+                    toolArguments = RoadmapIntentHelper.BuildRoadmapFallbackRequest(
+                        query,
+                        conversationContextText,
+                        userProfile,
+                        detectedLanguage);
+                }
+                else if (pendingRoadmapRequest != null
+                         && (roadmapStateFollowUp || hasAskedDiscovery || hasPendingRoadmapConfirmation))
+                {
+                    toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                        MergeRoadmapRequests(pendingRoadmapRequest, toolArguments),
+                        userProfile,
+                        detectedLanguage);
+                }
+                else
+                {
+                    toolArguments = ApplyProfileSignalsToRoadmapRequest(
+                        toolArguments,
+                        userProfile,
+                        detectedLanguage);
+                }
+            }
+
+            if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments != null)
+            {
+                await SavePendingRoadmapRequestAsync(userId, actualSessionId, toolArguments);
             }
             // When the user is answering discovery questions, run AI-powered profile extraction
             // synchronously. The static parser may miss free-form answers.
@@ -1699,24 +1827,32 @@ public class CustomerService(
                                 : BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText),
                             previouslyAskedIds);
 
-                        await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
-                            $"{responseMessage}\n[ASKED_QUESTIONS:{string.Join(",", responseQuestions.Select(q => q.Id))}]", "assistant");
-                        await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
-
-                        return new APIResponse<AiIntentDetectionResponse>()
+                        if (responseQuestions.Length > 0)
                         {
-                            StatusCode = HttpStatusCode.OK,
-                            Data = new AiIntentDetectionResponse
+                            await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
+                                $"{responseMessage}\n[ASKED_QUESTIONS:{string.Join(",", responseQuestions.Select(q => q.Id))}]", "assistant");
+                            await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+
+                            return new APIResponse<AiIntentDetectionResponse>()
                             {
-                                InteractionType = LLMInteractionType.RoadmapGeneration,
-                                Confidence = confidence,
-                                Success = true,
-                                Answer = responseMessage,
-                                Thinking = !string.IsNullOrEmpty(thinkingContent),
-                                ThinkingLog = thinkingContent,
-                                Questions = responseQuestions
-                            }
-                        };
+                                StatusCode = HttpStatusCode.OK,
+                                Data = new AiIntentDetectionResponse
+                                {
+                                    InteractionType = LLMInteractionType.RoadmapGeneration,
+                                    Confidence = confidence,
+                                    Success = true,
+                                    Answer = responseMessage,
+                                    Thinking = !string.IsNullOrEmpty(thinkingContent),
+                                    ThinkingLog = thinkingContent,
+                                    Questions = responseQuestions
+                                }
+                            };
+                        }
+
+                        _logger.LogInformation(
+                            "No new roadmap discovery questions remain for {UserId} in non-streaming session {SessionId}; proceeding with partial profile",
+                            userId,
+                            actualSessionId);
                     }
                 }
 
@@ -1735,24 +1871,32 @@ public class CustomerService(
                         : BuildRoadmapConfirmationQuestions(toolArguments?.Tags, knownSkillsNonStream),
                     previouslyAskedIds);
 
-                await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
-                    $"{confirmMessage}\n[ASKED_QUESTIONS:{string.Join(",", confirmQuestions.Select(q => q.Id))}]", "assistant");
-                await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
-
-                return new APIResponse<AiIntentDetectionResponse>()
+                if (confirmQuestions.Length > 0)
                 {
-                    StatusCode = HttpStatusCode.OK,
-                    Data = new AiIntentDetectionResponse
+                    await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
+                        $"{confirmMessage}\n[ASKED_QUESTIONS:{string.Join(",", confirmQuestions.Select(q => q.Id))}]", "assistant");
+                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStatePendingConfirmation);
+
+                    return new APIResponse<AiIntentDetectionResponse>()
                     {
-                        InteractionType = LLMInteractionType.RoadmapGeneration,
-                        Confidence = confidence,
-                        Success = true,
-                        Answer = confirmMessage,
-                        Thinking = !string.IsNullOrEmpty(thinkingContent),
-                        ThinkingLog = thinkingContent,
-                        Questions = confirmQuestions
-                    }
-                };
+                        StatusCode = HttpStatusCode.OK,
+                        Data = new AiIntentDetectionResponse
+                        {
+                            InteractionType = LLMInteractionType.RoadmapGeneration,
+                            Confidence = confidence,
+                            Success = true,
+                            Answer = confirmMessage,
+                            Thinking = !string.IsNullOrEmpty(thinkingContent),
+                            ThinkingLog = thinkingContent,
+                            Questions = confirmQuestions
+                        }
+                    };
+                }
+
+                _logger.LogInformation(
+                    "No new roadmap confirmation questions remain for {UserId} in non-streaming session {SessionId}; proceeding to generation",
+                    userId,
+                    actualSessionId);
             }
 
             // Safety net: incomplete profile should not reach the pipeline, unless max discovery attempts are exhausted.
@@ -1777,24 +1921,32 @@ public class CustomerService(
                         BuildRoadmapDiscoveryQuestions(userProfile, query, conversationContextText),
                         previouslyAskedIds);
 
-                    await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
-                        $"{safetyMessage}\n[ASKED_QUESTIONS:{string.Join(",", safetyQuestions.Select(q => q.Id))}]", "assistant");
-                    await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
-
-                    return new APIResponse<AiIntentDetectionResponse>()
+                    if (safetyQuestions.Length > 0)
                     {
-                        StatusCode = HttpStatusCode.OK,
-                        Data = new AiIntentDetectionResponse
+                        await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId,
+                            $"{safetyMessage}\n[ASKED_QUESTIONS:{string.Join(",", safetyQuestions.Select(q => q.Id))}]", "assistant");
+                        await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateDiscoveryAsked);
+
+                        return new APIResponse<AiIntentDetectionResponse>()
                         {
-                            InteractionType = LLMInteractionType.RoadmapGeneration,
-                            Confidence = confidence,
-                            Success = true,
-                            Answer = safetyMessage,
-                            Thinking = !string.IsNullOrEmpty(thinkingContent),
-                            ThinkingLog = thinkingContent,
-                            Questions = safetyQuestions
-                        }
-                    };
+                            StatusCode = HttpStatusCode.OK,
+                            Data = new AiIntentDetectionResponse
+                            {
+                                InteractionType = LLMInteractionType.RoadmapGeneration,
+                                Confidence = confidence,
+                                Success = true,
+                                Answer = safetyMessage,
+                                Thinking = !string.IsNullOrEmpty(thinkingContent),
+                                ThinkingLog = thinkingContent,
+                                Questions = safetyQuestions
+                            }
+                        };
+                    }
+
+                    _logger.LogInformation(
+                        "Safety net found no new roadmap discovery questions for {UserId} in non-streaming session {SessionId}; allowing pipeline to proceed",
+                        userId,
+                        actualSessionId);
                 }
             }
 
@@ -2202,9 +2354,7 @@ public class CustomerService(
         if (newlineIdx >= 0)
             rest = rest[..newlineIdx];
 
-        return rest.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(s => s.Length > 0)
-            .ToArray();
+        return [.. rest.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(s => s.Length > 0)];
     }
 
     private string GenerateSessionId(string userId)
@@ -2287,6 +2437,31 @@ public class CustomerService(
             .Split([' ', '\t', '\n', '\r', '.', ',', '!', '?', ';', ':'], StringSplitOptions.RemoveEmptyEntries);
 
         return tokens.Contains("no") || tokens.Contains("لا") || tokens.Contains("لأ");
+    }
+
+    private static bool HasInlineRoadmapQuestionPayload(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return false;
+
+        var normalized = query.Trim().ToLowerInvariant();
+        return normalized.Contains("i detected a roadmap request")
+               || normalized.Contains("roadmap_confirm")
+               || normalized.Contains("roadmap_experience")
+               || normalized.Contains("roadmap_target_role")
+               || normalized.Contains("roadmap_budget")
+               || normalized.Contains("topic_preview")
+               || normalized.Contains("generate your roadmap now")
+               || normalized.Contains("generate roadmap now")
+               || normalized.Contains("which role are you targeting with this roadmap")
+               || normalized.Contains("what is your current experience level")
+               || normalized.Contains("known topics:")
+               || normalized.Contains("already know some")
+               || normalized.Contains("خريطة طريق")
+               || normalized.Contains("مسار تعلم")
+               || normalized.Contains("ما الدور المستهدف")
+               || normalized.Contains("ما مستوى خبرتك")
+               || normalized.Contains("مستواك الحالي");
     }
 
     private string[] ValidateTagsAgainstMarket(
@@ -2755,14 +2930,209 @@ Latest user message:
     private static AskUserQuestion[] DeduplicateQuestions(AskUserQuestion[] questions, HashSet<string> askedIds)
     {
         if (questions is not { Length: > 0 } || askedIds.Count == 0) return questions;
-        var filtered = questions.Where(q => !askedIds.Contains(q.Id)).ToArray();
-        return filtered.Length > 0 ? filtered : questions; // fallback: if all deduped, keep originals to avoid empty
+        return [.. questions.Where(q => !askedIds.Contains(q.Id))];
     }
 
     private static void MarkQuestionsAsked(HashSet<string> askedIds, AskUserQuestion[] questions)
     {
         foreach (var q in questions)
             askedIds.Add(q.Id);
+    }
+
+    private static string BuildRoadmapRequestCacheKey(string userId, string sessionId)
+        => $"{userId}::{sessionId}";
+
+    private static bool ProfilePrefersFreeOnly(UserProfileEntity? userProfile)
+    {
+        return userProfile?.Constraints?.Any(c =>
+            c.Contains("free only", StringComparison.OrdinalIgnoreCase)
+            || c.Contains("no paid", StringComparison.OrdinalIgnoreCase)
+            || c.Contains("مجاني", StringComparison.OrdinalIgnoreCase)
+            || c.Contains("بدون مدفوع", StringComparison.OrdinalIgnoreCase)) == true;
+    }
+
+    private static RoadmapRequestDTO CloneRoadmapRequest(RoadmapRequestDTO request)
+    {
+        return new RoadmapRequestDTO
+        {
+            Tags = request.Tags?.ToArray() ?? [],
+            PreferPaid = request.PreferPaid,
+            Language = request.Language,
+            Sources = request.Sources?.ToArray(),
+            TagCheckpoints = request.TagCheckpoints?.ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value?.ToArray() ?? [],
+                StringComparer.OrdinalIgnoreCase),
+            JobId = request.JobId
+        };
+    }
+
+    private static RoadmapRequestDTO MergeRoadmapRequests(RoadmapRequestDTO primary, RoadmapRequestDTO secondary)
+    {
+        var merged = CloneRoadmapRequest(primary);
+        var tagCheckpoints = merged.TagCheckpoints is { Count: > 0 }
+            ? new Dictionary<string, string[]>(merged.TagCheckpoints, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var kvp in secondary.TagCheckpoints ?? [])
+        {
+            if (!tagCheckpoints.ContainsKey(kvp.Key))
+                tagCheckpoints[kvp.Key] = kvp.Value?.ToArray() ?? [];
+        }
+
+        merged.Tags = [.. primary.Tags
+            .Concat(secondary.Tags ?? [])
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)];
+
+        merged.Sources = [.. (primary.Sources ?? [])
+            .Concat(secondary.Sources ?? [])
+            .Where(source => !string.IsNullOrWhiteSpace(source))
+            .Distinct(StringComparer.OrdinalIgnoreCase)];
+
+        merged.TagCheckpoints = tagCheckpoints.Count > 0 ? tagCheckpoints : null;
+        merged.PreferPaid = primary.PreferPaid || secondary.PreferPaid;
+        merged.Language = !string.IsNullOrWhiteSpace(primary.Language)
+            ? primary.Language
+            : secondary.Language;
+        merged.JobId ??= secondary.JobId;
+        return merged;
+    }
+
+    private static RoadmapRequestDTO ApplyProfileSignalsToRoadmapRequest(
+        RoadmapRequestDTO request,
+        UserProfileEntity? userProfile,
+        string? detectedLanguage)
+    {
+        var normalizedRequest = CloneRoadmapRequest(request);
+
+        normalizedRequest.Tags = [.. new[] { userProfile?.TargetRole }
+            .Concat(normalizedRequest.Tags ?? [])
+            .Concat(userProfile?.Interests ?? [])
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Select(tag => tag.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)];
+
+        if (ProfilePrefersFreeOnly(userProfile))
+            normalizedRequest.PreferPaid = false;
+
+        if (string.Equals(detectedLanguage, "ar", StringComparison.OrdinalIgnoreCase))
+            normalizedRequest.Language = "ar";
+        else if (string.IsNullOrWhiteSpace(normalizedRequest.Language))
+            normalizedRequest.Language = detectedLanguage ?? "en";
+
+        normalizedRequest.Sources = normalizedRequest.PreferPaid
+            ? (normalizedRequest.Sources?.Length > 0
+                ? normalizedRequest.Sources
+                : ["youtube", "udemy"])
+            : ["youtube"];
+
+        var checkpoints = normalizedRequest.TagCheckpoints is { Count: > 0 }
+            ? new Dictionary<string, string[]>(normalizedRequest.TagCheckpoints, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var tag in normalizedRequest.Tags)
+        {
+            if (!checkpoints.ContainsKey(tag))
+            {
+                checkpoints[tag] = string.Equals(normalizedRequest.Language, "ar", StringComparison.OrdinalIgnoreCase)
+                    ?
+                    [
+                        $"أكمل أساسيات {tag}",
+                        $"طبّق مشروعًا عمليًا باستخدام {tag}"
+                    ]
+                    :
+                    [
+                        $"Complete fundamentals of {tag}",
+                        $"Build one practical project using {tag}"
+                    ];
+            }
+        }
+
+        normalizedRequest.TagCheckpoints = checkpoints;
+        return normalizedRequest;
+    }
+
+    private async Task SavePendingRoadmapRequestAsync(string userId, string sessionId, RoadmapRequestDTO request)
+    {
+        var clonedRequest = CloneRoadmapRequest(request);
+        PendingRoadmapRequestCache[BuildRoadmapRequestCacheKey(userId, sessionId)] = clonedRequest;
+
+        try
+        {
+            await conversationContextManager.AddMessageToContextAsync(
+                userId,
+                sessionId,
+                RoadmapIntentHelper.BuildRoadmapRequestMessage(clonedRequest),
+                "state");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Failed to persist pending roadmap request for {UserId} in session {SessionId}; using in-memory fallback",
+                userId,
+                sessionId);
+        }
+    }
+
+    private async Task ClearPendingRoadmapRequestAsync(string userId, string sessionId)
+    {
+        PendingRoadmapRequestCache.TryRemove(BuildRoadmapRequestCacheKey(userId, sessionId), out _);
+
+        try
+        {
+            await conversationContextManager.AddMessageToContextAsync(
+                userId,
+                sessionId,
+                RoadmapIntentHelper.BuildRoadmapRequestMessage(null),
+                "state");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Failed to clear pending roadmap request for {UserId} in session {SessionId}",
+                userId,
+                sessionId);
+        }
+    }
+
+    private async Task<RoadmapRequestDTO?> GetPendingRoadmapRequestAsync(string userId, string sessionId)
+    {
+        var cacheKey = BuildRoadmapRequestCacheKey(userId, sessionId);
+
+        try
+        {
+            var latestRequestMessage = await chatRepository.GetLatestStateMessageByPrefixAsync(
+                userId,
+                sessionId,
+                RoadmapIntentHelper.RoadmapRequestPrefix);
+
+            if (latestRequestMessage != null)
+            {
+                var parsedRequest = RoadmapIntentHelper.ExtractRoadmapRequest(latestRequestMessage);
+                if (parsedRequest != null)
+                {
+                    PendingRoadmapRequestCache[cacheKey] = CloneRoadmapRequest(parsedRequest);
+                    return CloneRoadmapRequest(parsedRequest);
+                }
+
+                PendingRoadmapRequestCache.TryRemove(cacheKey, out _);
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Failed to fetch pending roadmap request from persistence for {UserId} in session {SessionId}; falling back to memory",
+                userId,
+                sessionId);
+        }
+
+        return PendingRoadmapRequestCache.TryGetValue(cacheKey, out var cachedRequest)
+            ? CloneRoadmapRequest(cachedRequest)
+            : null;
     }
 
     private string FormatSse(string eventName, object data)
@@ -2833,6 +3203,7 @@ Latest user message:
         else if (string.Equals(state, RoadmapIntentHelper.RoadmapStateIdle, StringComparison.OrdinalIgnoreCase)
                  || string.Equals(state, RoadmapIntentHelper.RoadmapStateCompleted, StringComparison.OrdinalIgnoreCase))
         {
+            await ClearPendingRoadmapRequestAsync(userId, sessionId);
             await conversationContextManager.AddMessageToContextAsync(
                 userId,
                 sessionId,

@@ -4,6 +4,7 @@ using Service.Helpers;
 using Service.Implementations;
 using Shared;
 using Shared.DTOs;
+using Shared.DTOs.RoadmapDTOs;
 using Shared.Enums;
 using Shared.Options;
 
@@ -165,6 +166,56 @@ public class ChatBugFixTests
         parsed.Should().Be("discovery_asked");
     }
 
+    [Fact]
+    public void RoadmapIntentHelper_RoadmapRequestMessage_RoundTrips()
+    {
+        var request = new RoadmapRequestDTO
+        {
+            Tags = ["Game Development", "Unity", "C#"],
+            PreferPaid = true,
+            Language = "ar",
+            Sources = ["youtube", "udemy"],
+            TagCheckpoints = new Dictionary<string, string[]>
+            {
+                ["Unity"] = ["Learn scenes", "Build a small game"]
+            }
+        };
+
+        var message = RoadmapIntentHelper.BuildRoadmapRequestMessage(request);
+        var parsed = RoadmapIntentHelper.ExtractRoadmapRequest(message);
+
+        parsed.Should().NotBeNull();
+        parsed!.Tags.Should().Contain(["Game Development", "Unity", "C#"]);
+        parsed.PreferPaid.Should().BeTrue();
+        parsed.Language.Should().Be("ar");
+        parsed.Sources.Should().Contain(["youtube", "udemy"]);
+        parsed.TagCheckpoints.Should().ContainKey("Unity");
+    }
+
+    [Fact]
+    public void RoadmapIntentHelper_BuildRoadmapFallbackRequest_UsesUserProfileSignals()
+    {
+        var userProfile = new UserProfileEntity
+        {
+            UserId = "user1",
+            TargetRole = "Game Engineer",
+            Interests = ["Unity", "C#"],
+            Constraints = ["Free only"]
+        };
+
+        var request = RoadmapIntentHelper.BuildRoadmapFallbackRequest(
+            "yes",
+            "Recent Conversation:\n[user]: game dev roadmap",
+            userProfile,
+            "ar");
+
+        request.Tags.Should().Contain("Game Engineer");
+        request.Tags.Should().Contain("Unity");
+        request.PreferPaid.Should().BeFalse();
+        request.Language.Should().Be("ar");
+        request.Sources.Should().ContainSingle().Which.Should().Be("youtube");
+    }
+
     #endregion
 
     #region Profile Parser Enhancement (Workstream 4D)
@@ -236,6 +287,27 @@ public class ChatBugFixTests
         result!.ExperienceLevel.Should().Be("Beginner");
         result!.TargetRole.Should().Be("Software Engineer");
         result!.Constraints.Should().Contain("Free only");
+    }
+
+    [Fact]
+    public void ExtractProfileFromUserMessage_ParsesQuestionIdPrefixedAnswers()
+    {
+        var query = """
+            [QUESTION_ID:roadmap_experience] What is your current experience level?: Beginner
+            [QUESTION_ID:roadmap_target_role] Which role are you targeting with this roadmap?: Game Engineer
+            [QUESTION_ID:roadmap_budget] Do you want free resources only, or is paid okay too?: Free only
+            """;
+
+        var method = typeof(CustomerService).GetMethod(
+            "ExtractProfileFromUserMessage",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        var result = (UserProfileEntity?)method!.Invoke(null, ["user1", query]);
+
+        result.Should().NotBeNull();
+        result!.ExperienceLevel.Should().Be("Beginner");
+        result.TargetRole.Should().Be("Game Engineer");
+        result.Constraints.Should().Contain("Free only");
     }
 
     [Fact]

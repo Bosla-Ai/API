@@ -140,6 +140,30 @@ public class CustomerServiceTests
         result.Should().BeFalse();
     }
 
+    [Fact]
+    public void DeduplicateQuestions_RemovesPreviouslyAskedQuestionsWithoutReintroducingThem()
+    {
+        var questions = new[]
+        {
+            new AskUserQuestion { Id = "roadmap_experience", Text = "Experience?", Type = "checkbox", Required = true },
+            new AskUserQuestion { Id = "roadmap_target_role", Text = "Target role?", Type = "text", Required = true }
+        };
+
+        var askedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "roadmap_experience",
+            "roadmap_target_role"
+        };
+
+        var method = typeof(CustomerService).GetMethod(
+            "DeduplicateQuestions",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        var result = (AskUserQuestion[])method!.Invoke(null, [questions, askedIds])!;
+
+        result.Should().BeEmpty();
+    }
+
     #endregion
 
     #region GetAllAsync Tests

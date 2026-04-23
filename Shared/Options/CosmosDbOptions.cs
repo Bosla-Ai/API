@@ -10,4 +10,6 @@ public class CosmosDbOptions
     public string ContainerName { get; set; } = "chat_messages";
 
     public string ProfileContainerName { get; set; } = "user_profiles";
+    public string FeedbackContainerName { get; set; } = "feedback";
+    public bool AutoProvisionResources { get; set; } = false;
 }
