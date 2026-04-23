@@ -13,11 +13,16 @@ public class CosmosFeedbackRepository(
 {
     private readonly string _databaseName = configuration["CosmosDb:DatabaseName"] ?? "BoslaChat";
     private readonly string _containerName = configuration["CosmosDb:FeedbackContainerName"] ?? "feedback";
+    private readonly bool _autoProvisionResources = configuration.GetValue<bool?>("CosmosDb:AutoProvisionResources") ?? false;
     private Container? _container;
+    private bool _fallbackOnly;
     private readonly SemaphoreSlim _initLock = new(1, 1);
 
     private async Task<Container> GetContainerAsync()
     {
+        if (_fallbackOnly)
+            throw new InvalidOperationException("Cosmos feedback storage is running in fallback-only mode.");
+
         if (_container != null)
             return _container;
 
@@ -27,13 +32,38 @@ public class CosmosFeedbackRepository(
             if (_container != null)
                 return _container;
 
-            var databaseResponse = await cosmosClient.CreateDatabaseIfNotExistsAsync(_databaseName, throughput: 1000);
-            var database = databaseResponse.Database;
-            var containerResponse = await database.CreateContainerIfNotExistsAsync(_containerName, "/UserId");
-            _container = containerResponse.Container;
+            try
+            {
+                Database database;
+                if (_autoProvisionResources)
+                {
+                    var databaseResponse = await cosmosClient.CreateDatabaseIfNotExistsAsync(_databaseName);
+                    database = databaseResponse.Database;
+                    var containerResponse = await database.CreateContainerIfNotExistsAsync(_containerName, "/UserId");
+                    _container = containerResponse.Container;
+                }
+                else
+                {
+                    database = cosmosClient.GetDatabase(_databaseName);
+                    await database.ReadAsync();
+                    var existingContainer = database.GetContainer(_containerName);
+                    await existingContainer.ReadContainerAsync();
+                    _container = existingContainer;
+                }
 
-            logger.LogInformation("Initialized Cosmos container '{ContainerName}' for feedback", _containerName);
-            return _container;
+                logger.LogInformation("Initialized Cosmos container '{ContainerName}' for feedback", _containerName);
+                return _container;
+            }
+            catch (Exception ex)
+            {
+                _fallbackOnly = true;
+                logger.LogWarning(ex,
+                    _autoProvisionResources
+                        ? "Failed to initialize Cosmos feedback container '{ContainerName}'"
+                        : "Cosmos feedback container '{ContainerName}' is unavailable and auto-provisioning is disabled.",
+                    _containerName);
+                throw;
+            }
         }
         finally
         {
@@ -43,14 +73,37 @@ public class CosmosFeedbackRepository(
 
     public async Task SubmitAsync(FeedbackEntity feedback)
     {
-        var container = await GetContainerAsync();
-        await container.CreateItemAsync(feedback, new PartitionKey(feedback.UserId));
-        logger.LogDebug("Feedback submitted: {Rating} for session {SessionId}", feedback.Rating, feedback.SessionId);
+        try
+        {
+            var container = await GetContainerAsync();
+            await container.CreateItemAsync(feedback, new PartitionKey(feedback.UserId));
+            logger.LogDebug("Feedback submitted: {Rating} for session {SessionId}", feedback.Rating, feedback.SessionId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Feedback submit skipped because Cosmos feedback storage is unavailable for {UserId}/{SessionId}",
+                feedback.UserId,
+                feedback.SessionId);
+        }
     }
 
     public async Task<IReadOnlyList<FeedbackEntity>> GetBySessionAsync(string userId, string sessionId)
     {
-        var container = await GetContainerAsync();
+        Container container;
+        try
+        {
+            container = await GetContainerAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Failed to initialize feedback storage for {UserId}/{SessionId}; returning empty feedback list",
+                userId,
+                sessionId);
+            return [];
+        }
+
         var query = new QueryDefinition(
             "SELECT * FROM c WHERE c.UserId = @userId AND c.SessionId = @sessionId ORDER BY c.CreatedAt DESC")
             .WithParameter("@userId", userId)
@@ -79,7 +132,7 @@ public class CosmosFeedbackRepository(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to initialize feedback container, returning empty list");
-            return Array.Empty<FeedbackEntity>();
+            return [];
         }
 
         var sql = limit.HasValue

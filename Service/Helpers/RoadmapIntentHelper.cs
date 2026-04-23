@@ -1,3 +1,6 @@
+using System.Text;
+using System.Text.Json;
+using Shared.DTOs;
 using Shared.DTOs.RoadmapDTOs;
 
 namespace Service.Helpers;
@@ -9,6 +12,7 @@ public static class RoadmapIntentHelper
     public const string RoadmapStateDiscoveryAsked = "discovery_asked";
     public const string RoadmapStateCompleted = "completed";
     public const string RoadmapStateIdle = "idle";
+    public const string RoadmapRequestPrefix = "roadmap_request:";
 
     public static string[] ExtractKeywordsFromText(string text)
     {
@@ -57,36 +61,77 @@ public static class RoadmapIntentHelper
                || normalized.Contains("رودماب");
     }
 
-    public static RoadmapRequestDTO BuildRoadmapFallbackRequest(string query, string conversationContext)
+    public static RoadmapRequestDTO BuildRoadmapFallbackRequest(
+        string query,
+        string conversationContext,
+        UserProfileEntity? userProfile = null,
+        string? detectedLanguage = null)
     {
-        var combined = string.IsNullOrWhiteSpace(conversationContext)
-            ? query
-            : $"{conversationContext}\n{query}";
+        var tags = new List<string>();
+        var seenTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var extracted = ExtractKeywordsFromText(combined)
-            .Where(k => !string.IsNullOrWhiteSpace(k))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(8)
-            .ToArray();
+        void AddTag(string? value)
+        {
+            var normalized = value?.Trim();
+            if (string.IsNullOrWhiteSpace(normalized))
+                return;
 
-        var tags = extracted.Length > 0
-            ? extracted
-            :
+            if (seenTags.Add(normalized))
+                tags.Add(normalized);
+        }
+
+        AddTag(userProfile?.TargetRole);
+
+        if (userProfile?.Interests is { Count: > 0 })
+        {
+            foreach (var interest in userProfile.Interests)
+                AddTag(interest);
+        }
+
+        var extractionSources = new List<string>();
+        if (!string.IsNullOrWhiteSpace(query))
+            extractionSources.Add(query);
+        if (!string.IsNullOrWhiteSpace(conversationContext))
+            extractionSources.Add(conversationContext);
+        if (!string.IsNullOrWhiteSpace(userProfile?.TargetRole))
+            extractionSources.Add(userProfile.TargetRole);
+
+        foreach (var source in extractionSources)
+        {
+            foreach (var extractedTag in ExtractKeywordsFromText(source))
+                AddTag(extractedTag);
+        }
+
+        if (tags.Count == 0)
+        {
+            tags.AddRange(
             [
                 "Programming Fundamentals",
                 "Problem Solving",
                 "Projects",
                 "Version Control",
                 "Career Preparation"
-            ];
+            ]);
+        }
 
-        var preferPaid = !ContainsFreeOnlyPreference(query, conversationContext);
-        var language = IsArabicText(query) ? "ar" : "en";
+        var finalTags = tags.Take(8).ToArray();
+
+        var userWantsFreeOnly = ContainsFreeOnlyPreference(query, conversationContext)
+            || (userProfile?.Constraints?.Any(c =>
+                c.Contains("free only", StringComparison.OrdinalIgnoreCase)
+                || c.Contains("no paid", StringComparison.OrdinalIgnoreCase)
+                || c.Contains("مجاني", StringComparison.OrdinalIgnoreCase)
+                || c.Contains("بدون مدفوع", StringComparison.OrdinalIgnoreCase)) ?? false);
+
+        var preferPaid = !userWantsFreeOnly;
+        var language = !string.IsNullOrWhiteSpace(detectedLanguage)
+            ? detectedLanguage
+            : IsArabicText(query) ? "ar" : "en";
         var sources = preferPaid
             ? new[] { "youtube", "udemy" }
             : ["youtube"];
 
-        var checkpoints = tags.ToDictionary(
+        var checkpoints = finalTags.ToDictionary(
             tag => tag,
             tag => language == "ar"
                 ? new[]
@@ -104,7 +149,7 @@ public static class RoadmapIntentHelper
 
         return new RoadmapRequestDTO
         {
-            Tags = tags,
+            Tags = finalTags,
             PreferPaid = preferPaid,
             Language = language,
             Sources = sources,
@@ -142,6 +187,16 @@ public static class RoadmapIntentHelper
         return $"{RoadmapStatePrefix}{state}";
     }
 
+    public static string BuildRoadmapRequestMessage(RoadmapRequestDTO? request)
+    {
+        if (request is null)
+            return $"{RoadmapRequestPrefix}null";
+
+        var json = JsonSerializer.Serialize(request);
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+        return $"{RoadmapRequestPrefix}{encoded}";
+    }
+
     public static string? ExtractRoadmapState(string? message)
     {
         if (string.IsNullOrWhiteSpace(message))
@@ -151,5 +206,35 @@ public static class RoadmapIntentHelper
             return null;
 
         return message[RoadmapStatePrefix.Length..].Trim().ToLowerInvariant();
+    }
+
+    public static RoadmapRequestDTO? ExtractRoadmapRequest(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return null;
+
+        if (!message.StartsWith(RoadmapRequestPrefix, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var payload = message[RoadmapRequestPrefix.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(payload) || string.Equals(payload, "null", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        try
+        {
+            var json = Encoding.UTF8.GetString(Convert.FromBase64String(payload));
+            return JsonSerializer.Deserialize<RoadmapRequestDTO>(json);
+        }
+        catch
+        {
+            try
+            {
+                return JsonSerializer.Deserialize<RoadmapRequestDTO>(payload);
+            }
+            catch
+            {
+                return null;
+            }
+        }
     }
 }

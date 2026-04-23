@@ -19,6 +19,11 @@ public class NullChatRepository : IChatRepository
         return Task.FromResult(new List<ChatMessageEntity>());
     }
 
+    public Task<ChatMessageEntity?> GetLatestSummaryMessageAsync(string userId, string sessionId)
+    {
+        return Task.FromResult<ChatMessageEntity?>(null);
+    }
+
     public Task<string?> GetLatestStateMessageByPrefixAsync(string userId, string sessionId, string prefix)
     {
         return Task.FromResult<string?>(null);
@@ -49,4 +54,3 @@ public class NullChatRepository : IChatRepository
         return Task.FromResult(0);
     }
 }
-
