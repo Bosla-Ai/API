@@ -198,7 +198,7 @@ public class ChatBugFixTests
         var userProfile = new UserProfileEntity
         {
             UserId = "user1",
-            TargetRole = "Game Engineer",
+            TargetRole = "Game Eng",
             Interests = ["Unity", "C#"],
             Constraints = ["Free only"]
         };
@@ -209,11 +209,19 @@ public class ChatBugFixTests
             userProfile,
             "ar");
 
-        request.Tags.Should().Contain("Game Engineer");
+        request.Tags.Should().Contain("Game engineer");
         request.Tags.Should().Contain("Unity");
         request.PreferPaid.Should().BeFalse();
         request.Language.Should().Be("ar");
         request.Sources.Should().ContainSingle().Which.Should().Be("youtube");
+    }
+
+    [Fact]
+    public void RoadmapIntentHelper_NormalizeRoadmapTag_ExpandsCommonAbbreviations()
+    {
+        RoadmapIntentHelper.NormalizeRoadmapTag("game eng").Should().Be("game engineer");
+        RoadmapIntentHelper.NormalizeRoadmapTag("frontend dev").Should().Be("frontend developer");
+        RoadmapIntentHelper.NormalizeRoadmapTag("Unity").Should().Be("Unity");
     }
 
     #endregion
