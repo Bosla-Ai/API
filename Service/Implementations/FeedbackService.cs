@@ -20,14 +20,15 @@ public class FeedbackService(
             MessageId = request.MessageId,
             Rating = request.Rating,
             Comment = request.Comment,
+            Reason = request.Reason,
             IntentType = request.IntentType,
             CreatedAt = DateTime.UtcNow
         };
 
         await feedbackRepository.SubmitAsync(entity);
 
-        logger.LogInformation("Feedback submitted: User={UserId} Session={SessionId} Rating={Rating}",
-            userId, request.SessionId, request.Rating);
+        logger.LogInformation("Feedback submitted: User={UserId} Session={SessionId} Rating={Rating} Reason={Reason}",
+            userId, request.SessionId, request.Rating, request.Reason ?? "none");
 
         return new APIResponse<bool>(HttpStatusCode.OK, true);
     }

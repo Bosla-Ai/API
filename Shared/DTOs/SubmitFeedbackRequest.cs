@@ -17,5 +17,8 @@ public class SubmitFeedbackRequest
     [MaxLength(1000)]
     public string? Comment { get; set; }
 
+    [MaxLength(200)]
+    public string? Reason { get; set; }
+
     public LLMInteractionType? IntentType { get; set; }
 }
