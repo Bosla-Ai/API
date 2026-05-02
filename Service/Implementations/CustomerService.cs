@@ -42,6 +42,10 @@ public class CustomerService(
 {
     private static readonly ConcurrentDictionary<string, RoadmapRequestDTO> PendingRoadmapRequestCache = new(StringComparer.Ordinal);
 
+    // Per-generation roadmap title cache — guarantees the same roadmap always
+    // resolves to the same title across retries, reloads, and API calls.
+    private static readonly ConcurrentDictionary<string, string> RoadmapTitleCache = new(StringComparer.Ordinal);
+
     private bool IsSuperAdmin()
     {
         var user = httpContextAccessor.HttpContext?.User;
@@ -1465,6 +1469,16 @@ public class CustomerService(
                         resultData = JsonSerializer.Deserialize<JsonElement>(resultJsonString);
                     }
 
+                    // Resolve a stable, content-aware roadmap title. Cached by
+                    // generationId so retries/reloads always yield the same title.
+                    string roadmapTitle = await ResolveRoadmapTitleAsync(
+                        generationId,
+                        resultData is JsonElement je3 ? je3 : default,
+                        userId);
+
+                    resultJsonString = InjectRoadmapTitle(resultJsonString, roadmapTitle);
+                    resultData = JsonSerializer.Deserialize<JsonElement>(resultJsonString);
+
                     // Persist parseable roadmap payload for refresh hydration.
                     finalResponse = $"[SYSTEM] {resultJsonString}";
 
@@ -1477,7 +1491,7 @@ public class CustomerService(
                         await conversationContextManager.AddMessageToContextAsync(userId, actualSessionId, aiResponse, "assistant");
                     }
 
-                    yield return FormatSse("result", new { status = "success", data = resultData });
+                    yield return FormatSse("result", new { status = "success", data = resultData, roadmapTitle });
 
                     await SaveRoadmapFlowStateAsync(userId, actualSessionId, RoadmapIntentHelper.RoadmapStateCompleted);
                 }
@@ -3158,6 +3172,208 @@ Latest user message:
             obj["generationId"] = generationId;
         }
         return node?.ToJsonString() ?? json;
+    }
+
+    private static string InjectRoadmapTitle(string json, string title)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(json);
+        if (node is System.Text.Json.Nodes.JsonObject obj)
+        {
+            obj["roadmapTitle"] = title;
+            obj["title"] = title;
+        }
+        return node?.ToJsonString() ?? json;
+    }
+
+    private static string SanitizeRoadmapTitle(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+
+        var cleaned = raw.Trim();
+
+        // Take the first non-empty line only.
+        var firstLine = cleaned
+            .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(l => !string.IsNullOrWhiteSpace(l))?.Trim() ?? string.Empty;
+
+        // Strip surrounding quotes/backticks and common label prefixes.
+        firstLine = firstLine.Trim('"', '\'', '`', ' ', '*', '#');
+        foreach (var prefix in new[] { "title:", "roadmap title:", "roadmap:" })
+        {
+            if (firstLine.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                firstLine = firstLine[prefix.Length..].Trim().Trim('"', '\'', '`');
+                break;
+            }
+        }
+
+        // Drop trailing punctuation that looks awkward in UI.
+        firstLine = firstLine.TrimEnd('.', ',', ';', ':', ' ', '"', '\'', '`');
+
+        if (firstLine.Length > 80)
+            firstLine = firstLine[..80].TrimEnd();
+
+        return firstLine;
+    }
+
+    private async Task<string> ResolveRoadmapTitleAsync(string generationId, JsonElement resultData, string userId)
+    {
+        // Cache lookup — same generationId always yields the same title.
+        if (!string.IsNullOrWhiteSpace(generationId)
+            && RoadmapTitleCache.TryGetValue(generationId, out var cachedTitle)
+            && !string.IsNullOrWhiteSpace(cachedTitle))
+        {
+            return cachedTitle;
+        }
+
+        var (domain, tags, _) = ExtractRoadmapTitleContext(resultData);
+
+        string? title = null;
+        try
+        {
+            title = await GenerateRoadmapTitleAsync(resultData, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LLM roadmap title generation failed. Falling back to deterministic title.");
+        }
+
+        if (string.IsNullOrWhiteSpace(title))
+            title = BuildDeterministicRoadmapTitle(domain, tags);
+
+        if (string.IsNullOrWhiteSpace(title))
+            title = "Learning Roadmap";
+
+        if (!string.IsNullOrWhiteSpace(generationId))
+            RoadmapTitleCache[generationId] = title;
+
+        return title;
+    }
+
+    private static string BuildDeterministicRoadmapTitle(string? domain, IReadOnlyList<string> tags)
+    {
+        if (!string.IsNullOrWhiteSpace(domain))
+        {
+            var domainClean = ToTitleCase(domain!.Trim());
+            return SanitizeRoadmapTitle($"{domainClean} Learning Path");
+        }
+
+        if (tags.Count > 0)
+        {
+            var focus = ToTitleCase(tags[0]);
+            if (tags.Count > 1)
+            {
+                var second = ToTitleCase(tags[1]);
+                return SanitizeRoadmapTitle($"{focus} & {second} Roadmap");
+            }
+            return SanitizeRoadmapTitle($"{focus} Roadmap");
+        }
+
+        return string.Empty;
+    }
+
+    private static string ToTitleCase(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return value ?? string.Empty;
+        var parts = value.Split(new[] { ' ', '-', '_' }, StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (parts[i].Length == 0) continue;
+            if (parts[i].All(char.IsUpper) && parts[i].Length <= 4)
+                continue; // keep acronyms (AI, SQL, API, HTML)
+            parts[i] = char.ToUpperInvariant(parts[i][0]) + parts[i][1..].ToLowerInvariant();
+        }
+        return string.Join(" ", parts);
+    }
+
+    private static (string? Domain, List<string> Tags, List<string> PhaseNames) ExtractRoadmapTitleContext(JsonElement resultData)
+    {
+        string? domain = null;
+        var tagList = new List<string>();
+        var phaseNames = new List<string>();
+
+        if (resultData.ValueKind != JsonValueKind.Object)
+            return (domain, tagList, phaseNames);
+
+        if (resultData.TryGetProperty("learning_path", out var lp) && lp.ValueKind == JsonValueKind.Object)
+        {
+            if (lp.TryGetProperty("domain", out var domEl) && domEl.ValueKind == JsonValueKind.String)
+                domain = domEl.GetString();
+
+            if (lp.TryGetProperty("phases", out var phases) && phases.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var phase in phases.EnumerateArray())
+                {
+                    if (phase.ValueKind != JsonValueKind.Object) continue;
+
+                    if (phase.TryGetProperty("name", out var nameEl) && nameEl.ValueKind == JsonValueKind.String)
+                    {
+                        var name = nameEl.GetString();
+                        if (!string.IsNullOrWhiteSpace(name)) phaseNames.Add(name!);
+                    }
+
+                    if (phase.TryGetProperty("tags", out var tags) && tags.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var tagObj in tags.EnumerateArray())
+                        {
+                            if (tagObj.ValueKind == JsonValueKind.Object
+                                && tagObj.TryGetProperty("tag", out var tagEl)
+                                && tagEl.ValueKind == JsonValueKind.String)
+                            {
+                                var t = tagEl.GetString();
+                                if (!string.IsNullOrWhiteSpace(t) && !tagList.Contains(t!, StringComparer.OrdinalIgnoreCase))
+                                    tagList.Add(t!);
+                            }
+                            else if (tagObj.ValueKind == JsonValueKind.String)
+                            {
+                                var t = tagObj.GetString();
+                                if (!string.IsNullOrWhiteSpace(t) && !tagList.Contains(t!, StringComparer.OrdinalIgnoreCase))
+                                    tagList.Add(t!);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return (domain, tagList, phaseNames);
+    }
+
+    private async Task<string?> GenerateRoadmapTitleAsync(JsonElement resultData, string userId)
+    {
+        var (domain, tagList, phaseNames) = ExtractRoadmapTitleContext(resultData);
+
+        if (tagList.Count == 0 && string.IsNullOrWhiteSpace(domain))
+            return null;
+
+        var topTags = tagList.Take(12).ToList();
+        var tagsText = topTags.Count > 0 ? string.Join(", ", topTags) : "(none)";
+        var domainText = string.IsNullOrWhiteSpace(domain) ? "(unspecified)" : domain;
+        var phaseText = phaseNames.Count > 0 ? string.Join(" → ", phaseNames.Take(6)) : "(none)";
+
+        var systemPrompt =
+            "You name personalized learning roadmaps. " +
+            "Return ONE short, catchy, human-friendly title (3 to 7 words, max 60 characters). " +
+            "No quotes, no emojis, no trailing punctuation, no prefixes like 'Title:'. " +
+            "Summarize the overall goal, not every topic. Use Title Case.";
+
+        var prompt =
+            $"Domain: {domainText}\n" +
+            $"Key topics: {tagsText}\n" +
+            $"Phases: {phaseText}\n\n" +
+            "Write the title now. Respond with the title only.";
+
+        var (response, _, _) = await customerHelper.SendRequestByTask(
+            prompt,
+            LLMInteractionType.ChatWithAI,
+            useThinking: false,
+            userId: userId,
+            isSuperAdmin: IsSuperAdmin(),
+            chatMode: ChatMode.Fast,
+            systemPrompt: systemPrompt);
+
+        var cleaned = SanitizeRoadmapTitle(response ?? string.Empty);
+        return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
     }
 
     private static async Task<(string Mode, string? Error)> ClassifyModeWithFallbackAsync(
