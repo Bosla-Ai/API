@@ -18,6 +18,7 @@ public class FeedbackEntity
 
     public string? Comment { get; set; }
 
+    public string? Reason { get; set; }
 
     public LLMInteractionType? IntentType { get; set; }
 
