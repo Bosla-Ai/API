@@ -7,13 +7,22 @@ on:
 
 concurrency:
   group: deploy-backend
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-and-push:
     # Use self-hosted ARM64 runner for native builds (much faster!)
     runs-on: self-hosted
+    timeout-minutes: 20
     steps:
+      - name: Free disk space
+        run: |
+          docker system prune -af || true
+          docker volume prune -f || true
+          docker buildx prune -f || true
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          df -h
+
       - name: Checkout code
         uses: actions/checkout@v4
 
