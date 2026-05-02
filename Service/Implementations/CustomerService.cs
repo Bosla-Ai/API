@@ -2058,6 +2058,10 @@ public class CustomerService(
             intentSystemPrompt = "Use your thinking capability to reason step-by-step before classifying the user's intent.\n\n" + intentSystemPrompt;
         if (!string.IsNullOrEmpty(prompts.LanguageRules))
             intentSystemPrompt = intentSystemPrompt.Replace("{LANGUAGE_RULES}", prompts.LanguageRules);
+        if (!string.IsNullOrEmpty(marketSkillsList))
+            intentSystemPrompt = intentSystemPrompt.Replace("{MARKET_CONTEXT}", marketSkillsList);
+        else
+            intentSystemPrompt = intentSystemPrompt.Replace("{MARKET_CONTEXT}", "No real-time market data available. Use your knowledge of current labor market trends.");
 
         try
         {
