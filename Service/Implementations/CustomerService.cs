@@ -737,7 +737,8 @@ public class CustomerService(
         // Requires confirmed profile before proceeding; re-asks discovery if fields are still missing.
         var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
             && !roadmapConfirmationReply
-            && !roadmapRefinementReply;
+            && !roadmapRefinementReply
+            && !roadmapStateFollowUp;
 
         // Re-fetch to pick up fields persisted by TryPersistProfileFromLatestMessageAsync this turn.
         if (interactionType == LLMInteractionType.RoadmapGeneration && !hasSufficientRoadmapProfile)
@@ -1297,10 +1298,10 @@ public class CustomerService(
         {
             string finalResponse = "";
 
-            if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
+            if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments != null)
             {
                 // Filter out topics the user marked as "already known" from topic_chips
-                if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments.Tags is { Length: > 0 })
+                if (toolArguments.Tags is { Length: > 0 })
                 {
                     var knownTopicsFromAnswer = ExtractKnownTopicsFromAnswer(query);
                     if (knownTopicsFromAnswer.Length > 0)
@@ -1798,7 +1799,8 @@ public class CustomerService(
 
             var roadmapNeedsConfirmation = interactionType == LLMInteractionType.RoadmapGeneration
                 && !roadmapConfirmationReply
-                && !roadmapRefinementReply;
+                && !roadmapRefinementReply
+                && !roadmapStateFollowUp;
 
             var discoveryAttempts = await GetDiscoveryAttemptCountAsync(userId, actualSessionId);
 
@@ -1950,7 +1952,7 @@ public class CustomerService(
                 }
             }
 
-            if ((interactionType == LLMInteractionType.RoadmapGeneration || interactionType == LLMInteractionType.CVAnalysis) && toolArguments != null)
+            if (interactionType == LLMInteractionType.RoadmapGeneration && toolArguments != null)
             {
                 toolArguments.JobId = Guid.NewGuid().ToString("N")[..12];
                 string apiResponse = "";
