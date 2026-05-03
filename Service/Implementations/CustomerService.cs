@@ -470,6 +470,8 @@ public class CustomerService(
                 $"Generate your response, questions, and tags appropriate for this mode.";
         }
 
+        systemPrompt = AddRoadmapTagIsolationInstruction(systemPrompt);
+
         var isNonRoadmapUiOverride = uiForcedIntent.HasValue
             && uiForcedIntent.Value != LLMInteractionType.RoadmapGeneration;
 
@@ -508,6 +510,7 @@ public class CustomerService(
         string? coachMonologue = null;
         string? chatTitle = null;
         string? thinkingTitle = null;
+        var profileUpdatedFromCvAnalysis = false;
 
         if (!skipIntentDetection)
         {
@@ -1220,56 +1223,78 @@ public class CustomerService(
             var cvUserPrompt = $"Here is the CV/resume text to analyze:\n\n{inlineCvText}";
 
             var fullCvResponse = new StringBuilder();
-            try
+            string? cvModelName = null;
+            await foreach (var chunk in customerHelper.SendStreamRequestByTask(
+                cvUserPrompt, LLMInteractionType.CVAnalysis, useThinking: false,
+                cancellationToken: cancellationToken, userId: userId,
+                isSuperAdmin: IsSuperAdmin(), chatMode: chatMode,
+                systemPrompt: cvSystemPrompt))
             {
-                await foreach (var chunk in customerHelper.SendStreamRequestByTask(
-                    cvUserPrompt, LLMInteractionType.CVAnalysis, useThinking: false,
-                    cancellationToken: cancellationToken, userId: userId,
-                    isSuperAdmin: IsSuperAdmin(), chatMode: chatMode,
-                    systemPrompt: cvSystemPrompt))
+                if (chunk.StartsWith("__FALLBACK__:"))
                 {
-                    if (chunk.StartsWith("__FALLBACK__:"))
-                    {
-                        var fbModel = chunk["__FALLBACK__:".Length..];
-                        yield return FormatSse("fallback", new { model = fbModel });
-                        continue;
-                    }
-                    yield return FormatSse("text", new { delta = chunk });
-                    fullCvResponse.Append(chunk);
+                    var fbModel = chunk["__FALLBACK__:".Length..].Trim();
+                    yield return FormatSse("fallback", new { provider = fbModel, message = "Switched to backup AI model" });
+                    continue;
                 }
-            }
-            finally
-            {
-                if (!cancellationToken.IsCancellationRequested && fullCvResponse.Length > 0)
+
+                if (chunk.StartsWith("__MODEL__:"))
                 {
-                    await conversationContextManager
-                        .AddMessageToContextAsync(userId, actualSessionId, fullCvResponse.ToString(), "assistant");
+                    cvModelName = chunk["__MODEL__:".Length..].Trim();
+                    yield return FormatSse("model", new { name = cvModelName, reasoning = false });
+                    continue;
                 }
+
+                if (chunk.StartsWith("__THINKING_CONTENT__:") || chunk.StartsWith("__STATUS__"))
+                    continue;
+
+                fullCvResponse.Append(chunk);
             }
+
+            var cvMarkdown = fullCvResponse.ToString();
+            var cvSummary = BuildCvAnalysisSummary(cvMarkdown, cvModelName);
+
+            var cvProfileUpdate = await ExtractAndPersistProfileFromCvAnalysisAsync(
+                userId,
+                inlineCvText,
+                cvMarkdown,
+                targetRole);
+
+            profileUpdatedFromCvAnalysis = cvProfileUpdate.Profile != null;
 
             // Try to extract suggested tags from the analysis for career pulse
             // (best-effort — response is Markdown, not JSON)
             string? cvPulseEvent = null;
-            if (toolArguments?.Tags is { Length: > 0 })
+            CvCareerPulsePayload? cvPulsePayload = null;
+            var cvTags = toolArguments?.Tags is { Length: > 0 }
+                ? toolArguments.Tags
+                : cvProfileUpdate.Profile?.Interests?.ToArray();
+
+            if (cvTags is { Length: > 0 })
             {
                 try
                 {
-                    var cvInsight = await jobMarketService.GetMarketInsightsAsync(toolArguments.Tags);
+                    var cvInsight = await jobMarketService.GetMarketInsightsAsync(cvTags);
                     if (cvInsight is not null)
                     {
-                        var cvPulse = jobMarketService.CalculateReadiness(toolArguments.Tags, cvInsight);
+                        var cvPulse = jobMarketService.CalculateReadiness(cvTags, cvInsight);
                         if (cvPulse is not null)
                         {
-                            cvPulseEvent = FormatSse("career_pulse", new
+                            cvPulsePayload = new CvCareerPulsePayload
                             {
                                 readinessScore = cvPulse.ReadinessScore,
                                 readinessLevel = cvPulse.ReadinessLevel,
                                 matchedSkills = cvPulse.MatchedSkills,
-                                topGaps = cvPulse.TopGaps.Select(g => new { skill = g.Skill, demandPercent = g.DemandPercent, category = g.Category }),
+                                topGaps = [.. cvPulse.TopGaps.Select(g => new CvSkillGapPayload
+                                {
+                                    skill = g.Skill,
+                                    demandPercent = g.DemandPercent,
+                                    category = g.Category
+                                })],
                                 insight = cvPulse.Insight,
                                 targetRole = cvPulse.TargetRole,
                                 jobsAnalyzed = cvPulse.JobsAnalyzed
-                            });
+                            };
+                            cvPulseEvent = FormatSse("career_pulse", cvPulsePayload);
                         }
                     }
                 }
@@ -1279,22 +1304,33 @@ public class CustomerService(
             if (cvPulseEvent is not null)
                 yield return cvPulseEvent;
 
-            // Persist CV-derived profile signals to Cosmos
-            try
-            {
-                var cvProfile = new UserProfileEntity { UserId = userId };
-                if (toolArguments?.Tags is { Length: > 0 })
-                    cvProfile.Interests = [.. toolArguments.Tags];
-                if (!string.IsNullOrEmpty(targetRole))
-                    cvProfile.TargetRole = targetRole;
+            cvPulsePayload ??= BuildCvCareerPulseFromAnalysis(cvSummary, cvProfileUpdate.Profile);
 
-                if (cvProfile.Interests?.Count > 0 || !string.IsNullOrEmpty(cvProfile.TargetRole))
-                    await userProfileRepository.UpsertAsync(cvProfile);
-            }
-            catch (Exception ex)
+            if (cvPulsePayload is not null && cvPulseEvent is null)
             {
-                _logger.LogDebug(ex, "Failed to persist CV profile signals for user {UserId}", userId);
+                yield return FormatSse("career_pulse", cvPulsePayload);
             }
+
+            var cvAnalysisPayload = BuildCvAnalysisResultPayload(
+                cvSummary,
+                cvProfileUpdate.Profile,
+                cvPulsePayload,
+                cvModelName);
+
+            yield return FormatSse("cv_analysis_result", cvAnalysisPayload);
+
+            if (!cancellationToken.IsCancellationRequested && !string.IsNullOrWhiteSpace(cvMarkdown))
+            {
+                var persistedPayload = JsonSerializer.Serialize(
+                    cvAnalysisPayload,
+                    new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+                await conversationContextManager
+                    .AddMessageToContextAsync(userId, actualSessionId, $"[CV_ANALYSIS] {persistedPayload}", "assistant");
+            }
+
+            if (cvProfileUpdate.SseEvent is not null)
+                yield return cvProfileUpdate.SseEvent;
 
             yield return FormatSse("done", new { message = "CV analysis completed" });
         }
@@ -1521,8 +1557,10 @@ public class CustomerService(
         string? profileUpdateSseEvent = null;
 
         if (options.CurrentValue.Llm.EnableBackgroundProfileExtraction
+            && !profileUpdatedFromCvAnalysis
             && (classifiedMode == "FRIEND"
                 || interactionType == LLMInteractionType.RoadmapGeneration
+                || interactionType == LLMInteractionType.CVAnalysis
                 || hasAskedDiscovery
                 || hasPendingRoadmapConfirmation))
         {
@@ -2077,6 +2115,8 @@ public class CustomerService(
         else
             intentSystemPrompt = intentSystemPrompt.Replace("{MARKET_CONTEXT}", "No real-time market data available. Use your knowledge of current labor market trends.");
 
+        intentSystemPrompt = AddRoadmapTagIsolationInstruction(intentSystemPrompt);
+
         try
         {
             var (responseText, modelName, thinkingContent) = await customerHelper.SendRequestByTask(
@@ -2209,6 +2249,609 @@ public class CustomerService(
         }
 
         return null;
+    }
+
+    private static string AddRoadmapTagIsolationInstruction(string systemPrompt)
+    {
+        const string marker = "ROADMAP TAG ISOLATION";
+        if (string.IsNullOrWhiteSpace(systemPrompt) || systemPrompt.Contains(marker, StringComparison.OrdinalIgnoreCase))
+            return systemPrompt;
+
+        return systemPrompt + "\n\n" + marker + ":\n" +
+            "- Treat User Profile as memory for personalization, profile completeness, constraints, budget, language, and tone.\n" +
+            "- Do NOT copy User Profile Target Role or Interests into tool_arguments.tags by default.\n" +
+            "- Roadmap tags must come from the current roadmap request, this roadmap's discovery answers, and market context.\n" +
+            "- Only include a profile interest in tags when the current user message explicitly asks for that same topic.";
+    }
+
+    private sealed class CvAnalysisSummary
+    {
+        public string Markdown { get; set; } = "";
+        public string? ModelName { get; set; }
+        public string ProfileSummary { get; set; } = "";
+        public List<string> Strengths { get; set; } = [];
+        public List<string> Gaps { get; set; } = [];
+        public List<string> Recommendations { get; set; } = [];
+        public List<string> SuggestedLearningTags { get; set; } = [];
+        public List<string> TargetRoles { get; set; } = [];
+        public int OverallScore { get; set; }
+        public Dictionary<string, int> ScoreBreakdown { get; set; } = [];
+        public string ScoreLabel { get; set; } = "CV reviewed";
+    }
+
+    private sealed class CvSkillGapPayload
+    {
+        public string skill { get; set; } = "";
+        public int demandPercent { get; set; }
+        public string category { get; set; } = "Skill Gap";
+    }
+
+    private sealed class CvCareerPulsePayload
+    {
+        public int readinessScore { get; set; }
+        public string readinessLevel { get; set; } = "Growing";
+        public string[] matchedSkills { get; set; } = [];
+        public CvSkillGapPayload[] topGaps { get; set; } = [];
+        public string insight { get; set; } = "";
+        public string? targetRole { get; set; }
+        public int jobsAnalyzed { get; set; }
+    }
+
+    private sealed class CvAnalysisResultPayload
+    {
+        public string kind { get; set; } = "cv_analysis";
+        public string? modelName { get; set; }
+        public string markdown { get; set; } = "";
+        public string profileSummary { get; set; } = "";
+        public string[] strengths { get; set; } = [];
+        public string[] gaps { get; set; } = [];
+        public string[] recommendations { get; set; } = [];
+        public string[] suggestedLearningTags { get; set; } = [];
+        public string[] targetRoles { get; set; } = [];
+        public int overallScore { get; set; }
+        public string scoreLabel { get; set; } = "";
+        public Dictionary<string, int> scoreBreakdown { get; set; } = [];
+        public CvCareerPulsePayload? careerPulse { get; set; }
+    }
+
+    private static CvAnalysisSummary BuildCvAnalysisSummary(string markdown, string? modelName)
+    {
+        var summary = new CvAnalysisSummary
+        {
+            Markdown = markdown,
+            ModelName = modelName,
+            ProfileSummary = ExtractMarkdownSection(markdown, "profile summary", "summary", "ملخص")
+        };
+
+        if (string.IsNullOrWhiteSpace(summary.ProfileSummary))
+        {
+            summary.ProfileSummary = markdown
+                .Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault(line => !line.TrimStart().StartsWith('#')) ?? "";
+        }
+
+        summary.Strengths = ExtractCvSectionItems(ExtractMarkdownSection(
+            markdown, "strengths", "key strengths", "نقاط القوة"));
+
+        summary.Gaps = ExtractCvSectionItems(ExtractMarkdownSection(
+            markdown, "gaps", "areas for improvement", "improvement", "الفجوات", "نقاط التحسين"));
+
+        summary.Recommendations = ExtractCvSectionItems(ExtractMarkdownSection(
+            markdown, "recommendations", "recommendation", "توصيات", "النصائح"));
+
+        summary.SuggestedLearningTags = ExtractCvSectionItems(ExtractMarkdownSection(
+                markdown, "suggested learning tags", "learning tags", "suggested tags", "tags", "المهارات المقترحة", "وسوم"))
+            .Select(RoadmapIntentHelper.NormalizeRoadmapTag)
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+
+        summary.TargetRoles = ExtractCvSectionItems(ExtractMarkdownSection(
+                markdown, "target roles", "target role", "roles", "الأدوار المستهدفة", "الوظائف المستهدفة"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+
+        summary.OverallScore = CalculateCvOverallScore(summary);
+        summary.ScoreBreakdown = BuildCvScoreBreakdown(summary);
+        summary.ScoreLabel = summary.OverallScore >= 85
+            ? "Market ready"
+            : summary.OverallScore >= 70
+                ? "Strong foundation"
+                : summary.OverallScore >= 55
+                    ? "Needs focus"
+                    : "Early stage";
+
+        return summary;
+    }
+
+    private static CvAnalysisResultPayload BuildCvAnalysisResultPayload(
+        CvAnalysisSummary summary,
+        UserProfileEntity? profile,
+        CvCareerPulsePayload? careerPulse,
+        string? modelName)
+    {
+        var targetRoles = summary.TargetRoles.Count > 0
+            ? summary.TargetRoles
+            : !string.IsNullOrWhiteSpace(profile?.TargetRole)
+                ? [profile.TargetRole!]
+                : [];
+
+        return new CvAnalysisResultPayload
+        {
+            modelName = modelName ?? summary.ModelName,
+            markdown = summary.Markdown,
+            profileSummary = summary.ProfileSummary,
+            strengths = [.. summary.Strengths],
+            gaps = [.. summary.Gaps],
+            recommendations = [.. summary.Recommendations],
+            suggestedLearningTags = [.. summary.SuggestedLearningTags],
+            targetRoles = [.. targetRoles],
+            overallScore = summary.OverallScore,
+            scoreLabel = summary.ScoreLabel,
+            scoreBreakdown = summary.ScoreBreakdown,
+            careerPulse = careerPulse
+        };
+    }
+
+    private static CvCareerPulsePayload? BuildCvCareerPulseFromAnalysis(
+        CvAnalysisSummary summary,
+        UserProfileEntity? profile)
+    {
+        if (summary.Strengths.Count == 0
+            && summary.Gaps.Count == 0
+            && summary.SuggestedLearningTags.Count == 0
+            && string.IsNullOrWhiteSpace(profile?.TargetRole))
+        {
+            return null;
+        }
+
+        var targetRole = profile?.TargetRole ?? summary.TargetRoles.FirstOrDefault();
+        var matchedSkills = summary.Strengths.Count > 0
+            ? summary.Strengths.Take(4).Select(ShortenCvInsight).ToArray()
+            : (profile?.Interests ?? []).Take(4).ToArray();
+
+        var gapSource = summary.SuggestedLearningTags.Count > 0
+            ? summary.SuggestedLearningTags
+            : summary.Gaps.Select(ShortenCvInsight).ToList();
+
+        var topGaps = gapSource
+            .Take(6)
+            .Select((gap, index) => new CvSkillGapPayload
+            {
+                skill = gap,
+                demandPercent = Math.Max(35, 82 - (index * 7)),
+                category = "CV gap"
+            })
+            .ToArray();
+
+        return new CvCareerPulsePayload
+        {
+            readinessScore = summary.OverallScore,
+            readinessLevel = MapReadinessLevel(summary.OverallScore),
+            matchedSkills = matchedSkills,
+            topGaps = topGaps,
+            insight = targetRole is { Length: > 0 }
+                ? $"Based on this CV analysis, you have a {MapReadinessLevel(summary.OverallScore).ToLowerInvariant()} profile for {targetRole}. Focus next on the listed skill gaps."
+                : "Based on this CV analysis, your profile has clear strengths and a few focused gaps to close next.",
+            targetRole = targetRole,
+            jobsAnalyzed = 0
+        };
+    }
+
+    private static int CalculateCvOverallScore(CvAnalysisSummary summary)
+    {
+        var score = 62
+            + Math.Min(summary.Strengths.Count, 6) * 4
+            + Math.Min(summary.TargetRoles.Count, 3) * 2
+            + Math.Min(summary.Recommendations.Count, 5)
+            - Math.Min(summary.Gaps.Count, 5) * 4;
+
+        if (summary.SuggestedLearningTags.Count > 0)
+            score += 4;
+
+        return Math.Clamp(score, 35, 95);
+    }
+
+    private static Dictionary<string, int> BuildCvScoreBreakdown(CvAnalysisSummary summary)
+    {
+        return new Dictionary<string, int>
+        {
+            ["Content"] = Math.Clamp(summary.OverallScore + (summary.ProfileSummary.Length > 80 ? 4 : -4), 0, 100),
+            ["Structure"] = Math.Clamp(70 + Math.Min(summary.Recommendations.Count, 5) * 4, 0, 100),
+            ["Skills"] = Math.Clamp(64 + Math.Min(summary.Strengths.Count, 6) * 5 - Math.Min(summary.Gaps.Count, 4) * 3, 0, 100),
+            ["Impact"] = Math.Clamp(60 + Math.Min(summary.Strengths.Count, 6) * 4, 0, 100),
+        };
+    }
+
+    private static string MapReadinessLevel(int score)
+    {
+        return score >= 85
+            ? "Market Ready"
+            : score >= 70
+                ? "Strong Foundation"
+                : score >= 55
+                    ? "Growing"
+                    : "Building Blocks";
+    }
+
+    private static string ShortenCvInsight(string value)
+    {
+        var cleaned = CleanCvListItem(value);
+        if (cleaned.Length <= 42)
+            return cleaned;
+
+        var words = cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var compact = string.Join(" ", words.Take(4));
+        return string.IsNullOrWhiteSpace(compact) ? cleaned[..42].Trim() : compact;
+    }
+
+    private async Task<(UserProfileEntity? Profile, string? SseEvent)> ExtractAndPersistProfileFromCvAnalysisAsync(
+        string userId,
+        string inlineCvText,
+        string analysisMarkdown,
+        string? detectedTargetRole)
+    {
+        if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(analysisMarkdown))
+            return (null, null);
+
+        try
+        {
+            var cvProfile = ExtractProfileFromCvAnalysisMarkdown(userId, analysisMarkdown)
+                ?? new UserProfileEntity { UserId = userId };
+
+            if (options.CurrentValue.Llm.EnableBackgroundProfileExtraction)
+            {
+                var extractionContext = BuildCvProfileExtractionContext(inlineCvText, analysisMarkdown);
+                var extracted = await customerHelper.ExtractProfileAsync(extractionContext);
+                if (extracted != null)
+                {
+                    var extractedEntity = UserProfileEntity.FromExtraction(userId, extracted);
+                    cvProfile.MergeFrom(extractedEntity);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(cvProfile.TargetRole) && !string.IsNullOrWhiteSpace(detectedTargetRole))
+                cvProfile.TargetRole = detectedTargetRole;
+
+            NormalizeProfileCollections(cvProfile);
+
+            if (!HasProfileSignals(cvProfile))
+                return (null, null);
+
+            await userProfileRepository.UpsertAsync(cvProfile);
+
+            var updatedFields = GetUpdatedProfileFields(cvProfile);
+            var sseEvent = updatedFields.Count > 0
+                ? FormatSse("profile_update", new
+                {
+                    message = "Profile updated with insights from your CV analysis",
+                    fields = updatedFields,
+                    interests = cvProfile.Interests,
+                    experienceLevel = cvProfile.ExperienceLevel,
+                    targetRole = cvProfile.TargetRole,
+                    constraints = cvProfile.Constraints,
+                    personalityHints = cvProfile.PersonalityHints,
+                })
+                : null;
+
+            _logger.LogInformation(
+                "Saved CV-derived profile to Cosmos DB for user {UserId}. Fields: {Fields}",
+                userId,
+                string.Join(", ", updatedFields));
+
+            return (cvProfile, sseEvent);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to persist CV-derived profile for user {UserId}", userId);
+            return (null, null);
+        }
+    }
+
+    private static string BuildCvProfileExtractionContext(string inlineCvText, string analysisMarkdown)
+    {
+        var cvExcerpt = TruncateForExtraction(inlineCvText, 6000);
+        var analysisExcerpt = TruncateForExtraction(analysisMarkdown, 6000);
+
+        return $"""
+CV SOURCE TEXT:
+{cvExcerpt}
+
+CV ANALYSIS MARKDOWN:
+{analysisExcerpt}
+
+Extraction guidance:
+- Use Profile Summary for experience_level and current/target role when confidently stated.
+- Use Suggested Learning Tags as interests.
+- Use Target Roles as target_role candidates.
+- Use Recommendations for constraints and personality_hints only when clearly stated.
+""";
+    }
+
+    private static string TruncateForExtraction(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        return value.Length <= maxLength ? value : value[..maxLength];
+    }
+
+    private static UserProfileEntity? ExtractProfileFromCvAnalysisMarkdown(string userId, string analysisMarkdown)
+    {
+        if (string.IsNullOrWhiteSpace(analysisMarkdown))
+            return null;
+
+        var profile = new UserProfileEntity
+        {
+            UserId = userId,
+            Interests = [],
+            PersonalityHints = []
+        };
+
+        var profileSummary = ExtractMarkdownSection(
+            analysisMarkdown,
+            "profile summary",
+            "summary",
+            "ملخص");
+
+        profile.ExperienceLevel = InferExperienceLevelFromText(
+            string.IsNullOrWhiteSpace(profileSummary) ? analysisMarkdown : profileSummary);
+
+        var suggestedTagsSection = ExtractMarkdownSection(
+            analysisMarkdown,
+            "suggested learning tags",
+            "learning tags",
+            "suggested tags",
+            "tags",
+            "المهارات المقترحة",
+            "وسوم");
+
+        var suggestedTags = ExtractCvSectionItems(suggestedTagsSection)
+            .Select(RoadmapIntentHelper.NormalizeRoadmapTag)
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+
+        if (suggestedTags.Count > 0)
+            profile.Interests = suggestedTags;
+
+        var targetRolesSection = ExtractMarkdownSection(
+            analysisMarkdown,
+            "target roles",
+            "target role",
+            "roles",
+            "الأدوار المستهدفة",
+            "الوظائف المستهدفة");
+
+        var targetRoles = ExtractCvSectionItems(targetRolesSection)
+            .Where(LooksLikeRole)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (targetRoles.Count > 0)
+            profile.TargetRole = targetRoles[0];
+
+        var recommendationsSection = ExtractMarkdownSection(
+            analysisMarkdown,
+            "recommendations",
+            "recommendation",
+            "توصيات",
+            "النصائح");
+
+        var recommendationHints = ExtractLearningHintsFromRecommendations(recommendationsSection);
+        if (recommendationHints.Count > 0)
+            profile.PersonalityHints = recommendationHints;
+
+        NormalizeProfileCollections(profile);
+        return HasProfileSignals(profile) ? profile : null;
+    }
+
+    private static string ExtractMarkdownSection(string markdown, params string[] headingAliases)
+    {
+        var builder = new StringBuilder();
+        var capturing = false;
+
+        foreach (var rawLine in markdown.Split(['\n', '\r'], StringSplitOptions.None))
+        {
+            var line = rawLine.TrimEnd();
+            if (IsMarkdownHeading(line))
+            {
+                var heading = NormalizeMarkdownHeading(line);
+                if (capturing)
+                    break;
+
+                if (headingAliases.Any(alias =>
+                    heading.Contains(NormalizeTextForComparison(alias), StringComparison.OrdinalIgnoreCase)))
+                {
+                    capturing = true;
+                }
+
+                continue;
+            }
+
+            if (capturing)
+                builder.AppendLine(line);
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private static bool IsMarkdownHeading(string line)
+        => !string.IsNullOrWhiteSpace(line) && line.TrimStart().StartsWith('#');
+
+    private static string NormalizeMarkdownHeading(string line)
+    {
+        var withoutHashes = line.Trim().TrimStart('#').Trim();
+        return NormalizeTextForComparison(withoutHashes);
+    }
+
+    private static string NormalizeTextForComparison(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        var chars = value
+            .Where(ch => char.IsLetterOrDigit(ch) || char.IsWhiteSpace(ch))
+            .ToArray();
+        return new string(chars).Trim().ToLowerInvariant();
+    }
+
+    private static List<string> ExtractCvSectionItems(string section)
+    {
+        if (string.IsNullOrWhiteSpace(section))
+            return [];
+
+        var items = new List<string>();
+        foreach (var rawLine in section.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var cleaned = CleanCvListItem(rawLine);
+            if (string.IsNullOrWhiteSpace(cleaned))
+                continue;
+
+            var splitValues = cleaned.Contains(',')
+                ? cleaned.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                : new[] { cleaned };
+
+            foreach (var value in splitValues)
+            {
+                var item = CleanCvListItem(value);
+                if (item.Length >= 2 && item.Length <= 80)
+                    items.Add(item);
+            }
+        }
+
+        return [.. items.Distinct(StringComparer.OrdinalIgnoreCase)];
+    }
+
+    private static string CleanCvListItem(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        var cleaned = System.Text.RegularExpressions.Regex.Replace(
+            value,
+            @"^\s*(?:[-*+]|\d+[\.)]|\u2022)\s*",
+            "");
+
+        cleaned = cleaned
+            .Replace("**", "")
+            .Replace("__", "")
+            .Replace("`", "")
+            .Trim();
+
+        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\[(.*?)\]\(.*?\)", "$1");
+
+        foreach (var separator in new[] { " - ", " -- ", " – ", " — ", ":" })
+        {
+            var idx = cleaned.IndexOf(separator, StringComparison.Ordinal);
+            if (idx > 0)
+            {
+                cleaned = cleaned[..idx].Trim();
+                break;
+            }
+        }
+
+        return cleaned.Trim(' ', '\t', '.', ',', ';', ':', '-', '*', '#', '"', '\'');
+    }
+
+    private static string? InferExperienceLevelFromText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var normalized = text.ToLowerInvariant();
+
+        if (ContainsAny(normalized,
+            "senior", "advanced", "lead", "principal", "expert", "5+ years", "6+ years",
+            "7+ years", "8+ years", "9+ years", "10+ years", "متقدم", "خبير", "قائد"))
+        {
+            return "advanced";
+        }
+
+        if (ContainsAny(normalized,
+            "mid-level", "mid level", "intermediate", "2+ years", "3+ years", "4+ years",
+            "2 years", "3 years", "4 years", "متوسط"))
+        {
+            return "intermediate";
+        }
+
+        if (ContainsAny(normalized,
+            "junior", "entry-level", "entry level", "beginner", "fresh", "student", "intern",
+            "0 years", "1 year", "مبتدئ", "طالب", "متدرب"))
+        {
+            return "beginner";
+        }
+
+        return null;
+    }
+
+    private static List<string> ExtractLearningHintsFromRecommendations(string recommendationsSection)
+    {
+        if (string.IsNullOrWhiteSpace(recommendationsSection))
+            return [];
+
+        var hints = new List<string>();
+        var normalized = recommendationsSection.ToLowerInvariant();
+
+        if (ContainsAny(normalized, "project", "portfolio", "hands-on", "practical", "تطبيق", "مشروع"))
+            hints.Add("hands-on projects");
+        if (ContainsAny(normalized, "visual", "ui", "ux", "design", "تصميم", "مرئي"))
+            hints.Add("visual learning");
+        if (ContainsAny(normalized, "english", "communication", "presentation", "إنجليزي", "تواصل"))
+            hints.Add("communication practice");
+
+        return [.. hints.Distinct(StringComparer.OrdinalIgnoreCase)];
+    }
+
+    private static void NormalizeProfileCollections(UserProfileEntity profile)
+    {
+        if (profile.Interests is { Count: > 0 })
+        {
+            profile.Interests = [.. profile.Interests
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(20)];
+        }
+
+        if (profile.Constraints is { Count: > 0 })
+        {
+            profile.Constraints = [.. profile.Constraints
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(10)];
+        }
+
+        if (profile.PersonalityHints is { Count: > 0 })
+        {
+            profile.PersonalityHints = [.. profile.PersonalityHints
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(10)];
+        }
+    }
+
+    private static bool HasProfileSignals(UserProfileEntity profile)
+        => profile.Interests?.Count > 0
+           || !string.IsNullOrWhiteSpace(profile.ExperienceLevel)
+           || !string.IsNullOrWhiteSpace(profile.TargetRole)
+           || profile.Constraints?.Count > 0
+           || profile.PersonalityHints?.Count > 0;
+
+    private static List<string> GetUpdatedProfileFields(UserProfileEntity profile)
+    {
+        var updatedFields = new List<string>();
+        if (profile.Interests?.Count > 0) updatedFields.Add("interests");
+        if (!string.IsNullOrWhiteSpace(profile.ExperienceLevel)) updatedFields.Add("experience_level");
+        if (!string.IsNullOrWhiteSpace(profile.TargetRole)) updatedFields.Add("target_role");
+        if (profile.Constraints?.Count > 0) updatedFields.Add("constraints");
+        if (profile.PersonalityHints?.Count > 0) updatedFields.Add("personality_hints");
+        return updatedFields;
     }
 
 
@@ -3029,9 +3672,7 @@ Latest user message:
     {
         var normalizedRequest = CloneRoadmapRequest(request);
 
-        normalizedRequest.Tags = [.. new[] { userProfile?.TargetRole }
-            .Concat(normalizedRequest.Tags ?? [])
-            .Concat(userProfile?.Interests ?? [])
+        normalizedRequest.Tags = [.. (normalizedRequest.Tags ?? [])
             .Where(tag => !string.IsNullOrWhiteSpace(tag))
             .Select(RoadmapIntentHelper.NormalizeRoadmapTag)
             .Where(tag => !string.IsNullOrWhiteSpace(tag))

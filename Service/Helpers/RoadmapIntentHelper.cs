@@ -87,21 +87,11 @@ public static class RoadmapIntentHelper
                 tags.Add(normalized);
         }
 
-        AddTag(userProfile?.TargetRole);
-
-        if (userProfile?.Interests is { Count: > 0 })
-        {
-            foreach (var interest in userProfile.Interests)
-                AddTag(interest);
-        }
-
         var extractionSources = new List<string>();
         if (!string.IsNullOrWhiteSpace(query))
             extractionSources.Add(query);
         if (!string.IsNullOrWhiteSpace(conversationContext))
             extractionSources.Add(conversationContext);
-        if (!string.IsNullOrWhiteSpace(userProfile?.TargetRole))
-            extractionSources.Add(userProfile.TargetRole);
 
         foreach (var source in extractionSources)
         {

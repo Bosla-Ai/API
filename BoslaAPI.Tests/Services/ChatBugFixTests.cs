@@ -193,7 +193,7 @@ public class ChatBugFixTests
     }
 
     [Fact]
-    public void RoadmapIntentHelper_BuildRoadmapFallbackRequest_UsesUserProfileSignals()
+    public void RoadmapIntentHelper_BuildRoadmapFallbackRequest_DoesNotSeedTagsFromUserProfile()
     {
         var userProfile = new UserProfileEntity
         {
@@ -209,11 +209,78 @@ public class ChatBugFixTests
             userProfile,
             "ar");
 
-        request.Tags.Should().Contain("Game engineer");
-        request.Tags.Should().Contain("Unity");
+        request.Tags.Should().NotContain("Game engineer");
+        request.Tags.Should().NotContain("Unity");
+        request.Tags.Should().NotContain("C#");
         request.PreferPaid.Should().BeFalse();
         request.Language.Should().Be("ar");
         request.Sources.Should().ContainSingle().Which.Should().Be("youtube");
+    }
+
+    [Fact]
+    public void ApplyProfileSignalsToRoadmapRequest_DoesNotAppendProfileInterestsToTags()
+    {
+        var method = typeof(CustomerService).GetMethod(
+            "ApplyProfileSignalsToRoadmapRequest",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        method.Should().NotBeNull();
+
+        var request = new RoadmapRequestDTO
+        {
+            Tags = ["Frontend Development", "React"],
+            PreferPaid = true,
+            Language = "en",
+            Sources = ["youtube", "udemy"]
+        };
+
+        var profile = new UserProfileEntity
+        {
+            UserId = "user1",
+            TargetRole = "Unity Developer",
+            Interests = ["Unity", "C#"],
+            Constraints = ["Free only"]
+        };
+
+        var result = (RoadmapRequestDTO)method!.Invoke(null, [request, profile, "en"])!;
+
+        result.Tags.Should().BeEquivalentTo(["Frontend Development", "React"], opts => opts.WithStrictOrdering());
+        result.Tags.Should().NotContain(["Unity Developer", "Unity", "C#"]);
+        result.PreferPaid.Should().BeFalse();
+        result.Sources.Should().ContainSingle().Which.Should().Be("youtube");
+    }
+
+    [Fact]
+    public void ExtractProfileFromCvAnalysisMarkdown_ParsesProfileSummaryTagsAndRoles()
+    {
+        var method = typeof(CustomerService).GetMethod(
+            "ExtractProfileFromCvAnalysisMarkdown",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        method.Should().NotBeNull();
+
+        var markdown = """
+## Profile Summary
+Ahmed is a junior frontend developer with student project experience.
+
+## Suggested Learning Tags
+- React
+- TypeScript
+- Testing React Apps
+
+## Target Roles
+- Frontend Developer
+- UI Engineer
+
+## Recommendations
+- Build portfolio projects to show practical skill.
+""";
+
+        var result = (UserProfileEntity?)method!.Invoke(null, ["user1", markdown]);
+
+        result.Should().NotBeNull();
+        result!.ExperienceLevel.Should().Be("beginner");
+        result.Interests.Should().Contain(["React", "TypeScript", "Testing React Apps"]);
+        result.TargetRole.Should().Be("Frontend Developer");
+        result.PersonalityHints.Should().Contain("hands-on projects");
     }
 
     [Fact]
